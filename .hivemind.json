@@ -1,0 +1,12 @@
+{
+  "$schema": "https://hivemind.prox-tech.co.za/schemas/project-binding.schema.json",
+  "schema_version": 1,
+  "team": {
+    "id": "6df50b5d-014d-45b1-8f46-0e031e96c795",
+    "slug": "ruann"
+  },
+  "project": {
+    "id": "e5327f3c-12a8-4e51-9251-db050bc80c18",
+    "key": "argus"
+  }
+}
