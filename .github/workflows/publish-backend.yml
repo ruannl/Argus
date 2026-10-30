@@ -1,0 +1,79 @@
+name: Publish Argus Backend Image
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: argus_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d argus_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ARGUS_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/argus_test
+      ARGUS_API_SECRET: 01234567890123456789012345678901
+      ARGUS_FRONTEND_URL: http://127.0.0.1:3000
+      ARGUS_RESEND_API_KEY: re_test_key_with_at_least_20_bytes
+      ARGUS_RESEND_FROM: local@example.com
+      ARGUS_BILLING_WEBHOOK_SECRET: 01234567890123456789012345678901
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image (no push yet)
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          load: true
+          tags: ghcr.io/argus/argus-backend:sha-${{ github.sha }}
+
+      - name: Smoke test (boot, migrate, healthcheck, non-root)
+        run: |
+          docker run -d --name csharp-kit-smoke \
+            --network host \
+            -e ARGUS_DATABASE_URL="$ARGUS_DATABASE_URL" \
+            -e ARGUS_API_SECRET="$ARGUS_API_SECRET" \
+            -e ARGUS_FRONTEND_URL="$ARGUS_FRONTEND_URL" \
+            -e ARGUS_RESEND_API_KEY="$ARGUS_RESEND_API_KEY" \
+            -e ARGUS_RESEND_FROM="$ARGUS_RESEND_FROM" \
+            -e ARGUS_BILLING_WEBHOOK_SECRET="$ARGUS_BILLING_WEBHOOK_SECRET" \
+            ghcr.io/argus/argus-backend:sha-${{ github.sha }}
+          for i in $(seq 1 30); do
+            if docker inspect --format '{{.State.Health.Status}}' csharp-kit-smoke | grep -q healthy; then
+              break
+            fi
+            sleep 2
+          done
+          docker inspect --format '{{.State.Health.Status}}' csharp-kit-smoke | grep -q healthy
+          docker exec csharp-kit-smoke id | grep -q "uid=10001"
+          curl -fsS http://127.0.0.1:3001/health
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GH_PACKAGES_TOKEN }}
+
+      - name: Tag latest and push
+        run: |
+          docker tag \
+            ghcr.io/argus/argus-backend:sha-${{ github.sha }} \
+            ghcr.io/argus/argus-backend:latest
+          docker push ghcr.io/argus/argus-backend:sha-${{ github.sha }}
+          docker push ghcr.io/argus/argus-backend:latest

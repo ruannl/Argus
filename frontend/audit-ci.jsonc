@@ -1,0 +1,13 @@
+{
+  "$schema": "https://github.com/IBM/audit-ci/raw/main/docs/schema.json",
+  "high": true,
+  "allowlist": [
+    {
+      "GHSA-vfj7-8cjw-p6xm": {
+        "active": true,
+        "notes": "braces <=3.0.3 has no patched version (checked 2026-10-03). Dev-only chain: eslint-config-next > @next/eslint-plugin-next > fast-glob > micromatch > braces. The shipped product does not include it. Re-check for an upstream fix before this expiry.",
+        "expiry": "2026-11-15"
+      }
+    }
+  ]
+}

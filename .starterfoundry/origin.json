@@ -1,0 +1,14 @@
+{
+  "recordVersion": 1,
+  "kitId": "nextjs-csharp-saas-kit",
+  "kitVersion": "0.1.0",
+  "inputs": {
+    "displayName": "Argus",
+    "envPrefix": "ARGUS_",
+    "envPrefixBare": "ARGUS",
+    "headerToken": "81e1a205-ec1c-4e03-b785-9748db1e7677",
+    "imageOwner": "argus",
+    "slug": "argus",
+    "slugSnake": "argus"
+  }
+}

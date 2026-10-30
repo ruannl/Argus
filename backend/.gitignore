@@ -1,0 +1,22 @@
+# .NET build output
+bin/
+obj/
+TestResults/
+artifacts/
+
+# IDE / tooling state
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.csproj.user
+
+# Debug symbols and packages
+*.pdb
+*.nupkg
+
+# Local secrets
+.env
+.env.*
+!.env.example

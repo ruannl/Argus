@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (format, tests, release build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: argus_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d argus_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ARGUS_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/argus_test
+      ARGUS_API_SECRET: 01234567890123456789012345678901
+      ARGUS_FRONTEND_URL: http://127.0.0.1:3000
+      ARGUS_RESEND_API_KEY: re_test_key_with_at_least_20_bytes
+      ARGUS_RESEND_FROM: local@example.com
+      ARGUS_BILLING_WEBHOOK_SECRET: 01234567890123456789012345678901
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Format check (server)
+        run: dotnet format argus.Server.csproj --verify-no-changes
+
+      - name: Format check (tests)
+        run: dotnet format tests/argus.Server.Tests/argus.Server.Tests.csproj --verify-no-changes
+
+      - name: Isolation tests (real PostgreSQL)
+        run: dotnet test tests/argus.Server.Tests
+
+      - name: Release build
+        run: dotnet build -c Release
+
+  security:
+    name: Dependency vulnerability check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Vulnerability scan (transitive)
+        run: |
+          set -euo pipefail
+          dotnet list package --vulnerable --include-transitive | tee vulnerable.txt
+          if grep -q "has the following vulnerable packages" vulnerable.txt; then
+            echo "vulnerable packages found" >&2
+            exit 1
+          fi
+
+  frontend:
+    name: Frontend (lint, test, build, e2e)
+    runs-on: ubuntu-latest
+    env:
+      ARGUS_AUTH_SECRET: test-only-auth-secret-placeholder-32-bytes
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Dependency audit
+        run: npx audit-ci@^7 --config ./audit-ci.jsonc
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit and component tests
+        run: npm run test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Install Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright E2E tests
+        run: npm run test:e2e
