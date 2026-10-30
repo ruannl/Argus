@@ -1,7 +1,7 @@
 # Argus product brief
 
-**Status:** Draft for architecture planning  
-**Date:** 2026-10-29  
+**Status:** Approved for architecture planning (REQUIREMENTS READY)  
+**Date:** 2026-10-30  
 **Scope:** Product behaviour and outcomes. This is not an architecture plan.  
 **Evidence level:** Source inspection of the working tree. No runtime observation, analytics, or user research was available.
 
@@ -15,11 +15,11 @@ The finance domain is therefore greenfield inside a working SaaS shell. That is 
 
 The smallest coherent Argus product is:
 
-> One authenticated workspace where a user creates one or more financial accounts in ZAR, imports FNB CSV and Standard Bank PDF statements, reviews and corrects parsed transactions, assigns a category and optional store/merchant tags individually or in bulk, and sees a period-based overview and bar-first chart view that reconcile to the underlying transactions.
+> One authenticated workspace where a user creates one or more financial accounts in ZAR, imports FNB CSV, Standard Bank PDF, and generic mapped CSV statements with a confirmed statement date range, reviews parsed transactions and skips any invalid rows, assigns a category and optional store/merchant tags individually or in bulk, and sees a period-based overview and bar-first chart view that reconcile to the underlying transactions.
 
 ZAR is the confirmed initial currency. Multi-currency and foreign exchange are future capabilities. Categories answer what the money was for; merchant tags answer where it went.
 
-Two real FNB CSV exports and two Standard Bank PDF statements were supplied after the first draft. They confirm that the first import formats are FNB CSV (ZIP or bare CSV) and text-based Standard Bank PDF, but they are data samples, not finance code.
+Two real FNB CSV exports and two Standard Bank PDF statements were supplied after the first draft. They confirm the first two automatic import presets—FNB CSV (ZIP or bare CSV) and text-based Standard Bank PDF—alongside generic CSV column mapping and format disambiguation in the initial release.
 
 The product stops at insight. It does not budget, advise, aggregate bank feeds, track investments, or chat with the user.
 
@@ -27,7 +27,26 @@ The product stops at insight. It does not budget, advise, aggregate bank feeds, 
 
 **Core value proposition:** Make sense of your money. See the patterns. Understand your financial behaviour.
 
-**Most important finding:** Every finance capability in the requested product is an MVP gap. The brief must not describe imaginary current behaviour. Section 4 records what exists and what does not; Section 12 lists the decisions that must be settled before architecture planning.
+**Most important finding:** Every finance capability in the requested product is an MVP gap. The brief must not describe imaginary current behaviour. Section 4 records what exists and what does not; Section 12 records the resolved product decisions; Section 13 defines the four-plan architecture programme.
+
+### 1.1 Authoritative four-part requirement
+
+> **Here is the problem.**  
+> The repository provides authenticated customer accounts, session management, and a starter UI, but has no financial domain model, statement import pipeline, transaction workspace, or spending insights, and its public landing page still describes a generic software starter kit. Users with South African bank statements cannot import their statements, classify transactions by purpose and merchant, or see reconciled period summaries and charts without maintaining manual spreadsheets.
+>
+> **Here is the desired outcome.**  
+> Argus is an authenticated ZAR personal finance insights web application where each customer creates financial accounts, imports FNB CSV/ZIP statements, text-based Standard Bank six-column PDF statements, and generic mapped CSV statements with confirmed statement start and end dates, manages categories and merchant tags individually or in bulk, hides or restores transactions and statements (or deletes a committed statement import to re-import cleanly), and explores reconciled period overviews and bar-first charts that drill down to the exact underlying transactions.
+>
+> **Here are the important constraints.**  
+> - **Customer isolation and boundary:** Every finance API read and write uses the existing trusted frontend-to-backend boundary and opaque session token, scoped strictly to the authenticated customer (`SEC-1`). Foreign identifiers never reveal whether a record exists, and the admin surface (`SEC-5`) never exposes financial data.
+> - **Privacy and logging:** Financial descriptions, amounts, statement contents, user-defined category and tag names, statement preamble metadata, and raw filenames never appear in logs, audit events, or analytics (`SEC-4`), and raw uploaded files are discarded after commit or abandoned review (`SET-6`).
+> - **Immutability and lifecycle:** Source transaction `date`, `description`, and `amount` are immutable both in pre-commit review and after commit; invalid rows in review must be marked to be skipped (`IMP-5`). Post-commit edits may change only `category`, `merchant tags`, and `hidden` state (`TXN-4`). Individual transactions are never deleted (hide and restore only), whereas a committed statement import may be hidden, restored, or permanently deleted with its transactions (`IMP-9`). Hiding and restoring a statement preserves individual transaction hide flags.
+> - **Exact arithmetic and reconciliation:** All monetary values are stored and aggregated as exact ZAR amounts without pre-aggregation rounding. Headline metrics use gross directional flows (`Money in`, `Money out`, and `Net`), excluding `Transfer`, `Excluded`, and `Hidden` transactions. Category breakdowns are mutually exclusive and sum to `Money in` and `Money out`; merchant-tag totals overlap when a transaction carries multiple tags and are never summed to headline totals (`OVR-11`).
+> - **Idempotency and scope boundaries:** Imports are atomic (`IMP-7`) and occurrence-aware idempotent per financial account (`DUP-12`), including hidden transactions unless their parent import was deleted. The MVP excludes OCR for scanned PDFs, multi-currency conversion, balance importing or reconciliation, automatic categorisation or auto-applied merchant tags, split transactions, budgets, financial advice, bank feeds, and whole-customer account deletion.
+>
+> **Here is observable success.**  
+> - **Positive behaviour:** A verified subscriber can create ZAR financial accounts, import the FNB CSV/ZIP and Standard Bank PDF fixture structures and generic mapped CSVs after confirming ZAR and statement start/end dates, bulk-assign categories and multiple merchant tags across pages (`AC-CAT-2`), and view Overview summary cards, bar-first charts, period comparisons, and coverage warnings that reconcile to the filtered transaction list and drill down with shared filters.
+> - **Negative and failure behaviour:** Archive uploads with zero or multiple CSVs, nested archives, encrypted archives, path traversal, or oversized payloads, as well as scanned, password-protected, or unrecognized-layout PDFs, are rejected before commit with plain-language reasons and zero persisted records (`AC-IMP-10`, `AC-IMP-15`, `AC-IMP-20`). Invalid rows block commit until marked skipped (`AC-IMP-2`). Overlapping imports and retried commits create zero duplicate transactions (`AC-IMP-21`, `AC-IMP-23`). Stale concurrent edits are rejected without silent overwrite, and deleting a committed import removes only that statement's transactions and restores clean re-import eligibility.
 
 ## 2. Product vision and principles
 
@@ -106,8 +125,8 @@ Someone who has tried a budgeting app and abandoned it because of manual entry, 
 | Users will export statements as CSV or PDF rather than demand direct bank connections. | **Hypothesis, partially supported** | The samples prove CSV and PDF are available from two banks; target-user preference is still untested. |
 | Standard Bank PDF import is in the MVP scope. | **Confirmed by operator** | Added to the product scope after inspecting the samples. |
 | Transactions need a category (for example groceries, home loan, levies, school fees) and one or more optional merchant tags (for example Woolworths, Checkers, Uber Eats). | **Confirmed by operator** | Stated product requirement. |
-| Imported date, description, and amount are immutable; only category, merchant tags, and hidden state change after import. | **Confirmed by operator** | Stated product requirement. |
-| Transactions are never deleted in normal use; hide and restore. | **Confirmed by operator** | Stated product requirement. |
+| Imported date, description, and amount are immutable in review and after import; only category, merchant tags, and hidden state change after import. | **Confirmed by operator** | Stated product requirement. |
+| Individual transactions are never deleted (hide and restore only); committed statement imports can be hidden, restored, or permanently deleted. | **Confirmed by operator** | Stated product requirement. |
 | Balances are ignored; the transaction amount is the critical field. | **Confirmed by operator** | Stated product requirement. |
 | A bar-first Chart view is in MVP scope. | **Confirmed by operator** | Stated product requirement. |
 | Users want merchant-level insight, not only category totals. | **Hypothesis** | Validate with interviews and prototype tests. |
@@ -158,14 +177,14 @@ There is no screen for overview, transactions, imports, categories, financial ac
 
 | Capability | Importance | Current state | Desired MVP behaviour |
 | --- | --- | --- | --- |
-| Bank statement imports | Critical | **Absent as product code.** No upload route, parser, statement record, or import UI. Two FNB CSVs and two Standard Bank PDFs exist outside the app and define the first formats. | Import FNB CSV (including a single CSV inside its ZIP) and text-based Standard Bank PDF into a chosen financial account; review parsed rows, resolve errors and duplicates, and commit atomically. |
+| Bank statement imports | Critical | **Absent as product code.** No upload route, parser, statement record, or import UI. Two FNB CSVs and two Standard Bank PDFs exist outside the app and define the first formats. | Import FNB CSV (including a single CSV inside its ZIP), text-based Standard Bank PDF, and generic mapped CSV into a chosen financial account; confirm ZAR and statement start/end dates, review read-only parsed rows, skip invalid rows, resolve duplicates, and commit atomically. |
 | Transaction management | Critical | **Absent.** There is no transaction table, list, filter, search, or detail view. | A searchable, filterable, paginated transaction list with a detail view. Imported date, description, and amount are immutable; category, merchant tags, and hidden state can change. |
 | Categorisation | Critical | **Absent.** There is no category model, no default set, no assignment workflow, and no bulk action. | Assign, change, and review categories such as groceries, home loan, levies, and school fees; bulk-assign selected rows or all rows matching a filter; keep corrections efficient. |
 | Merchant tagging | High | **Absent.** There is no store/merchant tag model, no tag filter, and no merchant-level view. | Create and reuse merchant tags such as Woolworths, Checkers, and Uber Eats; assign one or more, clear one or all, individually or in bulk; filter and compare by tag. |
 | Financial overview | Critical | **Absent.** No cards, summaries, charts, trends, or period comparison. | A period overview and bar-first Chart view showing money in, money out, net, category breakdowns, merchant tags, comparison, and data coverage. |
 | Financial exploration | High | **Absent.** No drill-down from a summary to transactions, no category detail, no merchant tag detail, no trend view. | Move from any card, chart segment, category, or merchant tag into the filtered transactions that explain it; compare periods, categories, and merchants. |
 | Data quality and trust | Critical | **Foundation only.** The existing account system is careful about security and explicit errors, but there are no financial metric definitions or reconciliation rules. | Exact amounts, immutable imported records, explicit metric definitions, duplicate prevention, idempotent imports, coverage warnings, and totals that reconcile to transactions. |
-| User settings and preferences | High | **Minimal.** Only theme. No financial accounts, categories, merchant tags, or data deletion. | Manage financial accounts, categories, merchant tags, profile/account details, and deletion of imported financial data. |
+| User settings and preferences | High | **Minimal.** Only theme. No financial accounts, categories, or merchant tags. | Manage financial accounts, categories, merchant tags, and profile/account details; committed statement imports can be hidden, restored, or deleted from Imports. |
 | Authentication and isolation | Existing foundation | **Implemented for accounts.** The finance domain must extend the same authority model; it must not create a parallel one. | Every finance read and write is scoped to the authenticated customer; foreign identifiers do not reveal existence; admin does not see finance data. |
 | Responsive and accessible experience | High | **Foundation only.** Existing pages are responsive and forms are labelled; no data-heavy table or chart has been designed. | Core import, review, categorisation, tagging, and overview flows work at narrow and wide widths with keyboard and screen-reader access. |
 
@@ -174,7 +193,7 @@ There is no screen for overview, transactions, imports, categories, financial ac
 | Journey stage | Current experience | Gap or friction | Opportunity |
 | --- | --- | --- | --- |
 | Import | There is no import screen. The authenticated home is an account-status card. | The core value cannot begin. | Make import the primary action from the first-run empty state and from persistent navigation. |
-| Review | No parsed-row review, validation, duplicate handling, or import history. | Users cannot see what will be imported before it is committed. | A review step with counts, row-level errors, corrections, duplicate warnings, and an atomic commit. |
+| Review | No parsed-row review, validation, duplicate handling, or import history. | Users cannot see what will be imported before it is committed. | A review step with statement start/end date confirmation, counts, row-level validation errors, skip controls for invalid rows, duplicate warnings, and an atomic commit. |
 | Categorise and tag | There are no transactions, categories, or merchant tags. | No way to turn raw rows into meaningful insight. | Default categories, inline category and merchant-tag assignment, multi-select, "select all matching," and visible uncategorised and untagged queues. |
 | Understand | There is no overview, chart, or summary. | No answer to "where did my money go?" | Period cards, directional category breakdowns, top merchant tags, a trend, and a comparison with honest coverage notes. |
 | Discover | There is no category, merchant tag, account, or period exploration. | Users cannot move from a total to the transactions behind it. | Drill-down from every visual, plus category and merchant-tag detail views with trend and transactions. |
@@ -260,10 +279,10 @@ Each download is a ZIP containing exactly one CSV. The samples establish the fir
 2. Detect the FNB preamble and header instead of assuming the first row is data. Accept the UTF-8 BOM without showing it in the first header label. Preamble lines are metadata, never transactions.
 3. Trim header labels and amount fields. Ignore the Balance column entirely. Trim trailing spaces from descriptions for display and duplicate matching; preserve the meaningful description text.
 4. Ignore the `Balance` column entirely: do not import, display, or use it. The credit-card sample's balance is zero for every row, and the cheque sample's running balance is not a trusted transaction value. The transaction amount is the sole monetary source.
-5. The file has no currency column. The MVP currency is ZAR; show it prominently during import and require the user to confirm the statement is in ZAR. Do not infer a currency from the bank name or account label.
+5. The file has no currency column and no statement start/end date range. The MVP currency is ZAR; show it prominently during import and require the user to confirm the statement is in ZAR and to confirm or enter the statement `start_date` and `end_date` (pre-filled from the earliest and latest valid transaction dates). Do not infer a currency from the bank name or account label.
 6. Do not store, display, or log the preamble's name/account number or the raw ZIP/CSV filename. Use the user's account label and a generated statement label.
 7. Treat a row whose field count differs from the header as invalid. The CSV is unquoted in the sample; a comma in a future description would create an extra field, so flag it rather than shifting columns.
-8. The FNB layout is the MVP preset. A generic CSV mapping path for other files is a P1 extension; do not claim other banks are validated.
+8. The FNB layout is an automatic P0 preset alongside a generic CSV mapping and format-disambiguation path for other CSV exports. Do not claim other banks' fixed presets are pre-validated.
 
 ### 4.10 Provided Standard Bank PDF samples
 
@@ -315,16 +334,17 @@ Two Standard Bank PDF statements were provided: one 4-page statement and one 18-
 
 ### 5.2 Import and review
 
-1. The user selects the financial account and uploads an FNB ZIP/CSV or a Standard Bank PDF.
-2. Argus detects the format. For an FNB CSV, it extracts the single CSV, skips the preamble, and recognizes the header. For a Standard Bank PDF, it detects the six-column layout and reconstructs transaction rows. For an unfamiliar CSV in the P1 generic mapping path, it asks the user to confirm the mapping.
-3. Argus previews parsed rows and validates every row.
-4. The user corrects individual rows or marks them to be skipped, and reviews duplicate warnings.
-5. The user confirms the import and sees a summary: total reviewed, imported, already imported (suppressed), skipped by the user, and corrected counts.
-6. Argus shows the imported statement in the import history and links to the new transactions.
+1. The user selects the financial account and uploads an FNB ZIP/CSV, a Standard Bank PDF, or another CSV statement.
+2. Argus detects the format. For an FNB CSV, it extracts the single CSV, skips the preamble, and recognizes the header. For a Standard Bank PDF, it detects the six-column layout and reconstructs transaction rows. For an unfamiliar CSV, it asks the user to confirm the header row, delimiter, column mapping, date format, decimal separator, and sign convention.
+3. The user confirms the statement currency is ZAR and confirms or enters the statement coverage `start_date` and `end_date` (pre-filled from the PDF header period or the CSV's earliest and latest valid transaction dates).
+4. Argus previews the read-only parsed rows and validates every row.
+5. The user marks any invalid rows to be skipped and reviews duplicate warnings. Source fields (`date`, `description`, `amount`) are never edited in review.
+6. The user confirms the import and sees a summary: total reviewed, imported, already imported (suppressed), and skipped by the user.
+7. Argus shows the imported statement in the import history and links to the new transactions.
 
 **Success:** the import finishes with counts the user can understand, and every imported row is traceable to the statement.
 
-**Failure and recovery:** no partial import. A ZIP with zero or multiple CSVs, an encrypted archive, an unsafe path, or an unreadable archive is rejected before parsing. A password-protected, image-only, or unrecognized-layout PDF is rejected with a clear message. A file that overlaps an earlier import is not a failure; it proceeds with already-imported rows suppressed and new rows available for review. If validation fails, the user returns to mapping or row correction. If the backend is unavailable, the user sees a retry path and no half-saved statement.
+**Failure and recovery:** no partial import. A ZIP with zero or multiple CSVs, an encrypted archive, an unsafe path, or an unreadable archive is rejected before parsing. A password-protected, image-only, or unrecognized-layout PDF is rejected with a clear message. A file that overlaps an earlier import is not a failure; it proceeds with already-imported rows suppressed and new rows available for review. If validation fails, the user marks invalid rows to be skipped or fixes the source file and re-uploads. If the backend is unavailable, the user sees a retry path and no half-saved statement.
 
 ### 5.3 Categorise and tag
 
@@ -365,12 +385,12 @@ Two Standard Bank PDF statements were provided: one 4-page statement and one 18-
 1. The user opens a transaction. The imported date, description, and amount are read-only; the imported record is the truth.
 2. The user can change the category and merchant tags, or hide the transaction.
 3. Argus saves the change and recalculates the affected totals.
-4. The user can hide a transaction or an entire import after confirmation. Hidden transactions disappear from default lists, charts, and calculations, but they are not deleted.
-5. The user can open the Hidden view and restore a transaction or an entire import; the totals recalculate.
+4. The user can hide a transaction or hide/delete an entire committed import after confirmation. Hidden transactions disappear from default lists, charts, and calculations, but they are not deleted. Deleting a committed import removes that statement and its transactions so it can be re-imported cleanly.
+5. The user can open the Hidden view and restore a transaction or a hidden import (preserving individual transaction hide flags); the totals recalculate.
 
-**Success:** category, tag, and hidden-state changes are possible without altering the imported record. Hiding is reversible, and no transaction is lost.
+**Success:** category, tag, and hidden-state changes are possible without altering the imported record. Hiding is reversible, individual transactions are never deleted, and committed imports can be hidden, restored, or deleted cleanly.
 
-**Failure and recovery:** hide and restore are explicit and reversible. A stale category, tag, or hidden-state change in another session does not silently overwrite a newer change. A hidden transaction still counts for duplicate prevention, so re-importing it does not create a second copy. There is no in-place edit of an imported date, description, or amount.
+**Failure and recovery:** hide, restore, and statement delete are explicit. A stale category, tag, or hidden-state change in another session does not silently overwrite a newer change. A hidden transaction still counts for duplicate prevention, so re-importing it does not create a second copy unless its parent statement import was deleted. There is no edit of an imported date, description, or amount.
 
 ## 6. Desired experience and functional requirements
 
@@ -380,8 +400,8 @@ The authenticated product should have a small, persistent navigation:
 
 - **Overview** — the period summary and chart view, and the entry point after sign-in. Summary and Charts are tabs within Overview.
 - **Transactions** — the searchable, filterable list and the bulk-categorisation workspace.
-- **Imports** — committed import history and the start of a new import.
-- **Settings** — profile, financial accounts, categories, merchant tags, and data deletion.
+- **Imports** — committed import history (including statement hide, restore, and delete) and the start of a new import.
+- **Settings** — profile, financial accounts, categories, and merchant tags.
 
 The existing `/home` route is the natural default overview because login already redirects there and the proxy protects it. Account details should move to a profile/settings area rather than disappear. The final route names are an architecture decision; the screen set and the persistent navigation are product requirements.
 
@@ -390,17 +410,17 @@ On small screens, the same four destinations must remain reachable. Tables shoul
 ### 6.2 Import
 
 - **IMP-1:** The user can create or select a financial account before importing. A financial account has a display name and an optional institution, and uses the ZAR workspace currency.
-- **IMP-2:** The MVP supports the FNB CSV layout and text-based Standard Bank PDF statements. FNB may be a bare CSV or a ZIP containing exactly one CSV. Generic CSV mapping for other banks is a P1 extension. Other PDF layouts, scanned PDFs, and unrecognized formats are rejected with a clear message.
-- **IMP-3:** For an FNB export, Argus skips the six-line preamble, recognizes the `Date, Amount, Balance, Description` header, and confirms the mapping with a preview; the Balance column is ignored. For a Standard Bank PDF, Argus detects the `Date | Description | Payments | Deposits | Bank fees | Balance` layout and previews the reconstructed rows; the Balance column is ignored. For a P1 generic CSV, the user confirms the header row, delimiter, date format, and column mapping.
-- **IMP-4:** Ambiguous dates, decimal separators, and sign conventions require explicit confirmation. Argus never silently chooses an interpretation.
-- **IMP-5:** Every data row is validated. Invalid rows show the row number and a plain-language reason, and each row shows the raw source values alongside the interpreted date, description, and amount. PDF-derived rows also show the page number and source context. The user can correct the row or mark it to be skipped before committing; this review is the only point where date, description, or amount can be changed. Corrected rows are counted in the import summary.
-- **IMP-6:** The review step shows total data rows, rows ready to import, rows suppressed as already imported, rows marked to be skipped by the user, possible duplicates included, and corrected rows. At commit, total equals imported plus suppressed-as-already-imported plus skipped-by-user; no invalid row is left unaccounted for.
+- **IMP-2:** The MVP supports the automatic FNB CSV layout (bare CSV or a ZIP containing exactly one CSV), text-based Standard Bank six-column PDF statements, and generic CSV mapping with format disambiguation in P0. Other PDF layouts, scanned PDFs, and unrecognized non-CSV formats are rejected with a clear message.
+- **IMP-3:** For an FNB export, Argus skips the six-line preamble, recognizes the `Date, Amount, Balance, Description` header, and confirms the mapping with a preview; the Balance column is ignored. For a Standard Bank PDF, Argus detects the `Date | Description | Payments | Deposits | Bank fees | Balance` layout and previews the reconstructed rows; the Balance column is ignored. For a generic CSV, the user confirms the header row, delimiter, date format, decimal separator, sign convention, and column mapping.
+- **IMP-4:** Ambiguous dates, decimal separators, and sign conventions require explicit confirmation in P0. Argus never silently chooses an interpretation.
+- **IMP-5:** Every data row is validated and is strictly read-only. Invalid rows show the row number and a plain-language reason, and each row shows the raw source values alongside the interpreted date, description, and amount. PDF-derived rows also show the page number and source context. Source fields (`date`, `description`, `amount`) cannot be edited in review; the user must mark invalid rows to be skipped before committing (or fix the source file and re-upload).
+- **IMP-6:** The review step shows total data rows, rows ready to import, rows suppressed as already imported, rows marked to be skipped by the user, and possible duplicates included. At commit, total equals imported plus suppressed-as-already-imported plus skipped-by-user; no invalid row is left unaccounted for.
 - **IMP-7:** The commit is atomic. Either the confirmed statement and all its included transactions are saved, or nothing is saved. Retrying a failed commit must not duplicate data.
-- **IMP-8:** Import history shows the financial account, statement period, import date, and imported/suppressed-as-already-imported/skipped/corrected/hidden counts for each committed import. A committed import can be opened to review its counts, hidden, or restored. An abandoned or failed review is not listed as an import; the user retries from the review.
-- **IMP-9:** A user can hide an import and its transactions after a confirmation that states how many transactions will be hidden. The import remains in history with a Hidden state and can be restored. Transactions are never deleted.
+- **IMP-8:** Import history shows the financial account, confirmed statement coverage period (`start_date` to `end_date`), import date, and imported/suppressed-as-already-imported/skipped/hidden counts for each committed import. A committed import can be opened to review its counts, hidden, restored, or permanently deleted. An abandoned or failed review is not listed as an import; the user retries from the review.
+- **IMP-9:** A user can hide or restore a committed import, or permanently delete a committed import, after a confirmation that states how many transactions will be affected. Hiding an import hides its transactions and keeps the import in history with a Hidden state; restoring a hidden import restores its transactions except those that were hidden individually before the import was hidden. Deleting a committed import permanently removes that statement, its transactions, and its duplicate-protection identity records so the statement can be re-imported cleanly. Individual transactions are never deleted on their own.
 - **IMP-10:** File size, page count, and row count are bounded, including the uncompressed content of a ZIP and the page count of a PDF. Exceeding a limit produces a clear error before processing. Processing shows progress or a busy state and does not leave the user without feedback.
 - **IMP-11:** Re-importing the same statement is blocked or prominently flagged with a link to the existing import. An overlapping statement is allowed; transaction-level idempotency suppresses already-imported transactions and presents only new occurrences. An override requires explicit confirmation.
-- **IMP-12:** The MVP supports ZAR only. Neither the FNB file nor the Standard Bank PDF carries an explicit ZAR label in the samples, so show ZAR prominently and require the user to confirm the statement is in ZAR. A non-ZAR statement is unsupported and blocks the import with an explanation.
+- **IMP-12:** The MVP supports ZAR only and requires an explicit statement coverage period (`start_date` and `end_date`) on every import. Show ZAR prominently and require the user to confirm the statement is in ZAR and to confirm or enter the statement's `start_date` and `end_date` (pre-filled from the Standard Bank PDF header period when present, or from the earliest and latest valid transaction dates in a CSV). A non-ZAR statement is unsupported and blocks the import with an explanation.
 - **IMP-13:** The import flow clearly shows the current step (mapping, review, or committing), the selected file, and the target financial account, so the user always knows what will happen next.
 - **IMP-14:** A ZIP is accepted only when it contains exactly one CSV. Argus rejects multiple files, nested archives, encrypted archives, unsafe paths, and archives whose decompressed content exceeds the limit.
 - **IMP-15:** Argus does not store, display, or log the FNB preamble's name/account number, the Standard Bank PDF's account metadata, or the raw ZIP/CSV/PDF filename. The user sees the account label and a generated statement label.
@@ -408,10 +428,10 @@ On small screens, the same four destinations must remain reachable. Tables shoul
 - **IMP-17:** Password-protected or encrypted PDFs are rejected with a clear message.
 - **IMP-18:** The Standard Bank PDF layout is recognized by its six-column header and column positions. An unrecognized PDF layout is rejected; there is no generic PDF mapping in the MVP.
 - **IMP-19:** PDF descriptions that wrap are joined to the preceding transaction. Page headers, page footers, statement metadata, and summary or balance-only rows are skipped.
-- **IMP-20:** PDF transaction dates use two-digit years. Resolve them against the statement period printed in the PDF; if the period is missing or ambiguous, require the user to confirm the year.
+- **IMP-20:** PDF transaction dates use two-digit years. Resolve them against the confirmed statement period (`start_date` to `end_date`, pre-filled from the period printed in the PDF when present); if the period is missing or ambiguous, require the user to confirm the statement start/end dates and year.
 - **IMP-21:** PDF review shows the page number and source context for each extracted row. The raw PDF is not retained after the import or an abandoned review.
 - **IMP-22:** The import review may suggest merchant tags from the transaction description and the user's existing tag names. A suggestion is never applied automatically; the user accepts, changes, or ignores it.
-- **IMP-23:** A user can hide or restore individual transactions and bulk-hide selected or all matching transactions. Hidden transactions are excluded from calculations and default lists but retained for duplicate prevention and idempotency.
+- **IMP-23:** A user can hide or restore individual transactions and bulk-hide selected or all matching transactions. Hidden transactions are excluded from calculations and default lists but retained for duplicate prevention and idempotency unless their parent statement import is deleted.
 
 ### 6.3 Duplicate prevention and transaction idempotency
 
@@ -476,7 +496,7 @@ Category and merchant tag are independent dimensions. A category describes the p
 - **OVR-4:** The overview shows money in versus money out over time; this is the product's income-versus-expenditure view. The granularity adapts to the selected range, for example weekly for a single month and monthly for a multi-month range. The granularity is labelled.
 - **OVR-5:** The overview shows the largest categories for outflows and, separately, for inflows, with amount, share of the relevant directional total, transaction count, and change versus the comparison period.
 - **OVR-6:** Period comparison follows the rules in Section 7.3. If the prior period has no data, the overview says so and does not display a percentage change.
-- **OVR-7:** A data coverage note states the statement coverage for the selected period and warns when the period extends beyond imported data or includes a partial month.
+- **OVR-7:** A data coverage note states the statement coverage for the selected period, evaluated against the union of committed, non-hidden statement `[start_date, end_date]` periods for the selected financial account(s), and warns when the selected period extends beyond covered dates, has a statement gap, or includes a partial month.
 - **OVR-8:** Every card, chart segment, and category row is a path into the transaction list or category detail with the same period, account, category, and direction filters applied.
 - **OVR-9:** A "How this is calculated" disclosure explains money in, money out, net, transfers, excluded, and uncategorised in plain language.
 - **OVR-10:** The overview has a distinct empty state for no data at all and a distinct empty state for no data in the selected period.
@@ -513,9 +533,9 @@ Category and merchant tag are independent dimensions. A category describes the p
 - **SET-1:** The user can create, rename, archive, and restore financial accounts. All accounts use the ZAR workspace currency; there is no currency choice in the MVP.
 - **SET-2:** The user can manage categories and merchant tags, including defaults, custom entries, kinds, and archived state.
 - **SET-3:** The profile/settings area preserves the existing account details: email, verification status, subscription status, lifetime status, admin link where applicable, theme, and logout.
-- **SET-4:** Normal transaction and import management never deletes transactions; it hides and restores them. There is no account-level data-deletion action in the MVP; account deletion and data export are future. The workspace remains ZAR.
+- **SET-4:** Individual transactions are never deleted; they are hidden and restored. Committed statement imports can be hidden, restored, or permanently deleted from Imports (removing that statement, its transactions, and its duplicate-protection identity records). There is no whole-customer account-deletion or data-export action in the MVP; account deletion and data export are future. The workspace remains ZAR.
 - **SET-5:** The admin surface does not expose any user's financial data in the MVP. It may continue to show account state only.
-- **SET-6:** The product states whether the original uploaded ZIP/CSV is retained. The recommended MVP behaviour is to discard the raw file after a successful import or an abandoned review and keep only the parsed transactions and statement metadata.
+- **SET-6:** The product states whether the original uploaded ZIP/CSV/PDF is retained. The MVP behaviour is to discard the raw file after a successful import or an abandoned review and keep only the parsed transactions and statement metadata.
 - **SET-7:** The MVP does not add a pricing page, checkout, or plan management. The existing verified-subscriber gate remains the access model unless a separate product decision changes it.
 
 ### 6.9 Cross-cutting experience
@@ -536,7 +556,7 @@ Category and merchant tag are independent dimensions. A category describes the p
 - **SEC-3:** Uploads are validated for type, size, and content before parsing. Archive uploads reject multiple files, nested archives, encrypted archives, path traversal, and oversized decompression. PDF uploads reject password protection and image-only files in the MVP; no external OCR service is used. Parsed content is never executed. Malformed files produce a safe error, not an internal trace.
 - **SEC-4:** Financial descriptions, amounts, statement contents, user-defined category and merchant-tag names, the FNB preamble's name/account number, Standard Bank PDF account metadata, and raw ZIP/CSV/PDF filenames do not appear in application logs, audit events, or third-party analytics. Operational events may record counts, status, and non-sensitive identifiers.
 - **SEC-5:** The admin surface does not expose financial data. Any future support-access feature requires an explicit, audited product decision.
-- **SEC-6:** Hiding a statement hides its transactions, and restoring it restores them; totals recalculate. A separate account-level data deletion, if retained, removes all associated records with no orphans. Routine hiding never deletes a transaction.
+- **SEC-6:** Hiding a statement hides its transactions, and restoring it restores any transactions not hidden individually before the statement was hidden; totals recalculate. Deleting a committed statement removes all associated transactions and duplicate-protection identity records with no orphans. Routine transaction management never deletes an individual transaction.
 - **SEC-7:** Import retries are idempotent. A network failure after a successful commit must not create a second copy on retry.
 - **SEC-8:** Import and expensive read endpoints are rate-limited or otherwise bounded so a single session cannot exhaust the service.
 
@@ -548,7 +568,7 @@ Category and merchant tag are independent dimensions. A category describes the p
 | --- | --- |
 | **Customer account** | The login identity: email, password, verification, subscription. Called "Profile" in the product UI. |
 | **Financial account** | A bank or credit-card account whose statements the user imports. The FNB samples cover both. Called "Account" in the product UI. |
-| **Statement** | One committed import and its metadata: financial account, source file type, statement period, import date, and imported/skipped/duplicate/corrected counts. The source may be a bare FNB CSV, a ZIP containing one FNB CSV, or a text-based Standard Bank PDF. |
+| **Statement** | One committed import and its metadata: financial account, source file type, confirmed statement coverage period (`start_date` to `end_date`), import date, and imported/suppressed/skipped/hidden counts. The source may be a bare FNB CSV, a ZIP containing one FNB CSV, a text-based Standard Bank PDF, or a generic mapped CSV. |
 | **Transaction** | One row from a statement, with a date, description, signed amount, one category, zero or more merchant tags, and an import source. |
 | **Category** | A single user-visible classification for the purpose of the money, with a kind: Income, Expense, Transfer, or Excluded. Examples: Groceries, Home loan, Levies, School fees. |
 | **Merchant tag** | A workspace-wide user label for a store or merchant, such as Woolworths, Checkers, or Uber Eats. A transaction can have zero, one, or many merchant tags. |
@@ -570,7 +590,7 @@ The conceptual relationships are:
 - category and merchant tag are independent dimensions: a category answers what the money was for, and a tag answers where it went;
 - a hidden transaction remains linked to its statement and identity; hiding changes visibility, not the imported record.
 
-A transaction remains linked to its statement. Hiding a statement hides its transactions; restoring it restores them. Routine actions never delete a transaction. This is a product relationship, not a database design.
+A transaction remains linked to its statement. Hiding a statement hides its transactions; restoring it restores them except for transactions that were hidden individually before the statement was hidden; deleting a committed statement removes its transactions and duplicate-protection records. Individual transactions are never deleted on their own. This is a product relationship, not a database design.
 
 ### 7.2 Metric definitions
 
@@ -612,7 +632,7 @@ The recommended MVP model uses **gross directional flows** as the headline, with
 6. A multi-month or custom period compares with the immediately preceding period of equal length, ending the day before the selected start. The comparison dates are shown.
 7. If the comparison period has no included transactions, the product shows "No comparison available." It does not show 0%, +100%, or an infinite change.
 8. If the comparison period has data but the current period is partial, the comparison is labelled as partial and the date ranges are shown.
-9. If statements do not cover the full selected period, the overview shows a coverage warning naming the uncovered dates. It does not imply that missing data is zero spending.
+9. If the union of committed, non-hidden statement coverage periods (`start_date` to `end_date`) for the selected account(s) does not cover the full selected period, the overview shows a coverage warning naming the uncovered dates. It does not imply that missing data is zero spending.
 10. Date-range filters are inclusive of the start and end dates.
 
 ### 7.4 Amount, currency, and date rules
@@ -621,28 +641,28 @@ The recommended MVP model uses **gross directional flows** as the headline, with
 2. There is no foreign-exchange conversion in the MVP. A non-ZAR statement is unsupported and is blocked with a clear explanation.
 3. Amounts are exact at import. The product does not round transaction amounts before aggregation. Display rounds to ZAR cents; the exact value remains available.
 4. A positive amount means money in; a negative amount means money out. When a statement uses separate debit and credit columns, the mapping determines the direction. When a statement uses an inverted credit-card convention, the user confirms the convention from a preview that shows the interpreted direction.
-5. Thousands separators, decimal separators, parentheses for negatives, trailing minus signs, and CR/DR suffixes may be supported, but an ambiguous interpretation requires confirmation.
+5. Thousands separators, decimal separators, parentheses for negatives, trailing minus signs, and CR/DR suffixes are supported in P0 generic CSV mapping, and an ambiguous interpretation requires explicit user confirmation.
 6. Zero-amount transactions are imported and visible but do not change totals. They still count in transaction counts.
-7. Dates use four-digit years. Ambiguous day/month and month/day formats require the user to choose. Two-digit years require an explicit format choice, not a silent pivot.
+7. Dates use four-digit years. Ambiguous day/month and month/day formats require the user to choose. Two-digit years require an explicit format choice or statement-period resolution, not a silent pivot.
 8. Future-dated transactions are allowed with a warning; they are included if they fall inside the selected period.
-9. Amounts with more precision than ZAR cents are flagged during review. The user must confirm or correct them; they are not silently rounded.
-10. A statement's displayed period is the range from its earliest to its latest imported transaction date. It is shown separately from the analysis period and does not override transaction dates.
+9. Amounts with more precision than ZAR cents are flagged as invalid during review. Because source fields are read-only, the user must mark such rows to be skipped (or fix the source file); they are never silently rounded.
+10. Every import requires a confirmed statement coverage period (`start_date` and `end_date`). For Standard Bank PDFs, it is pre-filled from the statement period printed in the PDF when present; for CSVs, it is pre-filled from the earliest and latest valid transaction dates. The user confirms or adjusts `start_date` and `end_date` during review. It is stored on the statement for coverage warnings and shown separately from the analysis period without overriding transaction dates.
 11. A transaction cannot be imported without a valid date and amount. A missing description is allowed with a fallback label and is flagged in review; a missing category becomes Uncategorised.
-12. The FNB file has no currency column. The MVP currency is ZAR; show it prominently during import and require the user to confirm the statement is in ZAR. Never infer currency from the bank name or account label.
+12. The FNB file has no currency column and no statement period header. The MVP currency is ZAR; show it prominently during import and require the user to confirm the statement is in ZAR and to confirm or enter the statement `start_date` and `end_date`. Never infer currency from the bank name or account label.
 13. The FNB amount format is a signed dot-decimal with a leading space; the leading space is formatting, not a sign. Dates are `YYYY/MM/DD` and are unambiguous.
 14. Ignore the FNB `Balance` column entirely. The credit-card sample's balance is zero for every row, and the cheque sample's running balance is not a trusted transaction value. The transaction amount is the sole monetary source.
 15. The FNB preamble and raw filenames contain account identifiers. Skip the preamble, do not store or display its contents, and do not log the raw filename.
 16. The FNB header is on the seventh line; the six preamble lines are metadata. Rows whose field count differs from the header are invalid; do not shift columns.
-17. Standard Bank PDF transaction dates use `DD Mon YY`. Resolve the two-digit year against the statement period printed in the PDF; if the period is missing or ambiguous, require the user to confirm the year.
+17. Standard Bank PDF transaction dates use `DD Mon YY`. Resolve the two-digit year against the confirmed statement period (`start_date` to `end_date`, pre-filled from the PDF header when present); if the period is missing or ambiguous, require the user to confirm the statement dates and year.
 18. Standard Bank PDF columns map as follows: Payments is an outflow, Deposits is an inflow, Bank fees is an outflow. Ignore Balance entirely: do not import, display, or use it. The transaction amount is the sole monetary source.
 19. PDF descriptions that wrap across lines are joined to the preceding transaction. Page headers, page footers, statement metadata, and summary or balance-only rows are not transactions.
 20. A Standard Bank PDF must contain a selectable text layer. Image-only or scanned PDFs are unsupported in the MVP, and password-protected PDFs are rejected.
 21. PDF-derived rows retain their page number and source context for review. The raw PDF is not retained after the import or an abandoned review.
-22. If a PDF transaction row has values in more than one flow column, flag it for review rather than summing the columns silently.
+22. If a PDF transaction row has values in more than one flow column, flag it invalid in review (requiring the user to skip it) rather than summing the columns silently.
 23. If a PDF row has no flow amount, treat it as a summary or metadata row and skip it unless it is clearly a transaction with a missing amount, in which case flag it invalid.
 24. Transaction descriptions are unstructured merchant text. Argus may use them for search and as a suggestion source, but merchant tags are user-assigned and never inferred as fact.
 25. Suggested merchant tags are suggestions only. They are never applied automatically and never change the transaction's category.
-26. An imported transaction's date, description, amount, account, and source are immutable. The pre-commit import review is the only place where date, description, or amount can be corrected. After commit, only category, merchant tags, and hidden state can change.
+26. A transaction's date, description, amount, account, and source are strictly read-only both during the pre-commit import review and after commit. Invalid rows in the pre-commit review must be marked to be skipped (or fixed in the source file before re-uploading). After commit, only category, merchant tags, and hidden state can change.
 
 ### 7.5 Duplicate rules
 
@@ -652,9 +672,9 @@ The recommended MVP model uses **gross directional flows** as the headline, with
 4. **Near duplicate:** same account and amount within a short date window (proposed ±3 days), with a similar description. Near duplicates are warnings, not automatic exclusions.
 5. Exact matches against already-imported transactions default to suppressed. Exact duplicates within the incoming file are flagged for a user decision. Near duplicates default to included. All three are visible in the review with a reason.
 6. An override is explicit, recorded in the import summary, and visible after import.
-7. A statement-level repeat can only be imported after the user confirms an override or hides the prior import.
-8. Deleting an import removes its duplicate protection for future imports of the same data.
-9. Imported date, description, and amount are immutable. No post-import edit can create a duplicate, and category or tag changes do not affect identity.
+7. A statement-level repeat can only be imported after the user confirms an override or deletes/hides the prior import.
+8. Permanently deleting a committed import removes that statement, its transactions, and its duplicate protection for future imports of the same data. Hiding a statement or transaction retains its duplicate protection.
+9. Imported date, description, and amount are immutable in review and after commit. No edit can create a duplicate, and category or tag changes do not affect identity.
 10. Retrying a failed commit must detect the already-saved statement and return the existing result rather than importing again.
 11. FNB descriptions are padded with trailing spaces. Trim them for display and duplicate matching, but preserve the meaningful description text.
 12. Standard Bank PDF descriptions are reconstructed from wrapped lines. Collapse whitespace for matching and display, but preserve the meaningful description text.
@@ -664,7 +684,7 @@ The recommended MVP model uses **gross directional flows** as the headline, with
 16. **Account scope:** idempotency is per financial account. The same transaction arriving from a CSV, a ZIP-contained CSV, or a PDF for the same account is a duplicate; a transfer between two different accounts is not.
 17. **Visibility:** the import review and history report suppressed-as-already-imported rows separately from rows skipped by the user and possible duplicates.
 18. **Metadata:** category and merchant-tag assignments are user metadata. They are not part of the transaction identity and do not affect duplicate detection or idempotency.
-19. **Hidden transactions:** hidden transactions remain in the identity set. Re-importing one does not create a visible copy; it is reported as already imported and can be restored.
+19. **Hidden transactions:** hidden transactions remain in the identity set unless their parent statement import is permanently deleted. Re-importing a hidden transaction does not create a visible copy; it is reported as already imported and can be restored.
 
 ### 7.6 Reconciliation invariants
 
@@ -731,29 +751,29 @@ These are product-coherence corrections, not finance features:
 | ID | Capability | Priority | Why it is MVP |
 | --- | --- | --- | --- |
 | MVP-1 | Financial account setup for bank and credit-card accounts: name, optional institution, ZAR workspace currency, archive, and restore. | P0 | The FNB samples cover a cheque account and a credit card; import needs a destination, and duplicate detection is per account. |
-| MVP-2 | FNB ZIP/CSV import: structure detection, preamble handling, preview, validation, correction, and atomic commit. | P0 | This is the product's entry point, and the provided samples define the first format. |
-| MVP-3 | Committed import history with imported/suppressed/skipped/corrected/hidden counts, hidden state, and hide/restore. | P0 | Users need to know what happened and recover from mistakes without losing records. |
+| MVP-2 | FNB ZIP/CSV import: structure detection, preamble handling, statement start/end date confirmation, read-only preview, validation, skip controls for invalid rows, and atomic commit. | P0 | This is the product's entry point, and the provided samples define the first format. |
+| MVP-3 | Committed import history with confirmed statement period, imported/suppressed/skipped/hidden counts, hidden state, hide/restore, and committed-import deletion. | P0 | Users need to know what happened and recover from mistakes by hiding, restoring, or deleting and re-importing a statement. |
 | MVP-4 | Duplicate detection and transaction idempotency: exact, statement-level, within-file, near-duplicate, overlapping imports, retries, occurrence-aware suppression. | P0 | Duplicate data destroys trust in every total, and overlapping statements are normal. |
-| MVP-5 | Transaction list with search, date/account/category/direction filters, sorting, pagination, and totals. | P0 | This is the working surface for review and correction. |
+| MVP-5 | Transaction list with search, date/account/category/direction filters, sorting, pagination, and totals. | P0 | This is the working surface for review and classification. |
 | MVP-6 | Transaction detail with read-only imported fields, category and merchant-tag changes, hide and restore. | P0 | The imported record is the truth; only metadata and visibility may change after import. |
 | MVP-7 | Category model, default categories including Groceries, Home loan, Levies, and School fees, kinds, create/rename/archive/delete, system Uncategorised. | P0 | Categories are the vocabulary of the insight. |
 | MVP-8 | Single and bulk categorisation and merchant-tag add/remove, including select-all-matching-filter. | P0 | Manual one-by-one categorisation and tagging is too slow to be a product. |
 | MVP-9 | Overview with money in, money out, net, needs-categorisation, directional category breakdowns, trend, and comparison. | P0 | This is the core value proposition. |
 | MVP-10 | Drill-down from every overview element to the matching transactions or category detail. | P0 | Totals must be explainable. |
-| MVP-11 | Data coverage: statement coverage, partial periods, missing comparison data, uncategorised disclosure. | P0 | Trust depends on not overstating incomplete data. |
-| MVP-12 | Customer-scoped isolation, admin exclusion, hide/restore for transactions and imports, and a separate privacy decision for account-level deletion. | P0 | Financial data is sensitive and routine actions must not destroy records. |
+| MVP-11 | Data coverage: confirmed statement period coverage, partial periods, missing comparison data, uncategorised disclosure. | P0 | Trust depends on not overstating incomplete data. |
+| MVP-12 | Customer-scoped isolation, admin exclusion, hide/restore for transactions and imports, and committed-import deletion (no whole-customer account deletion in MVP). | P0 | Financial data is sensitive and customer isolation is mandatory. |
 | MVP-13 | Responsive, accessible core flows; empty, loading, error, and partial states. | P0 | The product must be usable, not just correct. |
-| MVP-14 | Profile/settings area for existing account details, financial accounts, categories, merchant tags, and data deletion. | P1 | Some of this can live in context, but the product needs a home for configuration. |
+| MVP-14 | Profile/settings area for existing account details, financial accounts, categories, and merchant tags. | P0 | The product needs a home for account, category, and tag configuration alongside the app shell. |
 | MVP-15 | Category detail with trend, gross in/out, net, count, and comparison. | P1 | This is the bridge between overview and transactions. |
 | MVP-16 | Period comparison view of the largest category changes. | P1 | It directly answers "what changed?" but the overview comparison is the minimum. |
 | MVP-17 | Performance targets for overview, filtering, and import. | P1 | Personal datasets are small, but the experience must stay responsive. |
 | MVP-18 | Landing page and metadata rewrite; sample page retirement. | P0 (launch-blocking) | The product cannot launch with a starter-kit identity. |
-| MVP-19 | Generic CSV mapping for other bank exports. | P1 (post-launch) | Launch formats are FNB CSV and Standard Bank PDF; generic mapping broadens reach without delaying the first path. |
-| MVP-20 | Standard Bank text-based PDF import: six-column layout, multi-line descriptions, two-digit-year resolution, page metadata skipping, and source context. | P0 | PDF is confirmed MVP scope; the two provided samples share one layout. |
+| MVP-19 | Generic CSV mapping and format disambiguation for other bank exports (header row, delimiter, date format, decimal separator, and debit/credit or sign-inversion confirmation). | P0 | Included in initial launch so users can import non-FNB CSVs and confirm ambiguous date, decimal, or sign conventions. |
+| MVP-20 | Standard Bank text-based PDF import: six-column layout, multi-line descriptions, two-digit-year resolution via statement period, page metadata skipping, and source context. | P0 | PDF is confirmed MVP scope; the two provided samples share one layout. |
 | MVP-21 | PDF format safety: reject scanned/image-only, password-protected, and unrecognized-layout PDFs with clear messages. | P0 | PDF parsing must fail safely and must not imply OCR support. |
 | MVP-22 | Merchant tags: multiple tags per transaction, suggestions with confirmation, create/rename/archive/delete, bulk add/remove, single-tag filter, tag detail, top tags, and untagged coverage. | P0 | Store-level insight is a confirmed requirement, and categories alone cannot answer where the money went. |
 | MVP-23 | Chart view: bar-first category, merchant-tag, and period charts with filters, drill-down, and accessible table alternatives. | P0 | The product needs a visual lens over the same reconciled data. |
-| MVP-24 | Hide and restore: transaction and import hide/restore, bulk hide, Hidden view, exclusion from calculations, retention for idempotency. | P0 | Users need to remove noise without losing the imported record. |
+| MVP-24 | Hide, restore, and statement delete: transaction and import hide/restore (preserving individual transaction hide flags), bulk hide, Hidden view, exclusion from calculations, retention for idempotency, and committed-import deletion. | P0 | Users need to remove noise without losing records, and delete a bad import when needed. |
 
 ### 8.4 Future enhancements — not MVP
 
@@ -776,7 +796,7 @@ These are product-coherence corrections, not finance features:
 | Split transactions | One transaction across multiple categories adds splitting and reconciliation complexity. | Users frequently report mixed-purpose transactions. |
 | Manual transaction entry | The MVP is statement-driven; manual entry adds validation, duplicate, and source-attribution questions. | Users need to track cash spending that never appears on a statement. |
 | Account balances and reconciliation | Balances are ignored in the MVP; a balance view adds opening/closing and reconciliation complexity. | Users need to verify a statement balance or track net worth. |
-| Account deletion, data export, and permanent data removal | The MVP hides and restores; permanent removal and export are future privacy features. | Users or regulators require deletion or export. |
+| Account deletion, data export, and whole-customer data removal | The MVP hides and restores transactions and allows deleting committed statement imports; whole-customer account deletion and export are future privacy features. | Users or regulators require whole-account deletion or export. |
 | Transfer linking between accounts | Nice for net-worth views, but the MVP excludes transfers from insight totals. | The product adds balance or net-worth tracking. |
 | Exports and scheduled reports | Useful distribution, not core insight. | Users ask to take data out or receive a monthly summary. |
 | Anomaly and unusual-change detection | Needs a defined baseline and a high bar for false positives. | Enough history exists to validate the rule. |
@@ -797,8 +817,8 @@ These are product-coherence corrections, not finance features:
 - No balance import, balance display, or balance reconciliation. Transaction amounts are the source of truth.
 - No automatic merchant enrichment, external merchant directory, or auto-applied merchant tags in the MVP.
 - No combined tag filters or tag merge in the MVP.
-- No in-place editing of an imported transaction's date, description, or amount.
-- No routine transaction or import deletion. Hiding is the only supported action; account deletion and data export are future.
+- No editing of a transaction's date, description, or amount either during import review or after commit.
+- No individual transaction deletion (hide and restore only). Committed statement imports may be hidden, restored, or permanently deleted; whole-customer account deletion and data export are future.
 - No shared/household accounts.
 - No pricing page, checkout, or plan management.
 - No financial data in the admin surface.
@@ -807,14 +827,14 @@ These are product-coherence corrections, not finance features:
 
 ### 9.1 Import and review
 
-- **AC-IMP-1:** Given a financial account in ZAR and a CSV with mapped date, description, and amount columns, when the user confirms the import, then a statement is recorded as imported, the transaction count equals the valid included rows, and each transaction's date, description, and amount match the review.
-- **AC-IMP-2:** Given a file with invalid rows, when the review is shown, then every invalid row has a row number and a plain-language reason, and the import cannot commit until each invalid row is corrected or marked to be skipped.
-- **AC-IMP-3:** Given an ambiguous date or amount format, when the user reaches the preview, then Argus requires an explicit format choice and shows the interpreted values; no ambiguous value is silently accepted.
+- **AC-IMP-1:** Given a financial account in ZAR and a CSV with mapped date, description, and amount columns and confirmed ZAR and statement start/end dates, when the user confirms the import, then a statement is recorded as imported with its confirmed coverage period, the transaction count equals the valid included rows, and each transaction's date, description, and amount match the source row.
+- **AC-IMP-2:** Given a file with invalid rows, when the review is shown, then every invalid row has a row number, raw source values, and a plain-language reason, source fields are read-only, and the import cannot commit until each invalid row is marked to be skipped.
+- **AC-IMP-3:** Given an ambiguous date, decimal separator, delimiter, or sign format in a CSV, when the user reaches the preview, then Argus requires an explicit format choice and shows the interpreted values; no ambiguous value is silently accepted.
 - **AC-IMP-4:** Given a backend failure during commit, when the failure is reported, then no statement or transactions from that commit are visible, and retrying does not create duplicates.
 - **AC-IMP-5:** Given a file that repeats a previously imported statement, when the user uploads it, then Argus blocks or prominently flags the repeat, links to the existing statement, and requires an explicit override to proceed.
 - **AC-IMP-6:** Given a file containing two identical rows, when the review is shown, then both are flagged as possible duplicates, the user can include both, and neither is silently dropped.
-- **AC-IMP-7:** Given a completed import, when the user opens import history, then the account, statement period, import date, and total/imported/suppressed-as-already-imported/skipped/corrected/hidden counts are visible and consistent with the review.
-- **AC-IMP-8:** Given a completed import, when the user hides it and confirms, then its transactions are hidden, the import remains in history with a Hidden state, the overview totals exclude them, and the user can restore them. No transaction is deleted.
+- **AC-IMP-7:** Given a completed import, when the user opens import history, then the account, confirmed statement coverage period (`start_date` to `end_date`), import date, and total/imported/suppressed-as-already-imported/skipped/hidden counts are visible and consistent with the review.
+- **AC-IMP-8:** Given a completed import, when the user hides it and confirms, then its transactions are hidden, the import remains in history with a Hidden state, the overview totals exclude them, and restoring the import restores its transactions except those that were hidden individually before the import was hidden. When the user permanently deletes a committed import and confirms, that statement, its transactions, and its duplicate-protection identity records are removed so the statement can be re-imported cleanly.
 - **AC-IMP-9:** Given an FNB ZIP containing one CSV, when the user uploads it, then Argus extracts the CSV, skips the six preamble lines, recognizes the header, and previews every data row without importing any preamble line as a transaction.
 - **AC-IMP-10:** Given a ZIP containing zero or multiple CSVs, a nested archive, an encrypted archive, or an unsafe path, when the user uploads it, then Argus rejects it before parsing with a clear reason.
 - **AC-IMP-11:** Given the FNB credit-card sample, when the overview is calculated, then the `Balance` column is not imported or displayed and has no effect on money in, money out, net, or coverage; the signed transaction amounts are the only source.
@@ -860,7 +880,7 @@ These are product-coherence corrections, not finance features:
 - **AC-OVR-3:** Given a comparison period with no included transactions, when the overview is displayed, then the comparison shows "No comparison available" and no percentage.
 - **AC-OVR-4:** Given a current month with data, when the overview defaults to it, then the heading says "Month to date" and the comparison uses the same day range in the previous month.
 - **AC-OVR-5:** Given uncategorised transactions, when the overview is displayed, then the needs-categorisation indicator shows the count and directional amounts, and the category breakdowns show an Uncategorised row.
-- **AC-OVR-6:** Given a period that extends beyond the latest imported statement, when the overview is displayed, then a coverage warning names the uncovered dates and does not imply that missing data is zero.
+- **AC-OVR-6:** Given a selected period that extends beyond the union of committed, non-hidden statement coverage periods (`start_date` to `end_date`) for the selected account(s) or contains an uncovered gap between statements, when the overview is displayed, then a coverage warning names the uncovered dates and does not imply that missing data is zero.
 
 ### 9.4 Access, isolation, and deletion
 
@@ -868,8 +888,8 @@ These are product-coherence corrections, not finance features:
 - **AC-SEC-2:** Given no valid session, when a finance screen or finance data request is made, then the user is sent to sign in and the backend rejects the request as unauthorised.
 - **AC-SEC-3:** Given an admin session, when the admin surface is opened, then it shows account state only and no financial data.
 - **AC-SEC-4:** Given a successful or failed import, when logs and audit events are inspected, then they do not contain transaction descriptions, amounts, or file contents.
-- **AC-DEL-1:** Given a statement hide, when it completes, then exactly that statement's transactions are hidden and no transaction is deleted. Restoring the statement makes them visible again.
-- **AC-DEL-2:** Given the MVP, then there is no account-level delete-all action. Hiding is the only supported removal; account deletion and data export are future.
+- **AC-DEL-1:** Given a statement hide, when it completes, then that statement's transactions are hidden and no transaction is deleted; restoring the statement restores its transactions except those hidden individually before the statement was hidden. Given a committed statement delete, when confirmed, then exactly that statement, its transactions, and its duplicate-protection identity records are removed.
+- **AC-DEL-2:** Given the MVP, then individual transactions cannot be deleted (hide and restore only), and there is no whole-customer account-deletion or data-export action; whole-account deletion and data export are future.
 
 ### 9.5 Responsive and accessible experience
 
@@ -888,7 +908,7 @@ These are product-coherence corrections, not finance features:
 ### 9.7 Hide and restore
 
 - **AC-HIDE-1:** Given a visible transaction, when the user hides it, then it disappears from the default transaction list, all cards, charts, category and tag totals, coverage, and comparisons; it remains in the Hidden view and can be restored.
-- **AC-HIDE-2:** Given a committed import, when the user hides it, then all of its transactions are hidden, the import remains in history with a Hidden state, totals recalculate, and the import can be restored.
+- **AC-HIDE-2:** Given a committed import, when the user hides it, then all of its transactions are hidden, the import remains in history with a Hidden state, totals recalculate, and restoring the import restores its transactions except any that were hidden individually before the import was hidden.
 - **AC-HIDE-3:** Given a hidden transaction, when an overlapping statement containing the same transaction is imported, then it is suppressed as already imported and no visible duplicate is created. The user can restore the hidden transaction instead.
 - **AC-HIDE-4:** Given hidden transactions, when categorisation, tagging, or coverage is calculated, then hidden transactions are excluded from the denominator and shown separately as a hidden count.
 - **AC-HIDE-5:** Given all transactions in a period are hidden, when the overview is displayed, then it shows the empty state with the hidden count and a restore action, not zero spending.
@@ -928,9 +948,9 @@ These are product-coherence corrections, not finance features:
 | Amount | Credit-card sign inversion | Require confirmation from a preview showing money in/out. |
 | Amount | FNB leading space before the amount | Trim it; the space is formatting, not a negative sign. |
 | Amount | FNB credit-card `Balance` is zero for every row | Ignore and do not import the balance; use the signed amount only. |
-| Amount | FNB file has no currency column | Use ZAR; show it and require confirmation; never infer currency from the bank or account label. |
+| Amount | FNB file has no currency column or statement period | Use ZAR; show it and require the user to confirm ZAR and the statement `start_date` and `end_date` (pre-filled from earliest and latest transaction dates); never infer currency from the bank or account label. |
 | Amount | Zero amount | Import and display; no effect on totals. |
-| Amount | More decimal places than ZAR cents | Flag; require correction or confirmation. |
+| Amount | More decimal places than ZAR cents | Flag as invalid; require the row to be marked skipped (or fixed in the source file); never round silently. |
 | Row | Missing description | Allow with a fallback label; do not drop the row silently. |
 | Row | FNB description has trailing spaces | Trim for display and duplicate matching; preserve the meaningful text. |
 | Row | Unmapped columns present in the header | Ignore them after the user confirms the mapping. |
@@ -976,15 +996,15 @@ These are product-coherence corrections, not finance features:
 | Period | No prior-period data | Show "No comparison available." |
 | Account | Archive a financial account with data | Remove it from new-import choices; keep its transactions in history and in the all-accounts view; allow filtering to the archived account and restoring it later. |
 | Account | Archive the last financial account | Keep its history visible; new imports prompt the user to restore it or create another account. |
-| Period | Statement gap inside the selected range | Show a coverage warning naming the gap. |
-| Edit | User wants to change an imported date, description, or amount | Not allowed. The imported record is read-only; hide it and import a corrected statement if needed. |
+| Period | Statement gap inside the selected range | Compare the selected period against the union of committed, non-hidden statement `[start_date, end_date]` periods for the selected account(s) and show a coverage warning naming any uncovered dates. |
+| Edit | User wants to change a row's date, description, or amount in review or after import | Not allowed. Source fields are read-only in review and after commit; mark invalid rows skipped in review, or hide a committed transaction / delete and re-import the statement if needed. |
 | Edit | User changes category, merchant tags, or hidden state | Allow; update the affected totals. The imported record is unchanged. |
 | Concurrency | Two sessions change the same transaction's category, tags, or hidden state | Warn on a stale change; do not silently overwrite a newer change. |
 | Concurrency | Two imports for the same account at once | Serialise or show one in progress; do not interleave counts. |
 | Session | Session expires during import | Redirect to sign in; do not lose the confirmed import if it already committed. |
 | Backend | Backend unavailable during review | Show a retry path; do not show a successful import. |
-| Deletion | Hide a statement while a transaction is open | Return the user to the list or show the transaction as hidden; restore remains available. |
-| Correction | A committed transaction is wrong | Hide it; import a corrected statement if needed. Do not edit the imported record. |
+| Deletion | Hide or delete a statement while a transaction is open | Return the user to the list or show the transaction as hidden/removed; restore remains available when hidden. |
+| Correction | A committed transaction is wrong | Hide it, or delete the committed statement import and import a corrected statement. Do not edit the imported record. |
 | Hide | All transactions in a period are hidden | Show the empty state with the hidden count and a restore action; do not show zero spending. |
 | Hide | A hidden transaction is re-imported | Suppress it as already imported; do not create a visible duplicate; allow restore. |
 | Currency | Statement is not in ZAR | Block the import with an explanation that the MVP supports ZAR only. |
@@ -998,10 +1018,9 @@ These are initial hypotheses, not commitments. Establish a baseline before setti
 | Metric | Definition | Why it matters | Initial target hypothesis |
 | --- | --- | --- | --- |
 | **Import completion rate** | Imports reaching "imported" divided by imports started, for supported ZIP/CSV inputs. | The product is unusable if statements do not land. | 85% or higher. |
-| **FNB first-import success** | FNB ZIP uploads reaching "imported" without manual correction. | Validates the first concrete format contract. | 90% or higher. |
+| **FNB first-import success** | FNB ZIP uploads reaching "imported" with zero invalid rows skipped. | Validates the first concrete format contract. | 90% or higher. |
 | **Standard Bank PDF extraction accuracy** | Correct transaction rows extracted divided by the expected rows in the sample fixtures. | A PDF parser that loses or invents rows is worse than no PDF support. | 99% or higher on the validated samples. |
-| **PDF first-import success** | Standard Bank PDF uploads reaching "imported" without manual correction. | Validates the second concrete format contract. | 85% or higher. |
-| **PDF row correction rate** | Rows the user corrects during PDF review divided by extracted PDF rows. | Shows whether layout reconstruction is reliable enough to trust. | Under 5%. |
+| **PDF first-import success** | Standard Bank PDF uploads reaching "imported" with zero invalid rows skipped. | Validates the second concrete format contract. | 85% or higher. |
 | **Time to first import** | Median time from first sign-in to first successful import. | Measures onboarding friction. | Under 10 minutes. |
 | **Import error rate** | Failed or abandoned imports divided by attempts. | Reveals format and validation problems. | Under 10%. |
 | **Duplicate rate** | Duplicate transactions imported per 1,000 transactions. | Duplicate data destroys trust. | Fewer than 1 per 1,000. |
@@ -1029,7 +1048,7 @@ These are initial hypotheses, not commitments. Establish a baseline before setti
 
 - The repository contains no finance product. This is the defining limitation.
 - The two FNB samples cover one bank and two account types. Other FNB account types are unvalidated.
-- The samples have no explicit currency label; the MVP is ZAR-only, so show ZAR and require the user to confirm the statement is in ZAR.
+- The samples have no explicit currency label, and FNB CSVs have no statement period header; the MVP is ZAR-only, so show ZAR and require the user to confirm the statement is in ZAR and to confirm or enter the statement `start_date` and `end_date`.
 - Balances are ignored entirely in the MVP; the credit-card sample's `Balance` column is zero for every row, and no balance is imported, displayed, or used for reconciliation.
 - The samples are real financial data and must not be committed. Use synthetic fixtures that reproduce the structure; record only structural characteristics in documentation.
 - No user research, analytics, support data, or product requirements exist.
@@ -1037,13 +1056,13 @@ These are initial hypotheses, not commitments. Establish a baseline before setti
 - No PDF parser exists in the application yet. The structural feasibility is established from the samples, not from implemented code.
 - No chart, data-table, file-upload, CSV, archive, or PDF capability exists in the current dependencies or UI.
 - The MVP is ZAR-only and does not convert foreign transactions.
-- Imported date, description, and amount are immutable. Corrections are possible only in the pre-commit import review; there is no in-place post-import edit.
-- Normal transaction and import management never deletes data; it hides and restores. There is no account-level delete-all action in the MVP; account deletion and data export are future.
+- Source transaction `date`, `description`, and `amount` are strictly read-only both during the pre-commit import review and after commit. Invalid rows in the pre-commit review must be marked to be skipped (or fixed in the source file and re-uploaded); there is no in-review or post-import editing of source fields.
+- Individual transactions are never deleted (they are hidden and restored only). Committed statement imports can be hidden, restored, or permanently deleted (removing that statement, its transactions, and its duplicate-protection identity records). There is no whole-customer account-deletion or data-export action in the MVP; account deletion and data export are future.
 - Split transactions, automatic merchant normalisation, recurring detection, auto-categorisation, and transfer linking are not in the MVP.
 - Merchant tags are user-assigned, with description-based suggestions that require confirmation. There is no external merchant directory and no auto-applied tag.
 - A transaction can have multiple merchant tags, so tag totals overlap and are not additive. The MVP filters by one tag at a time; combined tag filters, tag merge, and bulk tag replacement are future.
 - The Chart view is bar-first. Line and area chart variants are future.
-- There is no account deletion flow. Transaction and import management hides and restores; a separate account-level data-deletion action is a privacy decision.
+- Whole-customer account deletion is outside the MVP. Individual transactions are hidden and restored; committed imports may be hidden, restored, or deleted.
 - The existing login requires email verification and an activated subscription flag. This is existing behaviour, not a new product decision.
 - The billing integration is a mock. There is no pricing, checkout, or plan management.
 - The landing page, metadata, README, and docs still describe a SaaS starter.
@@ -1069,18 +1088,18 @@ These are initial hypotheses, not commitments. Establish a baseline before setti
 ### 12.3 Confirmed decisions
 
 - The initial workspace currency is ZAR. The MVP has no currency selection and no FX conversion. Multi-currency is future.
-- Launch formats are FNB CSV (bare or a ZIP containing exactly one CSV) and text-based Standard Bank PDF. Generic CSV mapping is P1 and not launch-blocking. Scanned/image-only PDFs and OCR are future.
+- Launch formats in P0 are FNB CSV (bare or a ZIP containing exactly one CSV), text-based Standard Bank six-column PDF, and generic CSV mapping with format disambiguation (delimiter, header row, date format, decimal separator, and debit/credit or sign-inversion confirmation). Scanned/image-only PDFs and OCR are future.
+- Every import requires the user to confirm ZAR currency and confirm or enter the statement coverage period (`start_date` and `end_date`), pre-filled from the PDF header period or the CSV's earliest and latest valid transaction dates. Statement coverage and gap warnings (`OVR-7`, `AC-OVR-6`) are evaluated against the union of committed, non-hidden statement `[start_date, end_date]` periods for the selected account(s).
 - The MVP supports multiple ZAR financial accounts.
 - Balances are ignored entirely in the MVP: not imported, not displayed, and not used in calculations. The transaction amount is the critical monetary field.
 - Transactions have one category and zero or more merchant tags. Categories include Groceries, Home loan, Levies, and School fees; merchant tags include Woolworths, Checkers, and Uber Eats.
-- Imported date, description, and amount are immutable. Only category, merchant tags, and hidden state can change after import.
-- Transactions are never deleted in normal product use. The supported action is hide and restore. Hidden transactions are excluded from calculations but retained for duplicate prevention and idempotency.
+- Source transaction `date`, `description`, and `amount` are strictly read-only both during pre-commit review and after commit. Invalid rows in pre-commit review must be marked to be skipped (or fixed in the source file before re-uploading). Only category, merchant tags, and hidden state can change after import.
+- Individual transactions are never deleted (hide and restore only). Committed statement imports can be hidden, restored (preserving individual transaction hide flags), or permanently deleted (removing that statement, its transactions, and its duplicate-protection identity records so it can be re-imported cleanly). Whole-customer account deletion and data export are future.
 - Merchant tags are user-assigned with description-based suggestions; suggestions require confirmation and are never auto-applied.
 - The MVP includes a bar-first Chart view over the same data and filters.
 - Transaction creation is idempotent across overlapping statement imports and retries. Exact overlaps are suppressed by default; occurrence counts preserve legitimate repeats; an explicit override is available.
 - The metric model is gross directional money in, money out, and net, with additive category breakdowns, overlapping merchant-tag views, transfers and excluded separate, and uncategorised and untagged flagged.
 - Duplicate policy: exact overlaps are suppressed, near duplicates are warned, statement repeats are blocked with an explicit override.
-- Deletion scope: hide and restore only. There is no account-level delete-all action in the MVP; account deletion and data export are future.
 - Raw-file retention: the uploaded ZIP/CSV/PDF is discarded after import or an abandoned review.
 - Access model: the existing verified-subscriber gate, with no pricing or checkout UI in the MVP.
 
@@ -1111,18 +1130,50 @@ These are initial hypotheses, not commitments. Establish a baseline before setti
 
 ### 12.6 Readiness for architecture planning
 
-**Status: planning ready. The decisions below are fixed, and the remaining Section 12.4 items are planning defaults.**
+**Status: REQUIREMENTS READY for architecture planning.**
 
-Fixed: ZAR; FNB CSV and text-based Standard Bank PDF; a ZIP containing exactly one CSV; multiple ZAR financial accounts; balances ignored entirely; transaction amount is the critical monetary field; one category and zero or more merchant tags per transaction; imported date, description, and amount immutable; transactions never deleted, with hide and restore only and no account-level delete-all; the uploaded ZIP/CSV/PDF discarded after import or an abandoned review; the money in/out/net metric model with additive categories and overlapping tag views; exact overlaps suppressed, near duplicates warned, statement repeats blocked; the existing verified-subscriber gate; a bar-first Chart view; transaction-level idempotency across overlapping imports and retries; the tagline "See where your money goes"; no OCR, budgets, investments, advice, bank feeds, or AI.
+Fixed decisions:
+- Single workspace currency: ZAR (no currency picker, no FX conversion).
+- P0 import formats: FNB CSV (bare or single-CSV ZIP), text-based Standard Bank six-column PDF, and generic CSV mapping with format disambiguation (delimiter, header row, date format, decimal separator, debit/credit columns, and sign-inversion confirmation).
+- Statement coverage period: every import requires confirming ZAR and confirming or entering the statement `start_date` and `end_date` (pre-filled from the PDF header period or the CSV's earliest and latest valid transaction dates). Coverage and gap warnings (`OVR-7`, `AC-OVR-6`) are evaluated against the union of committed, non-hidden statement `[start_date, end_date]` periods for the selected financial account(s).
+- Multiple ZAR financial accounts.
+- Balances ignored entirely; signed transaction amount is the sole monetary source.
+- One category and zero or more merchant tags per transaction.
+- Source transaction `date`, `description`, and `amount` are read-only both during pre-commit review and after commit; invalid rows in review must be marked to be skipped (no in-review editing of source fields).
+- Individual transactions are never deleted (hide and restore only). Committed statement imports may be hidden, restored (preserving individual transaction hide flags), or permanently deleted (removing that statement, its transactions, and its duplicate-protection identity records). No whole-customer account deletion or data export in the MVP.
+- Uploaded ZIP/CSV/PDF files are discarded after commit or abandoned review.
+- Gross directional `Money in`, `Money out`, and `Net` metric model with additive category breakdowns and overlapping merchant-tag views.
+- Occurrence-aware transaction-level idempotency across overlapping imports and retries; exact overlaps suppressed by default, near duplicates warned, statement repeats blocked with explicit override.
+- Existing verified-subscriber access gate; admin surface shows account state only and never exposes financial data.
+- Bar-first Chart view tab within Overview with accessible table alternatives.
+- Tagline: "See where your money goes".
+- Excluded from MVP: OCR for scanned PDFs, budgets, investments, financial advice, bank feeds, AI chat, split transactions, auto-categorisation, auto-applied merchant tags, combined tag filters, and whole-customer account deletion.
 
-Working defaults for the plan: file and page limits, refund and transfer representation, default period, default categories and tags, admin restriction, credit-card sign handling, concurrency, the landing-page rewrite, tag filter scope, bulk tag behaviour, and Chart view placement. Section 12.4 records a recommendation for each.
+Working defaults for the plan: file and page limits (10 MB, 20,000 rows, 200 PDF pages), refund and transfer representation, default period, default seeded categories and empty initial tags, admin restriction, credit-card sign handling, concurrency warnings on stale metadata edits, the landing-page rewrite, single-tag filter scope, additive/subtractive bulk tag behaviour, and Chart view placement as a tab within Overview. Section 12.4 records each default.
 
-The architect can start from Sections 6, 7, and 9 and the sample contracts in Sections 4.9 and 4.10, treat the Section 12.4 items as planning defaults, and return those defaults as plan assumptions for confirmation.
+## 13. Programme structure, documentation, and next step
 
-## 13. Documentation and next step
+This brief is stored at `docs/product-brief.md` as the authoritative product requirement and continuity brief for Argus.
 
-This brief is stored at `docs/product-brief.md`. It is the single product brief in the repository's existing documentation root and follows the existing Markdown conventions: one top-level heading, sentence-case sections, tables for comparisons, and repository-relative paths for evidence.
+### 13.1 Approved four-plan delivery programme
 
-The existing `docs/` files are operational. If the team later separates product artifacts from operational documentation, create a `docs/product/` directory and move this file once; do not maintain two competing copies.
+Architecture planning and implementation are divided into four sequential, repository-governed plans under `docs/plans/`:
 
-The architecture agent should treat Sections 6, 7, and 9 as the product contract and Sections 4.9 and 4.10 as the sample-derived format contracts. It should treat the remaining Section 12.4 items as planning defaults and return them as plan assumptions, and it should preserve the existing account, session, admin, billing, and visual foundations described in Section 4.
+1. **Plan 1 — Foundation, App Shell, and Financial Entities (`docs/plans/01-foundation-and-entities.md`)**
+   - **Scope:** Rewrite landing page and metadata with tagline *"See where your money goes"* and retire `/sample-page` (`MVP-18`); build the authenticated app shell and persistent navigation (`Overview`, `Transactions`, `Imports`, `Settings`), moving `AccountDetails` into `Settings` (`SET-3`); implement PostgreSQL migrations, customer-isolated backend endpoints, and Settings UI for ZAR Financial Accounts (`MVP-1`, `SET-1`), Categories with seeded defaults, system `Uncategorised`, and kinds (`MVP-7`, `CAT-1..7`, `SET-2`), and Merchant Tags (`MVP-22` entity/management foundation, `TAG-1`, `TAG-7`, `SET-2`).
+   - **Dependencies:** None (root foundation).
+2. **Plan 2 — Statement Import, Parsers, Review, and Idempotency (`docs/plans/02-statement-import.md`)**
+   - **Scope:** FNB CSV/ZIP parser (`MVP-2`, `IMP-14..15`), text-based Standard Bank six-column PDF parser (`MVP-20`, `MVP-21`, `IMP-16..21`), and generic CSV mapping with format disambiguation (`MVP-19`, `IMP-3..4`, `AC-IMP-3`); ZAR and statement `start_date`/`end_date` confirmation (`IMP-12`, `IMP-20`); read-only row validation and skip workflow (`IMP-5..6`, `AC-IMP-2`); exact, statement-level, within-file, and near-duplicate detection with occurrence-aware idempotency (`MVP-4`, `DUP-1..19`); merchant-tag suggestions in review (`IMP-22`); atomic commit, Import History, statement hide/restore (preserving individual transaction hide flags), and committed-import deletion (`MVP-3`, `MVP-24` statement scope, `IMP-7..9`, `AC-IMP-7..8`, `AC-DEL-1`).
+   - **Dependencies:** Requires Plan 1.
+3. **Plan 3 — Transaction Workspace, Bulk Classification, and Hide/Restore (`docs/plans/03-transactions-and-classification.md`)**
+   - **Scope:** Searchable, filterable, sortable, paginated Transaction List with visible count, hidden count, and filtered total (`MVP-5`, `TXN-1..3`, `TXN-7..9`, `TAG-5`); read-only Transaction Detail with category, multi-tag, tag suggestion confirmation, and hide/restore controls (`MVP-6`, `TXN-4`, `TAG-2..3`, `TAG-8`); page-level and filter-wide (`select all matching`) bulk category assignment, non-destructive bulk tag add/remove, and bulk hide/restore with stale-edit concurrency protection (`MVP-8`, `MVP-24` transaction scope, `TXN-5..6`, `TXN-10..12`, `TAG-4`, `AC-CAT-1..7`, `AC-TAG-1..8`, `AC-HIDE-1..5`).
+   - **Dependencies:** Requires Plans 1 and 2.
+4. **Plan 4 — Financial Overview, Bar-First Chart View, and Exploration (`docs/plans/04-overview-and-charts.md`)**
+   - **Scope:** Overview Summary tab (`MVP-9`, `MVP-11`, `OVR-1..13`, `AC-OVR-1..6`) with period presets/custom ranges, gross directional `Money in`, `Money out`, `Net`, `Needs categorisation`, additive category breakdowns, overlapping merchant-tag rankings, prior-period comparisons (`7.3`), statement-period coverage/gap warnings (`OVR-7`), and metric dictionary disclosure; Overview Chart tab (`MVP-23`, `CHT-1..8`, `AC-CHT-1..5`) with bar-first horizontal and grouped vertical charts and accessible table alternatives; drill-down from every visual plus Category Detail (`MVP-15`), Merchant-Tag Detail (`MVP-22`, `TAG-6`), and Period Comparison (`MVP-16`) views (`MVP-10`, `EXP-1..8`).
+   - **Dependencies:** Requires Plans 1, 2, and 3.
+
+**Programme completion condition:** All four plans are implemented and verified against the backend battery (`dotnet format`, `dotnet test`, `dotnet build -c Release`) and frontend battery (`npm run lint`, `npm run test`, `npm run build`, `npm run test:e2e`) with customer isolation and reconciliation invariants holding across all views.
+
+### 13.2 Instructions for Architect
+
+The architecture agent should treat Section 1.1 and Sections 6, 7, and 9 as the product contract, Sections 4.9 and 4.10 as the sample-derived format contracts, Section 12.3 and 12.4 as the confirmed decisions and planning defaults, and Section 13.1 as the delivery programme topology. Preserve the existing account, session, admin, billing, and visual foundations described in Section 4.
