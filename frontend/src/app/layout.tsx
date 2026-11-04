@@ -9,7 +9,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: PRODUCT_NAME,
   description:
-    "Explore researched SaaS opportunities for people who want to build but do not know what to build.",
+    "See where your money goes. Make sense of your money, see the patterns, and understand your financial behaviour with ZAR bank statement insights.",
 };
 
 // Runs before first paint so the stored theme is applied without a flash.

@@ -1,7 +1,11 @@
+using System.Net;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using argus.Server.Data;
 using argus.Server.Mail;
 
@@ -38,7 +42,7 @@ public static class TestEnvironment
         Set("RESEND_API_KEY", "test-placeholder-key-not-for-production");
         Set("RESEND_FROM", "local@example.test");
         Set("BILLING_WEBHOOK_SECRET", BillingSecret);
-        Set("LOG_LEVEL", "error");
+        Set("LOG_LEVEL", "info");
         Set("LOG_FORMAT", "json");
     }
 
@@ -127,9 +131,99 @@ public sealed class CapturingMailer : IMailer
     }
 }
 
+/// <summary>
+/// Captures every formatted log line so tests can assert that user-supplied
+/// entity names never reach application logs or audit events.
+/// </summary>
+public sealed class CapturingLoggerProvider : ILoggerProvider
+{
+    private readonly object _gate = new();
+    private readonly List<string> _entries = [];
+
+    public ILogger CreateLogger(string categoryName) => new CapturingLogger(this, categoryName);
+
+    public void Dispose()
+    {
+    }
+
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            _entries.Clear();
+        }
+    }
+
+    public bool Contains(string value)
+    {
+        lock (_gate)
+        {
+            return _entries.Any(entry => entry.Contains(value, StringComparison.Ordinal));
+        }
+    }
+
+    public IReadOnlyList<string> Snapshot()
+    {
+        lock (_gate)
+        {
+            return _entries.ToArray();
+        }
+    }
+
+    internal void Record(string category, LogLevel level, string message, Exception? exception)
+    {
+        lock (_gate)
+        {
+            _entries.Add(exception is null
+                ? $"{level} {category}: {message}"
+                : $"{level} {category}: {message} [{exception.GetType().Name}]");
+        }
+    }
+
+    private sealed class CapturingLogger(CapturingLoggerProvider provider, string category) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            provider.Record(category, logLevel, formatter(state, exception), exception);
+    }
+}
+
+/// <summary>
+/// The in-memory test server has no peer address, so finance rate limiting
+/// would never run. Give finance requests a loopback address (or the address
+/// named by <c>X-Test-Remote-Ip</c>) without changing account-endpoint behaviour.
+/// </summary>
+public sealed class TestRemoteIpStartupFilter : IStartupFilter
+{
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+    {
+        app.Use(async (context, nextMiddleware) =>
+        {
+            if (context.Request.Path.StartsWithSegments("/v1/finance"))
+            {
+                var header = context.Request.Headers["X-Test-Remote-Ip"].ToString();
+                context.Connection.RemoteIpAddress =
+                    IPAddress.TryParse(header, out var address) ? address : IPAddress.Loopback;
+            }
+            await nextMiddleware();
+        });
+        next(app);
+    };
+}
+
 public sealed class KitFactory : WebApplicationFactory<Program>
 {
     public CapturingMailer Mailer { get; } = new();
+
+    public CapturingLoggerProvider LogCapture { get; } = new();
 
     public KitFactory()
     {
@@ -142,6 +236,8 @@ public sealed class KitFactory : WebApplicationFactory<Program>
         {
             services.RemoveAll<IMailer>();
             services.AddSingleton<IMailer>(Mailer);
+            services.AddSingleton<ILoggerProvider>(LogCapture);
+            services.AddSingleton<IStartupFilter, TestRemoteIpStartupFilter>();
         });
     }
 

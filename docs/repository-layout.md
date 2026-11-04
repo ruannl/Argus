@@ -15,9 +15,9 @@ commands with the working directory inside the relevant tree.
 ├── backend/
 │   ├── Brand.cs              canonical brand/header/env constants
 │   ├── Configuration/        fail-closed prefixed configuration
-│   ├── Data/                 Npgsql connection, migrations, repositories
+│   ├── Data/                 Npgsql connection, migrations, Store, FinanceStore
 │   ├── Security/             argon2id, tokens, policy, rate limiter, HIBP
-│   ├── Http/                 error bodies, trust checks, account endpoints
+│   ├── Http/                 error bodies, trust checks, account + finance endpoints
 │   ├── Mail/                 Resend mailer
 │   ├── Billing/              HMAC webhook verification and event parsing
 │   ├── Seed.cs               idempotent dev-account seeding
@@ -28,8 +28,10 @@ commands with the working directory inside the relevant tree.
 │   ├── .env.example
 │   └── tests/argus.Server.Tests/   xunit isolation tests
 ├── frontend/
-│   ├── src/app/              App Router routes
-│   ├── src/lib/server/       server-only backend client
+│   ├── src/app/              App Router routes (landing, auth, workspace)
+│   ├── src/app/settings/     Accounts, Categories, Merchant tags, Profile
+│   ├── src/components/       app shell, account details, session clearing
+│   ├── src/lib/server/       server-only backend client and finance actions
 │   ├── src/lib/brand.ts      canonical brand constants
 │   ├── tests/                Vitest; tests/e2e is Playwright
 │   ├── package.json / package-lock.json
@@ -73,10 +75,34 @@ npm run test:e2e
 | POST | `/v1/password/reset/request` | Non-enumerating reset request |
 | POST | `/v1/password/reset` | Consumes a reset token and revokes sessions |
 | POST | `/v1/billing/webhook` | Provider HMAC-signed entitlement events |
+| GET | `/v1/finance/accounts` | List the customer's ZAR financial accounts |
+| POST | `/v1/finance/accounts` | Create a ZAR financial account |
+| PATCH | `/v1/finance/accounts/{id}` | Rename or update an account's institution |
+| POST | `/v1/finance/accounts/{id}/archive` | Archive an account (idempotent) |
+| POST | `/v1/finance/accounts/{id}/restore` | Restore an account (idempotent) |
+| GET | `/v1/finance/categories` | List categories; seeds defaults on first use |
+| POST | `/v1/finance/categories` | Create a custom category |
+| PATCH | `/v1/finance/categories/{id}` | Rename or change kind (confirmation required) |
+| POST | `/v1/finance/categories/{id}/archive` | Archive a category |
+| POST | `/v1/finance/categories/{id}/restore` | Restore a category |
+| DELETE | `/v1/finance/categories/{id}` | Delete a category and reassign to Uncategorised |
+| GET | `/v1/finance/merchant-tags` | List merchant tags |
+| POST | `/v1/finance/merchant-tags` | Create a merchant tag |
+| PATCH | `/v1/finance/merchant-tags/{id}` | Rename a merchant tag |
+| POST | `/v1/finance/merchant-tags/{id}/archive` | Archive a merchant tag |
+| POST | `/v1/finance/merchant-tags/{id}/restore` | Restore a merchant tag |
+| DELETE | `/v1/finance/merchant-tags/{id}` | Delete a tag and remove its assignments |
 
 Account routes require the trusted-frontend application-secret header and
 independently validate the acting user's session. Error bodies are
 `{"error":"<kind>"}`; origin rejection and webhook failures are bodyless.
+
+Finance routes apply the same caller proof plus a verified active subscriber
+session, scope every SQL statement by `customer_id`, and return the same
+`404 {"error":"not_found"}` for unknown and foreign-owned ids. User-defined
+account, institution, category, and merchant-tag names are never written to
+logs, audit events, or URL path segments. CORS allows `GET`, `POST`, `PATCH`,
+and `DELETE` for the workspace.
 
 ## CI
 

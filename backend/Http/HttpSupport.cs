@@ -26,6 +26,18 @@ public static class Errors
     public static IResult Internal() =>
         Results.Json(new { error = "internal_server_error" }, statusCode: 500);
 
+    public static IResult NotFound() =>
+        Results.Json(new { error = "not_found" }, statusCode: 404);
+
+    public static IResult DuplicateName() =>
+        Results.Json(new { error = "duplicate_name" }, statusCode: 409);
+
+    public static IResult SystemCategoryImmutable() =>
+        Results.Json(new { error = "system_category_immutable" }, statusCode: 400);
+
+    public static IResult KindChangeConfirmationRequired() =>
+        Results.Json(new { error = "kind_change_confirmation_required" }, statusCode: 400);
+
     public static IResult OriginRejected() => Results.StatusCode(403);
 }
 
@@ -85,6 +97,16 @@ public sealed record PasswordResetConsumeRequest(string? Token, string? Password
 
 public sealed record LoginResponse(string Token, string ExpiresAt);
 
+public sealed record CreateAccountRequest(string? DisplayName, string? Institution);
+
+public sealed record CreateCategoryRequest(string? DisplayName, string? Kind);
+
+public sealed record UpdateCategoryRequest(string? DisplayName, string? Kind, bool? ConfirmKindChange);
+
+public sealed record CreateMerchantTagRequest(string? DisplayName);
+
+public sealed record UpdateMerchantTagRequest(string? DisplayName);
+
 public static class JsonBody
 {
     private static readonly JsonSerializerOptions Options = new()
@@ -95,6 +117,90 @@ public static class JsonBody
     };
 
     public readonly record struct ParseResult<T>(T? Value, bool Parsed, bool UnknownField);
+
+    /// <summary>
+    /// Account PATCH needs to tell "institution omitted" from "institution
+    /// explicitly null", which a nullable DTO cannot express. Only
+    /// <c>display_name</c> (required string) and <c>institution</c> (optional
+    /// string or null) are accepted; any other property is unknown.
+    /// </summary>
+    public readonly record struct AccountPatchParseResult(
+        bool Parsed,
+        bool UnknownField,
+        string? DisplayName,
+        bool InstitutionProvided,
+        string? Institution);
+
+    public static async Task<AccountPatchParseResult> ReadAccountPatchAsync(
+        HttpRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        string body;
+        using (var reader = new StreamReader(request.Body, Encoding.UTF8))
+        {
+            body = await reader.ReadToEndAsync(cancellationToken);
+        }
+
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return new AccountPatchParseResult(false, false, null, false, null);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return new AccountPatchParseResult(false, false, null, false, null);
+            }
+
+            string? displayName = null;
+            var institutionProvided = false;
+            string? institution = null;
+
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                switch (property.Name)
+                {
+                    case "display_name":
+                        if (property.Value.ValueKind != JsonValueKind.String)
+                        {
+                            return new AccountPatchParseResult(false, false, null, false, null);
+                        }
+                        displayName = property.Value.GetString();
+                        break;
+                    case "institution":
+                        institutionProvided = true;
+                        if (property.Value.ValueKind == JsonValueKind.Null)
+                        {
+                            institution = null;
+                        }
+                        else if (property.Value.ValueKind == JsonValueKind.String)
+                        {
+                            institution = property.Value.GetString();
+                        }
+                        else
+                        {
+                            return new AccountPatchParseResult(false, false, null, false, null);
+                        }
+                        break;
+                    default:
+                        return new AccountPatchParseResult(false, true, null, false, null);
+                }
+            }
+
+            if (displayName is null)
+            {
+                return new AccountPatchParseResult(false, false, null, false, null);
+            }
+
+            return new AccountPatchParseResult(true, false, displayName, institutionProvided, institution);
+        }
+        catch (JsonException)
+        {
+            return new AccountPatchParseResult(false, false, null, false, null);
+        }
+    }
 
     public static async Task<ParseResult<T>> ReadAsync<T>(
         HttpRequest request,

@@ -4,14 +4,31 @@ vi.mock("server-only", () => ({}));
 
 import { PRODUCT_TOKEN } from "@/lib/brand";
 import {
+  archiveCategory,
+  archiveFinancialAccount,
+  archiveMerchantTag,
+  createCategory,
+  createFinancialAccount,
+  createMerchantTag,
+  deleteCategory,
+  deleteMerchantTag,
   getBackendHealth,
   getCurrentAccount,
+  listCategories,
+  listFinancialAccounts,
+  listMerchantTags,
   loginAccount,
   logoutSession,
   requestPasswordReset,
   registerAccount,
   resendVerification,
   resetPassword,
+  restoreCategory,
+  restoreFinancialAccount,
+  restoreMerchantTag,
+  updateCategory,
+  updateFinancialAccount,
+  updateMerchantTag,
   verifyEmail,
 } from "@/lib/server/backend-client";
 
@@ -346,5 +363,386 @@ describe("server backend client", () => {
 
     await expect(verifyEmail("a".repeat(64)))
       .resolves.toEqual({ ok: false, kind: "unavailable" });
+  });
+});
+
+describe("server finance client", () => {
+  function postNoBodyInit() {
+    return {
+      method: "POST",
+      headers: {
+        [REQUEST_ID_HEADER]: expect.any(String),
+        [APPLICATION_SECRET_HEADER]: "application-secret",
+        [SESSION_HEADER]: "opaque-session-token",
+        [FRONTEND_ORIGIN_HEADER]: "http://frontend.test",
+      },
+      cache: "no-store",
+    };
+  }
+
+  const account = {
+    id: "00000000-0000-0000-0000-0000000000aa",
+    display_name: "Cheque",
+    institution: "FNB",
+    currency: "ZAR",
+    is_archived: false,
+    transaction_count: 0,
+    created_at: "2026-01-01T00:00:00.0000000Z",
+    updated_at: "2026-01-01T00:00:00.0000000Z",
+  };
+
+  const category = {
+    id: "00000000-0000-0000-0000-0000000000bb",
+    display_name: "Groceries",
+    kind: "Expense",
+    is_system: false,
+    is_default: true,
+    is_archived: false,
+    transaction_count: 0,
+    created_at: "2026-01-01T00:00:00.0000000Z",
+    updated_at: "2026-01-01T00:00:00.0000000Z",
+  };
+
+  const tag = {
+    id: "00000000-0000-0000-0000-0000000000cc",
+    display_name: "Woolworths",
+    is_archived: false,
+    transaction_count: 0,
+    created_at: "2026-01-01T00:00:00.0000000Z",
+    updated_at: "2026-01-01T00:00:00.0000000Z",
+  };
+
+  function getInit() {
+    return {
+      method: "GET",
+      headers: {
+        [REQUEST_ID_HEADER]: expect.any(String),
+        [APPLICATION_SECRET_HEADER]: "application-secret",
+        [SESSION_HEADER]: "opaque-session-token",
+        [FRONTEND_ORIGIN_HEADER]: "http://frontend.test",
+      },
+      cache: "no-store",
+    };
+  }
+
+  function writeInit(method: string, body: unknown) {
+    const init: Record<string, unknown> = {
+      method,
+      headers: {
+        [REQUEST_ID_HEADER]: expect.any(String),
+        [APPLICATION_SECRET_HEADER]: "application-secret",
+        [SESSION_HEADER]: "opaque-session-token",
+        [FRONTEND_ORIGIN_HEADER]: "http://frontend.test",
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+    };
+    if (body !== undefined) {
+      init.body = JSON.stringify(body);
+    }
+    return init;
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("ARGUS_BACKEND_URL", "http://backend.test/");
+    vi.stubEnv("ARGUS_API_SECRET", "application-secret");
+    vi.stubEnv("ARGUS_FRONTEND_URL", "http://frontend.test");
+    fetchMock.mockReset();
+    globalThis.fetch = fetchMock;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.unstubAllEnvs();
+  });
+
+  it("lists financial accounts with the session headers and no body", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ accounts: [account] }), { status: 200 }),
+    );
+
+    await expect(listFinancialAccounts("opaque-session-token")).resolves.toEqual({
+      ok: true,
+      value: { accounts: [account] },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://backend.test/v1/finance/accounts",
+      getInit(),
+    );
+  });
+
+  it("creates an account with an institution and omits it when absent", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(account), { status: 201 }));
+
+    await createFinancialAccount("opaque-session-token", {
+      display_name: "Cheque",
+      institution: "FNB",
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://backend.test/v1/finance/accounts",
+      writeInit("POST", { display_name: "Cheque", institution: "FNB" }),
+    );
+
+    await createFinancialAccount("opaque-session-token", { display_name: "Cheque" });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://backend.test/v1/finance/accounts",
+      writeInit("POST", { display_name: "Cheque" }),
+    );
+  });
+
+  it("preserves institution on a rename-only update and clears it when null", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(account), { status: 200 }));
+
+    await updateFinancialAccount("opaque-session-token", account.id, {
+      display_name: "Main cheque",
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `http://backend.test/v1/finance/accounts/${account.id}`,
+      writeInit("PATCH", { display_name: "Main cheque" }),
+    );
+
+    await updateFinancialAccount("opaque-session-token", account.id, {
+      display_name: "Main cheque",
+      institution: null,
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `http://backend.test/v1/finance/accounts/${account.id}`,
+      writeInit("PATCH", { display_name: "Main cheque", institution: null }),
+    );
+  });
+
+  it("archives and restores accounts", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(account), { status: 200 }));
+
+    await archiveFinancialAccount("opaque-session-token", account.id);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `http://backend.test/v1/finance/accounts/${account.id}/archive`,
+      postNoBodyInit(),
+    );
+
+    await restoreFinancialAccount("opaque-session-token", account.id);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `http://backend.test/v1/finance/accounts/${account.id}/restore`,
+      postNoBodyInit(),
+    );
+  });
+
+  it("creates and updates categories with an explicit kind confirmation", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(category), { status: 201 }));
+
+    await createCategory("opaque-session-token", {
+      display_name: "Groceries",
+      kind: "Expense",
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://backend.test/v1/finance/categories",
+      writeInit("POST", { display_name: "Groceries", kind: "Expense" }),
+    );
+
+    await updateCategory("opaque-session-token", category.id, {
+      display_name: "Groceries",
+      kind: "Income",
+      confirm_kind_change: true,
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `http://backend.test/v1/finance/categories/${category.id}`,
+      writeInit("PATCH", {
+        display_name: "Groceries",
+        kind: "Income",
+        confirm_kind_change: true,
+      }),
+    );
+  });
+
+  it("lists, archives, restores, and deletes categories", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ categories: [category] }), { status: 200 }),
+    );
+    await listCategories("opaque-session-token");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://backend.test/v1/finance/categories",
+      getInit(),
+    );
+
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(category), { status: 200 }));
+    await archiveCategory("opaque-session-token", category.id);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `http://backend.test/v1/finance/categories/${category.id}/archive`,
+      postNoBodyInit(),
+    );
+
+    await restoreCategory("opaque-session-token", category.id);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `http://backend.test/v1/finance/categories/${category.id}/restore`,
+      postNoBodyInit(),
+    );
+
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          deleted: true,
+          reassigned_transaction_count: 2,
+          uncategorised_category_id: "00000000-0000-0000-0000-0000000000dd",
+        }),
+        { status: 200 },
+      ),
+    );
+    await expect(deleteCategory("opaque-session-token", category.id)).resolves.toEqual({
+      ok: true,
+      value: {
+        deleted: true,
+        reassigned_transaction_count: 2,
+        uncategorised_category_id: "00000000-0000-0000-0000-0000000000dd",
+      },
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `http://backend.test/v1/finance/categories/${category.id}`,
+      {
+        method: "DELETE",
+        headers: {
+          [REQUEST_ID_HEADER]: expect.any(String),
+          [APPLICATION_SECRET_HEADER]: "application-secret",
+          [SESSION_HEADER]: "opaque-session-token",
+          [FRONTEND_ORIGIN_HEADER]: "http://frontend.test",
+        },
+        cache: "no-store",
+      },
+    );
+  });
+
+  it("lists, creates, updates, archives, restores, and deletes merchant tags", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ merchant_tags: [tag] }), { status: 200 }),
+    );
+    await listMerchantTags("opaque-session-token");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://backend.test/v1/finance/merchant-tags",
+      getInit(),
+    );
+
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(tag), { status: 201 }));
+    await createMerchantTag("opaque-session-token", "Woolworths");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://backend.test/v1/finance/merchant-tags",
+      writeInit("POST", { display_name: "Woolworths" }),
+    );
+
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(tag), { status: 200 }));
+    await updateMerchantTag("opaque-session-token", tag.id, "Woolworths");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `http://backend.test/v1/finance/merchant-tags/${tag.id}`,
+      writeInit("PATCH", { display_name: "Woolworths" }),
+    );
+
+    await archiveMerchantTag("opaque-session-token", tag.id);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `http://backend.test/v1/finance/merchant-tags/${tag.id}/archive`,
+      postNoBodyInit(),
+    );
+
+    await restoreMerchantTag("opaque-session-token", tag.id);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `http://backend.test/v1/finance/merchant-tags/${tag.id}/restore`,
+      postNoBodyInit(),
+    );
+
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ deleted: true, unassigned_transaction_count: 3 }), {
+        status: 200,
+      }),
+    );
+    await expect(deleteMerchantTag("opaque-session-token", tag.id)).resolves.toEqual({
+      ok: true,
+      value: { deleted: true, unassigned_transaction_count: 3 },
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `http://backend.test/v1/finance/merchant-tags/${tag.id}`,
+      {
+        method: "DELETE",
+        headers: {
+          [REQUEST_ID_HEADER]: expect.any(String),
+          [APPLICATION_SECRET_HEADER]: "application-secret",
+          [SESSION_HEADER]: "opaque-session-token",
+          [FRONTEND_ORIGIN_HEADER]: "http://frontend.test",
+        },
+        cache: "no-store",
+      },
+    );
+  });
+
+  it("classifies finance failures by backend error kind", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "duplicate_name" }), { status: 409 }),
+    );
+    await expect(createMerchantTag("opaque-session-token", "Woolworths")).resolves.toEqual({
+      ok: false,
+      kind: "duplicate_name",
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "system_category_immutable" }), { status: 400 }),
+    );
+    await expect(
+      createCategory("opaque-session-token", { display_name: "X", kind: "Expense" }),
+    ).resolves.toEqual({ ok: false, kind: "system_category_immutable" });
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "kind_change_confirmation_required" }), {
+        status: 400,
+      }),
+    );
+    await expect(
+      updateCategory("opaque-session-token", category.id, {
+        display_name: "Groceries",
+        kind: "Income",
+      }),
+    ).resolves.toEqual({ ok: false, kind: "kind_change_confirmation_required" });
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "invalid_request" }), { status: 400 }),
+    );
+    await expect(
+      createCategory("opaque-session-token", { display_name: "", kind: "Expense" }),
+    ).resolves.toEqual({ ok: false, kind: "invalid_request" });
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "not_found" }), { status: 404 }),
+    );
+    await expect(deleteCategory("opaque-session-token", category.id)).resolves.toEqual({
+      ok: false,
+      kind: "not_found",
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "rate_limited" }), { status: 429 }),
+    );
+    await expect(listFinancialAccounts("opaque-session-token")).resolves.toEqual({
+      ok: false,
+      kind: "rate_limited",
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }),
+    );
+    await expect(listFinancialAccounts("opaque-session-token")).resolves.toEqual({
+      ok: false,
+      kind: "unavailable",
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "sensitive backend detail" }), { status: 500 }),
+    );
+    await expect(listCategories("opaque-session-token")).resolves.toEqual({
+      ok: false,
+      kind: "unavailable",
+    });
+  });
+
+  it("returns unavailable without fetching when the session token is empty", async () => {
+    await expect(listFinancialAccounts("")).resolves.toEqual({
+      ok: false,
+      kind: "unavailable",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

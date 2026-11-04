@@ -24,9 +24,12 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         await using var connection = await db.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText =
-            "TRUNCATE customers, sessions, email_verification_tokens, password_reset_tokens CASCADE";
+            "TRUNCATE transaction_merchant_tags, transactions, statement_imports, merchant_tags, " +
+            "categories, financial_accounts, customers, sessions, email_verification_tokens, " +
+            "password_reset_tokens CASCADE";
         await command.ExecuteNonQueryAsync();
         Factory.Mailer.Clear();
+        Factory.LogCapture.Clear();
     }
 
     protected static string Json(object value) => JsonSerializer.Serialize(value);
@@ -53,6 +56,32 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
         };
+        AddHeaders(request, secret, session, origin);
+        return request;
+    }
+
+    protected static HttpRequestMessage Patch(
+        string path,
+        string json,
+        string? secret = TestEnvironment.ApiSecret,
+        string? session = null,
+        string? origin = null)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Patch, path)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+        AddHeaders(request, secret, session, origin);
+        return request;
+    }
+
+    protected static HttpRequestMessage Delete(
+        string path,
+        string? secret = TestEnvironment.ApiSecret,
+        string? session = null,
+        string? origin = null)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Delete, path);
         AddHeaders(request, secret, session, origin);
         return request;
     }

@@ -43,6 +43,80 @@ export type LoginResponse = {
   expires_at: string;
 };
 
+export type FinancialAccount = {
+  id: string;
+  display_name: string;
+  institution: string | null;
+  currency: string;
+  is_archived: boolean;
+  transaction_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CategoryKind = "Expense" | "Income" | "Transfer" | "Excluded" | "Uncategorised";
+
+export type UserCategoryKind = Exclude<CategoryKind, "Uncategorised">;
+
+export type Category = {
+  id: string;
+  display_name: string;
+  kind: CategoryKind;
+  is_system: boolean;
+  is_default: boolean;
+  is_archived: boolean;
+  transaction_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MerchantTag = {
+  id: string;
+  display_name: string;
+  is_archived: boolean;
+  transaction_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DeleteCategoryResult = {
+  deleted: boolean;
+  reassigned_transaction_count: number;
+  uncategorised_category_id: string;
+};
+
+export type DeleteMerchantTagResult = {
+  deleted: boolean;
+  unassigned_transaction_count: number;
+};
+
+export type FinanceRequestErrorKind =
+  | "invalid_request"
+  | "duplicate_name"
+  | "system_category_immutable"
+  | "kind_change_confirmation_required"
+  | "not_found"
+  | "rate_limited"
+  | "unavailable";
+
+export type FinanceRequestResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; kind: FinanceRequestErrorKind };
+
+export type FinancialAccountInput = {
+  display_name: string;
+  institution?: string | null;
+};
+
+export type CategoryInput = {
+  display_name: string;
+  kind: UserCategoryKind;
+};
+
+export type CategoryUpdateInput = CategoryInput & {
+  confirm_kind_change?: boolean;
+};
+
 export type AccountRequestErrorKind =
   | "invalid_request"
   | "invalid_token"
@@ -232,4 +306,281 @@ export async function logoutSession(sessionToken: string): Promise<AccountReques
   } catch {
     return { ok: false, kind: "unavailable" };
   }
+}
+
+// --- Finance workspace -----------------------------------------------------
+
+function financeHeaders(sessionToken: string, hasBody: boolean): Record<string, string> {
+  const headers: Record<string, string> = {
+    [REQUEST_ID_HEADER]: newRequestId(),
+    [APPLICATION_SECRET_HEADER]: requiredEnvironment("ARGUS_API_SECRET"),
+    [SESSION_HEADER]: sessionToken,
+    [FRONTEND_ORIGIN_HEADER]: requiredEnvironment("ARGUS_FRONTEND_URL"),
+  };
+  if (hasBody) {
+    headers["Content-Type"] = "application/json";
+  }
+  return headers;
+}
+
+async function classifyFinanceFailure(response: Response): Promise<FinanceRequestErrorKind> {
+  if (response.status === 429) {
+    return "rate_limited";
+  }
+  if (response.status === 404) {
+    return "not_found";
+  }
+
+  if (response.status !== 400 && response.status !== 409) {
+    return "unavailable";
+  }
+
+  try {
+    const body: unknown = await response.json();
+    if (typeof body === "object" && body !== null && "error" in body) {
+      const error = (body as { error?: unknown }).error;
+      if (response.status === 409 && error === "duplicate_name") {
+        return "duplicate_name";
+      }
+      if (response.status === 400) {
+        if (error === "invalid_request") {
+          return "invalid_request";
+        }
+        if (error === "system_category_immutable") {
+          return "system_category_immutable";
+        }
+        if (error === "kind_change_confirmation_required") {
+          return "kind_change_confirmation_required";
+        }
+      }
+    }
+  } catch {
+    // An unparseable failure body is indistinguishable from an unavailable backend.
+  }
+
+  return "unavailable";
+}
+
+async function financeRequest<T>(
+  sessionToken: string,
+  method: "GET" | "POST" | "PATCH" | "DELETE",
+  path: string,
+  body?: Record<string, unknown>,
+): Promise<FinanceRequestResult<T>> {
+  if (!sessionToken) {
+    return { ok: false, kind: "unavailable" };
+  }
+
+  try {
+    const init: RequestInit = {
+      method,
+      headers: financeHeaders(sessionToken, body !== undefined),
+      cache: "no-store",
+    };
+    if (body !== undefined) {
+      init.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(`${backendUrl()}${path}`, init);
+    if (!response.ok) {
+      return { ok: false, kind: await classifyFinanceFailure(response) };
+    }
+    return { ok: true, value: (await response.json()) as T };
+  } catch {
+    return { ok: false, kind: "unavailable" };
+  }
+}
+
+export async function listFinancialAccounts(
+  sessionToken: string,
+): Promise<FinanceRequestResult<{ accounts: FinancialAccount[] }>> {
+  return financeRequest<{ accounts: FinancialAccount[] }>(
+    sessionToken,
+    "GET",
+    "/v1/finance/accounts",
+  );
+}
+
+export async function createFinancialAccount(
+  sessionToken: string,
+  input: FinancialAccountInput,
+): Promise<FinanceRequestResult<FinancialAccount>> {
+  const body: Record<string, unknown> = { display_name: input.display_name };
+  if ("institution" in input) {
+    body.institution = input.institution;
+  }
+  return financeRequest<FinancialAccount>(sessionToken, "POST", "/v1/finance/accounts", body);
+}
+
+export async function updateFinancialAccount(
+  sessionToken: string,
+  id: string,
+  input: FinancialAccountInput,
+): Promise<FinanceRequestResult<FinancialAccount>> {
+  const body: Record<string, unknown> = { display_name: input.display_name };
+  if ("institution" in input) {
+    body.institution = input.institution;
+  }
+  return financeRequest<FinancialAccount>(
+    sessionToken,
+    "PATCH",
+    `/v1/finance/accounts/${encodeURIComponent(id)}`,
+    body,
+  );
+}
+
+export async function archiveFinancialAccount(
+  sessionToken: string,
+  id: string,
+): Promise<FinanceRequestResult<FinancialAccount>> {
+  return financeRequest<FinancialAccount>(
+    sessionToken,
+    "POST",
+    `/v1/finance/accounts/${encodeURIComponent(id)}/archive`,
+  );
+}
+
+export async function restoreFinancialAccount(
+  sessionToken: string,
+  id: string,
+): Promise<FinanceRequestResult<FinancialAccount>> {
+  return financeRequest<FinancialAccount>(
+    sessionToken,
+    "POST",
+    `/v1/finance/accounts/${encodeURIComponent(id)}/restore`,
+  );
+}
+
+export async function listCategories(
+  sessionToken: string,
+): Promise<FinanceRequestResult<{ categories: Category[] }>> {
+  return financeRequest<{ categories: Category[] }>(sessionToken, "GET", "/v1/finance/categories");
+}
+
+export async function createCategory(
+  sessionToken: string,
+  input: CategoryInput,
+): Promise<FinanceRequestResult<Category>> {
+  return financeRequest<Category>(sessionToken, "POST", "/v1/finance/categories", {
+    display_name: input.display_name,
+    kind: input.kind,
+  });
+}
+
+export async function updateCategory(
+  sessionToken: string,
+  id: string,
+  input: CategoryUpdateInput,
+): Promise<FinanceRequestResult<Category>> {
+  const body: Record<string, unknown> = {
+    display_name: input.display_name,
+    kind: input.kind,
+  };
+  if (input.confirm_kind_change !== undefined) {
+    body.confirm_kind_change = input.confirm_kind_change;
+  }
+  return financeRequest<Category>(
+    sessionToken,
+    "PATCH",
+    `/v1/finance/categories/${encodeURIComponent(id)}`,
+    body,
+  );
+}
+
+export async function archiveCategory(
+  sessionToken: string,
+  id: string,
+): Promise<FinanceRequestResult<Category>> {
+  return financeRequest<Category>(
+    sessionToken,
+    "POST",
+    `/v1/finance/categories/${encodeURIComponent(id)}/archive`,
+  );
+}
+
+export async function restoreCategory(
+  sessionToken: string,
+  id: string,
+): Promise<FinanceRequestResult<Category>> {
+  return financeRequest<Category>(
+    sessionToken,
+    "POST",
+    `/v1/finance/categories/${encodeURIComponent(id)}/restore`,
+  );
+}
+
+export async function deleteCategory(
+  sessionToken: string,
+  id: string,
+): Promise<FinanceRequestResult<DeleteCategoryResult>> {
+  return financeRequest<DeleteCategoryResult>(
+    sessionToken,
+    "DELETE",
+    `/v1/finance/categories/${encodeURIComponent(id)}`,
+  );
+}
+
+export async function listMerchantTags(
+  sessionToken: string,
+): Promise<FinanceRequestResult<{ merchant_tags: MerchantTag[] }>> {
+  return financeRequest<{ merchant_tags: MerchantTag[] }>(
+    sessionToken,
+    "GET",
+    "/v1/finance/merchant-tags",
+  );
+}
+
+export async function createMerchantTag(
+  sessionToken: string,
+  displayName: string,
+): Promise<FinanceRequestResult<MerchantTag>> {
+  return financeRequest<MerchantTag>(sessionToken, "POST", "/v1/finance/merchant-tags", {
+    display_name: displayName,
+  });
+}
+
+export async function updateMerchantTag(
+  sessionToken: string,
+  id: string,
+  displayName: string,
+): Promise<FinanceRequestResult<MerchantTag>> {
+  return financeRequest<MerchantTag>(
+    sessionToken,
+    "PATCH",
+    `/v1/finance/merchant-tags/${encodeURIComponent(id)}`,
+    { display_name: displayName },
+  );
+}
+
+export async function archiveMerchantTag(
+  sessionToken: string,
+  id: string,
+): Promise<FinanceRequestResult<MerchantTag>> {
+  return financeRequest<MerchantTag>(
+    sessionToken,
+    "POST",
+    `/v1/finance/merchant-tags/${encodeURIComponent(id)}/archive`,
+  );
+}
+
+export async function restoreMerchantTag(
+  sessionToken: string,
+  id: string,
+): Promise<FinanceRequestResult<MerchantTag>> {
+  return financeRequest<MerchantTag>(
+    sessionToken,
+    "POST",
+    `/v1/finance/merchant-tags/${encodeURIComponent(id)}/restore`,
+  );
+}
+
+export async function deleteMerchantTag(
+  sessionToken: string,
+  id: string,
+): Promise<FinanceRequestResult<DeleteMerchantTagResult>> {
+  return financeRequest<DeleteMerchantTagResult>(
+    sessionToken,
+    "DELETE",
+    `/v1/finance/merchant-tags/${encodeURIComponent(id)}`,
+  );
 }

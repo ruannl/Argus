@@ -7,9 +7,8 @@ import {
   FEATURE_HIGHLIGHTS,
   FORBIDDEN_UI_PHRASES,
   HOW_IT_WORKS_STEPS,
-  ILLUSTRATIVE_SAMPLE_LABEL,
-  SAMPLE_PAGE_CONTENT,
   PRIMARY_CTA_LABEL,
+  PRODUCT_TAGLINE,
   STATUS_EXAMPLE,
 } from "@/lib/landing-content";
 
@@ -32,14 +31,13 @@ test("security headers are present on every page response", async ({ page }) => 
     .toContain("max-age=63072000");
 });
 
-test("landing page presents the product story and primary action", async ({
-  page,
-}) => {
+test("landing page presents the Argus finance story and tagline", async ({ page }) => {
   await page.goto("/");
 
   await expect(
     page.getByRole("heading", { level: 1, name: PRODUCT_NAME }),
   ).toBeVisible();
+  await expect(page.getByText(PRODUCT_TAGLINE, { exact: true })).toBeVisible();
   await expect(page.getByText(AUDIENCE_OUTCOME_LEAD)).toBeVisible();
   await expect(page.getByText(AUDIENCE_OUTCOME_DETAIL)).toBeVisible();
 
@@ -50,13 +48,18 @@ test("landing page presents the product story and primary action", async ({
   }
 
   for (const step of HOW_IT_WORKS_STEPS) {
-    await expect(page.getByText(step)).toBeVisible();
+    await expect(page.getByText(step, { exact: true })).toBeVisible();
   }
 
   await expect(page.getByText(STATUS_EXAMPLE)).toBeVisible();
   const cta = page.getByRole("link", { name: PRIMARY_CTA_LABEL });
-  await expect(cta).toHaveAttribute("href", "/sample-page");
+  await expect(cta).toHaveAttribute("href", "/register");
   await expect(cta).toBeVisible();
+
+  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+    "content",
+    /See where your money goes/,
+  );
 });
 
 test("the landing header links to login and register", async ({ page }) => {
@@ -74,31 +77,21 @@ test("the landing header links to login and register", async ({ page }) => {
   await expect(page).toHaveURL(/\/login$/);
 });
 
-test("the primary action opens the sample page", async ({ page }) => {
+test("the primary action opens the registration page", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("link", { name: PRIMARY_CTA_LABEL }).click();
 
-  await expect(page).toHaveURL(/\/sample-page$/);
+  await expect(page).toHaveURL(/\/register$/);
   await expect(
-    page.getByRole("heading", {
-      level: 1,
-      name: SAMPLE_PAGE_CONTENT.title,
-    }),
+    page.getByRole("heading", { level: 1, name: "Create an account" }),
   ).toBeVisible();
 });
 
-test("the sample page works when loaded directly", async ({ page }) => {
-  await page.goto("/sample-page");
+test("the retired sample page returns 404", async ({ page }) => {
+  const response = await page.goto("/sample-page");
 
-  await expect(page.getByText(ILLUSTRATIVE_SAMPLE_LABEL)).toBeVisible();
-  for (const section of SAMPLE_PAGE_CONTENT.sections) {
-    await expect(
-      page.getByRole("heading", { level: 2, name: section.heading }),
-    ).toBeVisible();
-  }
-  await expect(
-    page.getByRole("link", { name: `Back to ${PRODUCT_NAME}` }),
-  ).toHaveAttribute("href", "/");
+  expect(response?.status()).toBe(404);
+  await expect(page.locator("body")).not.toContainText("A sample content page");
 });
 
 test("the login page shows email, password, and submit controls", async ({ page }) => {
@@ -142,17 +135,12 @@ test("reset with a well-formed token renders the password form without a backend
   await expect(page.locator("body")).not.toContainText(token);
 });
 
-test("an unauthenticated home request ends on the login page", async ({ page }) => {
-  await page.goto("/home");
-
-  await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();
-});
-
-test("an unauthenticated admin request ends on the login page", async ({ page }) => {
-  await page.goto("/admin");
-
-  await expect(page).toHaveURL(/\/login$/);
+test("unauthenticated workspace routes end on the login page", async ({ page }) => {
+  for (const route of ["/home", "/transactions", "/imports", "/settings", "/admin"]) {
+    await page.goto(route);
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();
+  }
 });
 
 test("the register page shows the customer form", async ({ page }) => {
@@ -179,16 +167,12 @@ test("verify with a well-formed token shows confirmation without a backend", asy
   await expect(page.getByRole("button", { name: "Verify email" })).toBeVisible();
 });
 
-test("forbidden phrases are absent from both rendered pages", async ({
-  page,
-}) => {
-  for (const route of ["/", "/sample-page"]) {
-    await page.goto(route);
-    const renderedText = await page.locator("body").innerText();
+test("forbidden phrases are absent from the landing page", async ({ page }) => {
+  await page.goto("/");
+  const renderedText = await page.locator("body").innerText();
 
-    for (const phrase of FORBIDDEN_UI_PHRASES) {
-      expect(renderedText).not.toContain(phrase);
-    }
+  for (const phrase of FORBIDDEN_UI_PHRASES) {
+    expect(renderedText).not.toContain(phrase);
   }
 });
 
@@ -218,7 +202,7 @@ test("keyboard focus and Enter activate the CTA at 1280px", async ({ page }) => 
   await expect(cta).toBeFocused();
   await page.keyboard.press("Enter");
 
-  await expect(page).toHaveURL(/\/sample-page$/);
+  await expect(page).toHaveURL(/\/register$/);
 });
 
 test("the theme defaults to dark and the toggle persists light", async ({ page }) => {

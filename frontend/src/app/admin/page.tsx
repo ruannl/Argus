@@ -5,7 +5,7 @@ import { getCurrentAccount } from "@/lib/server/backend-client";
 import type { CurrentAccount } from "@/lib/server/backend-client";
 
 import AccountDetails from "@/components/account-details";
-import ClearSession from "../home/clear-session";
+import ClearSession from "@/components/clear-session";
 
 export const dynamic = "force-dynamic";
 

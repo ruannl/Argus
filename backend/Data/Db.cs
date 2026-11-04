@@ -209,5 +209,128 @@ public static class Migrations
                 ADD COLUMN failed_login_count INT NOT NULL DEFAULT 0,
                 ADD COLUMN locked_until TIMESTAMPTZ NULL;
             """),
+        ("0005_finance_foundation", """
+            ALTER TABLE customers
+                ADD COLUMN categories_seeded_at TIMESTAMPTZ NULL;
+
+            CREATE TABLE financial_accounts (
+                id UUID PRIMARY KEY,
+                customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                display_name TEXT NOT NULL,
+                institution TEXT NULL,
+                currency TEXT NOT NULL DEFAULT 'ZAR' CHECK (currency = 'ZAR'),
+                is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+                archived_at TIMESTAMPTZ NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                UNIQUE (customer_id, id)
+            );
+
+            CREATE INDEX financial_accounts_customer_id_idx ON financial_accounts(customer_id);
+
+            CREATE TABLE categories (
+                id UUID PRIMARY KEY,
+                customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                display_name TEXT NOT NULL,
+                normalized_name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                is_system BOOLEAN NOT NULL DEFAULT FALSE,
+                is_default BOOLEAN NOT NULL DEFAULT FALSE,
+                is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+                archived_at TIMESTAMPTZ NULL,
+                sort_order INT NOT NULL DEFAULT 100,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                UNIQUE (customer_id, id),
+                UNIQUE (customer_id, normalized_name),
+                CONSTRAINT categories_kind_check CHECK (
+                    (is_system = TRUE AND kind = 'Uncategorised' AND is_archived = FALSE)
+                    OR (is_system = FALSE AND kind IN ('Income', 'Expense', 'Transfer', 'Excluded'))
+                )
+            );
+
+            CREATE UNIQUE INDEX categories_customer_system_uidx
+                ON categories(customer_id) WHERE is_system = TRUE;
+            CREATE INDEX categories_customer_id_idx ON categories(customer_id);
+
+            CREATE TABLE merchant_tags (
+                id UUID PRIMARY KEY,
+                customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                display_name TEXT NOT NULL,
+                normalized_name TEXT NOT NULL,
+                is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+                archived_at TIMESTAMPTZ NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                UNIQUE (customer_id, id),
+                UNIQUE (customer_id, normalized_name)
+            );
+
+            CREATE INDEX merchant_tags_customer_id_idx ON merchant_tags(customer_id);
+
+            CREATE TABLE statement_imports (
+                id UUID PRIMARY KEY,
+                customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                financial_account_id UUID NOT NULL,
+                source_type TEXT NOT NULL,
+                statement_label TEXT NOT NULL,
+                statement_fingerprint TEXT NOT NULL,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                total_rows INT NOT NULL DEFAULT 0,
+                imported_count INT NOT NULL DEFAULT 0,
+                suppressed_count INT NOT NULL DEFAULT 0,
+                skipped_count INT NOT NULL DEFAULT 0,
+                is_hidden BOOLEAN NOT NULL DEFAULT FALSE,
+                hidden_at TIMESTAMPTZ NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                UNIQUE (customer_id, id),
+                FOREIGN KEY (customer_id, financial_account_id)
+                    REFERENCES financial_accounts(customer_id, id) ON DELETE RESTRICT
+            );
+
+            CREATE TABLE transactions (
+                id UUID PRIMARY KEY,
+                customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                financial_account_id UUID NOT NULL,
+                statement_import_id UUID NOT NULL,
+                transaction_date DATE NOT NULL,
+                description TEXT NOT NULL,
+                normalized_description TEXT NOT NULL,
+                amount NUMERIC(18, 2) NOT NULL,
+                category_id UUID NOT NULL,
+                source_type TEXT NOT NULL,
+                source_page INT NULL,
+                source_row_number INT NOT NULL DEFAULT 1,
+                identity_key TEXT NOT NULL,
+                occurrence_index INT NOT NULL DEFAULT 1,
+                is_hidden_by_user BOOLEAN NOT NULL DEFAULT FALSE,
+                version INT NOT NULL DEFAULT 1,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                FOREIGN KEY (customer_id, financial_account_id)
+                    REFERENCES financial_accounts(customer_id, id) ON DELETE RESTRICT,
+                FOREIGN KEY (customer_id, statement_import_id)
+                    REFERENCES statement_imports(customer_id, id) ON DELETE CASCADE,
+                FOREIGN KEY (customer_id, category_id)
+                    REFERENCES categories(customer_id, id) ON DELETE RESTRICT
+            );
+
+            CREATE INDEX transactions_customer_category_idx
+                ON transactions(customer_id, category_id);
+            CREATE INDEX transactions_customer_account_idx
+                ON transactions(customer_id, financial_account_id);
+
+            CREATE TABLE transaction_merchant_tags (
+                transaction_id UUID NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+                merchant_tag_id UUID NOT NULL REFERENCES merchant_tags(id) ON DELETE CASCADE,
+                assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (transaction_id, merchant_tag_id)
+            );
+
+            CREATE INDEX transaction_merchant_tags_tag_idx
+                ON transaction_merchant_tags(merchant_tag_id);
+            """),
     ];
 }

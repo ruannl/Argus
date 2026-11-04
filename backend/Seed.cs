@@ -17,8 +17,10 @@ public static class Seed
         CancellationToken cancellationToken = default)
     {
         await db.MigrateAsync(cancellationToken);
+        var financeStore = new FinanceStore(db);
         await SeedAccountAsync(
             db,
+            financeStore,
             logger,
             settings.SeedDevPassword,
             "dev@example.test",
@@ -27,6 +29,7 @@ public static class Seed
             cancellationToken);
         await SeedAccountAsync(
             db,
+            financeStore,
             logger,
             settings.SeedUserPassword,
             "user@example.test",
@@ -37,6 +40,7 @@ public static class Seed
 
     private static async Task SeedAccountAsync(
         Db db,
+        FinanceStore financeStore,
         ILogger logger,
         string? pinnedPassword,
         string email,
@@ -74,6 +78,14 @@ public static class Seed
         {
             Console.WriteLine($"seed: kept existing account {email}");
             logger.LogInformation("seed_account email={Email} outcome={Outcome}", email, "kept");
+        }
+
+        await using var lookup = connection.CreateCommand();
+        lookup.CommandText = "SELECT id FROM customers WHERE canonical_email = @email";
+        lookup.Parameters.AddWithValue("email", email);
+        if (await lookup.ExecuteScalarAsync(cancellationToken) is Guid customerId)
+        {
+            await financeStore.EnsureCategoriesSeededAsync(customerId, cancellationToken);
         }
     }
 }

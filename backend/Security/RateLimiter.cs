@@ -15,6 +15,12 @@ public sealed class RateLimiter
 
     public bool CheckIp(string ip) => Check($"ip:{ip}", 120);
 
+    /// <summary>
+    /// Finance workspace traffic has its own bucket so ordinary navigation does
+    /// not consume the login/auth brute-force budget.
+    /// </summary>
+    public bool CheckFinanceIp(string ip) => Check($"finance_ip:{ip}", 300);
+
     public bool CheckEmail(string canonicalEmail) =>
         Check($"email:{canonicalEmail}", 5) && Check("email_global", 60);
 

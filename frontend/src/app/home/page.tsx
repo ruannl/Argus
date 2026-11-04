@@ -1,65 +1,98 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
-import { endSessionAction } from "@/lib/server/account-actions";
+import AppShell from "@/components/app-shell";
+import WorkspaceExpired from "@/components/workspace-expired";
 import { getCurrentAccount } from "@/lib/server/backend-client";
 import type { CurrentAccount } from "@/lib/server/backend-client";
 
-import AccountDetails from "@/components/account-details";
-import ClearSession from "./clear-session";
-
 export const dynamic = "force-dynamic";
 
-function ExpiredSession() {
+function OverviewWorkspace({
+  account,
+  view,
+}: {
+  account: CurrentAccount;
+  view: "summary" | "charts";
+}) {
+  const isCharts = view === "charts";
+  const summaryClass =
+    view === "summary"
+      ? "rounded-full bg-ink px-4 py-2 text-sm font-semibold text-page"
+      : "rounded-full px-4 py-2 text-sm font-semibold text-muted transition hover:bg-elevated hover:text-ink";
+  const chartsClass =
+    view === "charts"
+      ? "rounded-full bg-ink px-4 py-2 text-sm font-semibold text-page"
+      : "rounded-full px-4 py-2 text-sm font-semibold text-muted transition hover:bg-elevated hover:text-ink";
+
   return (
-    <main className="min-h-screen px-5 py-8 sm:px-8 lg:px-12">
-      <div className="mx-auto max-w-3xl rounded-[2rem] border border-line bg-surface p-6 card-shadow sm:p-10">
-        <ClearSession />
-      </div>
-    </main>
+    <AppShell
+      account={account}
+      activeNav="overview"
+      description="Summary and charts for the statements you have imported."
+      eyebrow="Overview"
+      title="Overview"
+    >
+      <nav
+        aria-label="Overview views"
+        className="mt-8 inline-flex rounded-full border border-line bg-surface p-1"
+      >
+        <Link
+          aria-current={view === "summary" ? "page" : undefined}
+          className={summaryClass}
+          href="/home"
+        >
+          Summary
+        </Link>
+        <Link
+          aria-current={view === "charts" ? "page" : undefined}
+          className={chartsClass}
+          href="/home?view=charts"
+        >
+          Charts
+        </Link>
+      </nav>
+
+      <section
+        aria-labelledby="overview-empty-title"
+        className="mt-6 rounded-[2rem] border border-line bg-surface p-6 card-shadow sm:p-8"
+      >
+        <h2
+          id="overview-empty-title"
+          className="text-2xl leading-tight font-semibold tracking-[-0.03em] text-ink sm:text-3xl"
+        >
+          {isCharts ? "No charts yet" : "No transactions yet"}
+        </h2>
+        <p className="mt-4 max-w-2xl text-base leading-7 text-muted">
+          {isCharts
+            ? "Bar-first charts appear after your first statement import. Start by creating a ZAR financial account, categories, and merchant tags in "
+            : "Your Summary and Charts fill in after your first statement import. Start by creating a ZAR financial account, categories, and merchant tags in "}
+          <Link
+            className="font-semibold text-accent-text underline underline-offset-4"
+            href="/settings"
+          >
+            Settings
+          </Link>
+          , then import a statement in{" "}
+          <Link
+            className="font-semibold text-accent-text underline underline-offset-4"
+            href="/imports"
+          >
+            Imports
+          </Link>
+          .
+        </p>
+      </section>
+    </AppShell>
   );
 }
 
-function AccountHome({ account }: { account: CurrentAccount }) {
-  return (
-    <main className="min-h-screen px-5 py-8 sm:px-8 lg:px-12">
-      <div className="mx-auto max-w-3xl rounded-[2rem] border border-line bg-surface p-6 card-shadow sm:p-10">
-        <div className="flex flex-wrap items-start justify-between gap-5">
-          <div>
-            <p className="text-sm font-semibold tracking-[0.14em] text-accent-text uppercase">
-              Customer home
-            </p>
-            <h1 className="mt-4 text-4xl leading-tight font-semibold tracking-[-0.05em] text-ink sm:text-5xl">
-              Your account
-            </h1>
-          </div>
-          <div className="flex items-center gap-3">
-            {account.admin ? (
-              <a
-                className="inline-flex items-center justify-center rounded-full border border-warning-line bg-warning-soft px-5 py-2.5 text-sm font-bold text-warning-ink-soft transition hover:bg-warning-soft-hover"
-                href="/admin"
-              >
-                Admin
-              </a>
-            ) : null}
-            <form action={endSessionAction}>
-              <button
-                className="inline-flex items-center justify-center rounded-full border border-line px-5 py-2.5 text-sm font-bold text-ink transition hover:border-ink hover:text-ink"
-                type="submit"
-              >
-                Log out
-              </button>
-            </form>
-          </div>
-        </div>
-
-        <AccountDetails account={account} />
-      </div>
-    </main>
-  );
-}
-
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ view?: string }>;
+} = {}) {
   const backendToken = (await auth())?.user?.backendToken;
   if (!backendToken) {
     redirect("/login");
@@ -72,5 +105,8 @@ export default async function HomePage() {
     // Invalid, expired, revoked, and unavailable backend sessions all fail closed.
   }
 
-  return account ? <AccountHome account={account} /> : <ExpiredSession />;
+  const params = await searchParams;
+  const view = params?.view === "charts" ? "charts" : "summary";
+
+  return account ? <OverviewWorkspace account={account} view={view} /> : <WorkspaceExpired />;
 }

@@ -7,6 +7,7 @@ import {
   FEATURE_HIGHLIGHTS,
   HOW_IT_WORKS_STEPS,
   PRIMARY_CTA_LABEL,
+  PRODUCT_TAGLINE,
   STATUS_EXAMPLE,
 } from "@/lib/landing-content";
 
@@ -41,7 +42,7 @@ export default function Home() {
           >
             <div>
               <p className="mb-5 inline-flex rounded-full border border-accent-soft-line bg-accent-soft px-3 py-1 text-xs font-semibold tracking-[0.12em] text-accent-soft-ink uppercase">
-                Open-source SaaS starter
+                ZAR personal finance insights
               </p>
               <h1
                 id="landing-title"
@@ -58,14 +59,14 @@ export default function Home() {
             <div className="relative rounded-[2rem] border border-line bg-surface p-6 card-shadow sm:p-8">
               <div className="absolute -top-3 right-7 h-6 w-6 rounded-full border-4 border-page bg-accent" />
               <p className="text-xs font-semibold tracking-[0.14em] text-muted uppercase">
-                Ready to build on
+                {PRODUCT_TAGLINE}
               </p>
               <p className="mt-5 text-2xl leading-tight font-semibold tracking-[-0.03em] text-ink sm:text-3xl">
-                From a fresh repo to a secure, tested SaaS foundation in one bootstrap.
+                Every rand, categorised and reconciled to the statement it came from.
               </p>
               <div className="mt-8 flex items-center gap-3 text-sm font-medium text-muted">
                 <span className="h-2 w-2 rounded-full bg-accent" />
-                <span>Clone it. Rename it. Ship it.</span>
+                <span>ZAR workspace</span>
               </div>
             </div>
           </section>
@@ -82,10 +83,11 @@ export default function Home() {
                 id="features-title"
                 className="mt-4 text-3xl leading-tight font-semibold tracking-[-0.04em] text-ink sm:text-5xl"
               >
-                The foundation, prebuilt and tested
+                Your statements, made legible
               </h2>
               <p className="mt-5 text-lg leading-8 text-muted">
-                Every feature is covered by unit, isolation, and end-to-end tests, and gated by CI.
+                A focused workspace for South African bank and credit-card statements, with
+                categories, merchant tags, and totals that reconcile.
               </p>
             </div>
             <div className="mt-10 grid gap-4 md:grid-cols-3">
@@ -113,7 +115,7 @@ export default function Home() {
             <div className="grid gap-10 lg:grid-cols-[0.75fr_1.25fr] lg:gap-20">
               <div>
                 <p className="text-sm font-semibold tracking-[0.14em] text-accent-text uppercase">
-                  From clone to launch
+                  From statement to insight
                 </p>
                 <h2
                   id="how-it-works-title"
@@ -145,16 +147,18 @@ export default function Home() {
             <div className="mx-auto max-w-4xl rounded-[2rem] border border-accent-soft-line bg-accent-soft p-6 sm:p-8 lg:flex lg:items-center lg:justify-between lg:gap-12 lg:p-10">
               <div>
                 <p className="text-xs font-semibold tracking-[0.14em] text-accent-soft-ink uppercase">
-                  Example status
+                  Workspace status
                 </p>
                 <h2
                   id="status-title"
                   className="mt-3 text-2xl leading-tight font-semibold tracking-[-0.03em] text-ink sm:text-3xl"
                 >
-                  Where your product&apos;s status line goes
+                  Reconciled to every transaction
                 </h2>
                 <p className="mt-3 max-w-xl text-base leading-7 text-muted">
-                  A labelled slot for the kind of live status you may want to show customers later.                </p>
+                  Your overview totals are built from the same transactions you can inspect
+                  and classify, so the numbers always agree.
+                </p>
               </div>
               <p className="mt-7 shrink-0 rounded-2xl border border-accent-soft-line bg-surface px-5 py-4 text-base font-semibold text-ink shadow-sm lg:mt-0">
                 {STATUS_EXAMPLE}
@@ -163,28 +167,29 @@ export default function Home() {
           </section>
 
           <section
-            aria-labelledby="sample-cta-title"
+            aria-labelledby="start-cta-title"
             className="border-t border-line py-16 sm:py-20"
           >
             <div className="rounded-[2rem] bg-inverse px-6 py-10 text-inverse-ink sm:px-10 sm:py-12 lg:flex lg:items-center lg:justify-between lg:gap-10 lg:px-12">
               <div className="max-w-2xl">
                 <p className="text-sm font-semibold tracking-[0.14em] text-accent-inverse uppercase">
-                  See one example
+                  Ready when you are
                 </p>
                 <h2
-                  id="sample-cta-title"
+                  id="start-cta-title"
                   className="mt-4 text-3xl leading-tight font-semibold tracking-[-0.04em] sm:text-5xl"
                 >
-                  A reusable detail-page pattern.
+                  Start with your statements.
                 </h2>
                 <p className="mt-5 text-base leading-7 text-inverse-muted sm:text-lg">
-                  Open the labelled sample page to see the layout and content structure you can copy for your own pages.
+                  Create an account, add your ZAR financial accounts, and import your first
+                  statement.
                 </p>
               </div>
               <Link
                 aria-label={PRIMARY_CTA_LABEL}
                 className="primary-link mt-8 inline-flex shrink-0 items-center justify-center gap-3 rounded-full bg-accent px-6 py-4 text-base font-bold text-accent-ink transition hover:bg-accent-hover lg:mt-0"
-                href="/sample-page"
+                href="/register"
               >
                 {PRIMARY_CTA_LABEL}
                 <span aria-hidden="true" className="text-xl leading-none">
@@ -193,9 +198,9 @@ export default function Home() {
               </Link>
               <Link
                 className="mt-4 inline-flex text-sm font-semibold text-inverse-muted underline decoration-inverse-muted underline-offset-4 transition hover:text-inverse-ink lg:ml-6 lg:mt-0"
-                href="/register"
+                href="/login"
               >
-                Create an account
+                Log in
               </Link>
             </div>
           </section>

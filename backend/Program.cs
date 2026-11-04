@@ -55,17 +55,19 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
     .WithOrigins(settings.FrontendUrl)
-    .WithMethods("GET", "POST")
+    .WithMethods("GET", "POST", "PATCH", "DELETE")
     .WithHeaders(Brand.ApplicationSecretHeader, Brand.SessionHeader, Brand.FrontendOriginHeader)));
 
 builder.Services.AddSingleton(settings);
 builder.Services.AddSingleton(new Db(settings.DatabaseUrl));
 builder.Services.AddSingleton<Store>();
+builder.Services.AddSingleton<FinanceStore>();
 builder.Services.AddSingleton<Policy>();
 builder.Services.AddSingleton<RateLimiter>();
 builder.Services.AddSingleton<IPwnedScreener, HibpScreener>();
 builder.Services.AddSingleton<IMailer, ResendMailer>();
 builder.Services.AddSingleton<AccountApi>();
+builder.Services.AddSingleton<FinanceApi>();
 
 var app = builder.Build();
 
@@ -110,6 +112,7 @@ if (args.Contains("seed"))
 }
 
 app.Services.GetRequiredService<AccountApi>().Map(app);
+app.Services.GetRequiredService<FinanceApi>().Map(app);
 
 app.Run();
 return 0;

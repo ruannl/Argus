@@ -5,7 +5,7 @@ import { auth } from "@/auth";
 import { PRODUCT_NAME } from "@/lib/brand";
 import { getCurrentAccount } from "@/lib/server/backend-client";
 
-import ClearSession from "../home/clear-session";
+import ClearSession from "@/components/clear-session";
 import LoginForm from "./login-form";
 
 export const dynamic = "force-dynamic";
