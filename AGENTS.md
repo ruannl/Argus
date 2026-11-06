@@ -26,6 +26,45 @@ kit-source-only work.
   the packager, the website) must never learn stack-specific behaviour, so
   product changes belong in this tree, not in those tools.
 
+## Working agreement
+
+These rules apply to every change in this repository, whoever makes it.
+
+1. Work on a non-main branch. `main` is protected: no direct commits or
+   pushes; changes land only through pull-request merges.
+2. Merge only after an independent reviewer other than the author approves,
+   all required checks pass, and blocking findings are resolved. Failed,
+   skipped, or missing required checks do not qualify. The pull request must
+   record what changed and why, the exact verification commands and results,
+   known risks, out-of-scope findings, and the disposition of nonblocking
+   notes.
+3. Commit or change remote state only when explicitly authorized, including
+   through a named workflow. Inspection is read-only. Never reactivate
+   user-closed items or rewrite published history without explicit permission.
+   Ask when authorization is unclear.
+4. Do not delete, skip, weaken, or mock away tests to hide defects. Correct an
+   obsolete or incorrect test only against the intended contract, and explain
+   why. A bug fix needs a regression test that fails before and passes after;
+   if that is infeasible, report the limitation and the strongest alternative
+   evidence without claiming equivalent coverage.
+5. Reviewed rules and accepted artifacts define intended behavior; code may be
+   wrong. Flag conflicts and follow the governing authority; ask if it is
+   unclear. Treat `NeedsReview` as unconfirmed. Keep facts durable, current,
+   and nonduplicated; record progress and task decisions on Threads. Verify
+   factual claims when they are material or uncertain.
+6. Challenge the user's assumptions and your own. Verify consequential
+   premises; explain errors, risks, and better options with evidence. State
+   uncertainty and distinguish defects from preferences. Aim for verified
+   working software, not agreement or contrarianism. Raise concerns early.
+   After an informed user decision, proceed within the required safeguards and
+   record material concerns without relitigating.
+7. When a primary peer request targets the Specialist slot, capture the
+   `requestId` returned by `primary_transfer prepare` and relay it to the
+   Specialist or operator immediately. The Specialist publishes the completed
+   review through `primary_transfer` action `reply` using that active
+   `requestId`. A completed request cannot be reused. If the `requestId` is
+   missing, obtain the active one; do not rerun the review.
+
 ## Prerequisites
 
 Required before the first run. None of these is installed for you.
@@ -178,7 +217,10 @@ npm run test:e2e
 ```
 
 `dotnet test` needs `ARGUS_TEST_DATABASE_URL` for the isolation tests;
-the bootstrap creates that database and writes it to `backend/.env`.
+the bootstrap creates that database and writes it to `backend/.env`. Export
+the value before running the tests. The suite truncates finance tables and
+creates its own rows, so the URL must name the dedicated `argus_test`
+database — never the development `argus` database or production.
 `npm run test:e2e` needs chromium installed. `.github/workflows/ci.yml` runs
 this battery on push and pull request to `main`.
 
