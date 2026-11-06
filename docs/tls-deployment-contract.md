@@ -33,6 +33,37 @@ the certificates, and the network boundary.
    Resend placeholder with a real key and a verified sender; otherwise users
    never receive verification or reset links.
 
+## Statement import deployment requirements
+
+**Current scope:** Standard Bank PDF import is deferred by Plan 2 revision 5.
+The backend rejects `standard_bank_pdf` before launching the parser child, so
+the child-process requirements below are dormant but remain part of the
+deployment contract for the follow-up PDF thread.
+
+9. **The proxy admits the bounded import envelope.** Allow multipart requests up
+   to 10,100,000 bytes and JSON review mutations up to 256 KiB. Do not raise
+   these limits at the trust boundary to compensate for a larger file; the
+   importer rejects anything beyond its frozen service bounds.
+10. **Request and parser timeouts are compatible.** The backend enforces a
+    30-second parser deadline for CSV and PDF parsing. The ingress request
+    timeout must be longer than the parser deadline plus normal database work,
+    and the runtime must allow the backend to launch the
+    `--parse-statement-pdf` child of its own assembly when PDF is re-enabled.
+11. **Published output is self-contained.** Deploy the published backend output,
+    including the server runtime configuration. The PDF child is launched from
+    that output, not only from `dotnet run`.
+12. **Parsers are bounded.** Expect at most two concurrent parsers per backend
+    process, with CSV and PDF sharing the same admission slots. Each PDF child
+    has a 256 MiB managed-heap target, a 384 MiB resident-memory ceiling
+    enforced by the parent, bounded stdin and stdout, and whole-tree termination
+    on timeout or disconnect. A platform that forbids child processes cannot
+    serve the Standard Bank PDF preset when it is re-enabled.
+13. **Import privacy survives infrastructure.** Raw uploads are not persisted.
+    Ensure proxy access logs, APM traces, error trackers, and backups do not
+    capture request bodies, multipart filenames, or financial source text.
+    Database backups may retain committed financial rows; backup retention and
+    restore drills are operator responsibilities.
+
 ## Operator responsibilities
 
 TLS certificates and renewal, network isolation, backups and restore drills,

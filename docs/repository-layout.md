@@ -15,9 +15,13 @@ commands with the working directory inside the relevant tree.
 ├── backend/
 │   ├── Brand.cs              canonical brand/header/env constants
 │   ├── Configuration/        fail-closed prefixed configuration
-│   ├── Data/                 Npgsql connection, migrations, Store, FinanceStore
+│   ├── Data/                 Npgsql connection, migrations, Store, FinanceStore,
+│   │                         StatementImportStore, import cleanup service
+│   ├── Imports/              bounded FNB/generic CSV parsers, identity/fingerprint
+│   │                         code, and the dormant PDF parser/child runner
 │   ├── Security/             argon2id, tokens, policy, rate limiter, HIBP
-│   ├── Http/                 error bodies, trust checks, account + finance endpoints
+│   ├── Http/                 error bodies, trust checks, account, finance and import
+│   │                         endpoints, bounded multipart reader
 │   ├── Mail/                 Resend mailer
 │   ├── Billing/              HMAC webhook verification and event parsing
 │   ├── Seed.cs               idempotent dev-account seeding
@@ -30,8 +34,9 @@ commands with the working directory inside the relevant tree.
 ├── frontend/
 │   ├── src/app/              App Router routes (landing, auth, workspace)
 │   ├── src/app/settings/     Accounts, Categories, Merchant tags, Profile
+│   ├── src/app/imports/      upload/confirm workspace, review pages, statement detail
 │   ├── src/components/       app shell, account details, session clearing
-│   ├── src/lib/server/       server-only backend client and finance actions
+│   ├── src/lib/server/       server-only backend client, finance actions, import actions
 │   ├── src/lib/brand.ts      canonical brand constants
 │   ├── tests/                Vitest; tests/e2e is Playwright
 │   ├── package.json / package-lock.json
@@ -92,17 +97,40 @@ npm run test:e2e
 | POST | `/v1/finance/merchant-tags/{id}/archive` | Archive a merchant tag |
 | POST | `/v1/finance/merchant-tags/{id}/restore` | Restore a merchant tag |
 | DELETE | `/v1/finance/merchant-tags/{id}` | Delete a tag and remove its assignments |
+| POST | `/v1/finance/imports/inspect` | Inspect a statement file; stateless preview/mapping |
+| POST | `/v1/finance/imports/reviews` | Prepare a durable, expiring review |
+| GET | `/v1/finance/imports/reviews` | List the customer's open reviews |
+| GET | `/v1/finance/imports/reviews/{id}` | Read a paged review with decisions |
+| PATCH | `/v1/finance/imports/reviews/{id}` | Update skip, override, group, or tag decisions |
+| POST | `/v1/finance/imports/reviews/{id}/refresh` | Recompute duplicate state under the account lock |
+| POST | `/v1/finance/imports/reviews/{id}/commit` | Atomically commit or replay the same receipt |
+| POST | `/v1/finance/imports/reviews/{id}/abandon` | Purge a review without importing |
+| GET | `/v1/finance/imports` | Committed-only history, filterable and cursor-paged |
+| GET | `/v1/finance/imports/{id}` | Statement summary and paged owned rows |
+| POST | `/v1/finance/imports/{id}/hide` | Hide the parent statement layer |
+| POST | `/v1/finance/imports/{id}/restore` | Restore the parent statement layer |
+| DELETE | `/v1/finance/imports/{id}` | Delete the statement and exactly its owned transactions |
 
 Account routes require the trusted-frontend application-secret header and
 independently validate the acting user's session. Error bodies are
 `{"error":"<kind>"}`; origin rejection and webhook failures are bodyless.
 
-Finance routes apply the same caller proof plus a verified active subscriber
-session, scope every SQL statement by `customer_id`, and return the same
-`404 {"error":"not_found"}` for unknown and foreign-owned ids. User-defined
-account, institution, category, and merchant-tag names are never written to
-logs, audit events, or URL path segments. CORS allows `GET`, `POST`, `PATCH`,
-and `DELETE` for the workspace.
+Finance and import routes apply the same caller proof plus a verified active
+subscriber session, scope every SQL statement by `customer_id`, and return the
+same `404 {"error":"not_found"}` for unknown and foreign-owned ids. User-defined
+account, institution, category, merchant-tag and transaction-description text
+is never written to logs, audit events, or URL path segments. CORS allows
+`GET`, `POST`, `PATCH`, and `DELETE` for the workspace.
+
+Statement imports bound every file and request before buffering: 10 MB per file
+and decompressed ZIP payload, 20,000 rows, 200 PDF pages, a 10.1 MB multipart
+envelope, a 30-second parser deadline, and two concurrent parsers per process
+shared by CSV and PDF. Standard Bank PDF import is currently deferred: the API rejects
+that source kind with `pdf_import_deferred`, and the PDF parser and child runner
+remain dormant until the follow-up thread re-enables them. Raw uploads and real bank preamble metadata are request-local and
+never persisted. The durable review stores only sanitized mapped rows and
+expires after 24 hours; committed receipts retain identifiers and counts for
+retry safety. See `docs/statement-import-runbook.md`.
 
 ## CI
 

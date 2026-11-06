@@ -21,6 +21,10 @@ public sealed class RateLimiter
     /// </summary>
     public bool CheckFinanceIp(string ip) => Check($"finance_ip:{ip}", 300);
 
+    /// <summary>Inspect/prepare is ten requests per customer per window.</summary>
+    public bool CheckImportCustomer(Guid customerId) =>
+        Check($"import_customer:{customerId:N}", 10);
+
     public bool CheckEmail(string canonicalEmail) =>
         Check($"email:{canonicalEmail}", 5) && Check("email_global", 60);
 

@@ -136,7 +136,15 @@ test("reset with a well-formed token renders the password form without a backend
 });
 
 test("unauthenticated workspace routes end on the login page", async ({ page }) => {
-  for (const route of ["/home", "/transactions", "/imports", "/settings", "/admin"]) {
+  for (const route of [
+    "/home",
+    "/transactions",
+    "/imports",
+    "/imports/review/missing",
+    "/imports/missing",
+    "/settings",
+    "/admin",
+  ]) {
     await page.goto(route);
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();

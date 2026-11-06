@@ -1,50 +1,85 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
 import AppShell from "@/components/app-shell";
 import WorkspaceExpired from "@/components/workspace-expired";
-import { getCurrentAccount } from "@/lib/server/backend-client";
-import type { CurrentAccount } from "@/lib/server/backend-client";
+import {
+  getCurrentAccount,
+  listFinancialAccounts,
+  listImportHistory,
+  listOpenImportReviews,
+} from "@/lib/server/backend-client";
+import type {
+  CurrentAccount,
+  FinancialAccount,
+  ImportOpenReview,
+  ImportStatementSummary,
+} from "@/lib/server/backend-client";
+import ImportWorkspace from "./import-workspace";
 
 export const dynamic = "force-dynamic";
 
-function ImportsWorkspace({ account }: { account: CurrentAccount }) {
+type ImportsData = {
+  accounts: FinancialAccount[];
+  reviews: ImportOpenReview[];
+  history: ImportStatementSummary[];
+  loadError: string | null;
+  nextCursor: string | null;
+};
+
+async function loadImportsData(
+  backendToken: string,
+  cursor?: string,
+): Promise<ImportsData> {
+  const [accounts, reviews, history] = await Promise.all([
+    listFinancialAccounts(backendToken),
+    listOpenImportReviews(backendToken),
+    listImportHistory(backendToken, { limit: 20, cursor }),
+  ]);
+
+  const errors: string[] = [];
+  if (!accounts.ok) errors.push("accounts");
+  if (!reviews.ok) errors.push("open reviews");
+  if (!history.ok) errors.push("import history");
+
+  return {
+    accounts: accounts.ok ? accounts.value.accounts : [],
+    reviews: reviews.ok ? reviews.value.reviews : [],
+    history: history.ok ? history.value.items : [],
+    loadError:
+      errors.length > 0
+        ? `Could not load ${errors.join(", ")}. Refresh the page or try again.`
+        : null,
+    nextCursor: history.ok ? history.value.next_cursor : null,
+  };
+}
+
+function ImportsWorkspace({
+  account,
+  data,
+}: {
+  account: CurrentAccount;
+  data: ImportsData;
+}) {
   return (
     <AppShell
       account={account}
       activeNav="imports"
-      description="Import and review bank and credit-card statements."
+      description="Upload a bank or credit-card statement, confirm the mapping and dates, then review every row before committing."
       eyebrow="Workspace"
       title="Imports"
     >
-      <section
-        aria-labelledby="imports-empty-title"
-        className="mt-8 rounded-[2rem] border border-line bg-surface p-6 card-shadow sm:p-8"
-      >
-        <h2
-          id="imports-empty-title"
-          className="text-2xl leading-tight font-semibold tracking-[-0.03em] text-ink sm:text-3xl"
-        >
-          No statements imported yet
-        </h2>
-        <p className="mt-4 max-w-2xl text-base leading-7 text-muted">
-          First set up your ZAR financial accounts, categories, and merchant tags in{" "}
-          <Link
-            className="font-semibold text-accent-text underline underline-offset-4"
-            href="/settings"
-          >
-            Settings
-          </Link>
-          . Statement file upload will appear here once your accounts are ready; nothing is
-          imported yet.
-        </p>
-      </section>
+      <ImportWorkspace key={data.accounts.map((account) => account.id).join(",")} {...data} />
     </AppShell>
   );
 }
 
-export default async function ImportsPage() {
+export default async function ImportsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ cursor?: string }>;
+} = {}) {
+  const cursor = (await searchParams)?.cursor;
   const backendToken = (await auth())?.user?.backendToken;
   if (!backendToken) {
     redirect("/login");
@@ -57,5 +92,10 @@ export default async function ImportsPage() {
     // Invalid, expired, revoked, and unavailable backend sessions all fail closed.
   }
 
-  return account ? <ImportsWorkspace account={account} /> : <WorkspaceExpired />;
+  if (!account) {
+    return <WorkspaceExpired />;
+  }
+
+  const data = await loadImportsData(backendToken, cursor);
+  return <ImportsWorkspace account={account} data={data} />;
 }

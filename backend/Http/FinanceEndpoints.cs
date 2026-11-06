@@ -12,10 +12,8 @@ namespace argus.Server.Http;
 /// reach a log line, an audit event, or a URL segment.
 /// </summary>
 public sealed class FinanceApi(
-    AppSettings settings,
-    Store store,
+    FinanceGuard guard,
     FinanceStore financeStore,
-    RateLimiter rateLimiter,
     ILoggerFactory loggerFactory)
 {
     private readonly ILogger _audit = loggerFactory.CreateLogger("audit");
@@ -46,75 +44,13 @@ public sealed class FinanceApi(
 
     // --- Guard -------------------------------------------------------------
 
-    private async Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(
+    private Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(
         HttpContext context,
-        CancellationToken cancellationToken)
-    {
-        if (!Trust.OriginValid(context, settings))
-        {
-            return (null, Errors.OriginRejected());
-        }
-        if (!Trust.ApplicationSecretValid(context, settings))
-        {
-            return (null, Errors.Unauthorized());
-        }
+        CancellationToken cancellationToken) =>
+        guard.AuthenticateAsync(context, cancellationToken);
 
-        var rawToken = Trust.SessionToken(context);
-        if (rawToken is null)
-        {
-            return (null, Errors.Unauthorized());
-        }
-
-        var customerId = await store.ValidateAndTouchSessionAsync(Tokens.HashToken(rawToken), cancellationToken);
-        if (customerId is null)
-        {
-            return (null, Errors.Unauthorized());
-        }
-
-        var customer = await store.FindCustomerByIdAsync(customerId.Value, cancellationToken);
-        if (customer is null || customer.EmailVerifiedAt is null || customer.SubscriberActivatedAt is null)
-        {
-            return (null, Errors.Unauthorized());
-        }
-
-        var peerIp = context.Connection.RemoteIpAddress?.ToString();
-        if (peerIp is not null && !rateLimiter.CheckFinanceIp(peerIp))
-        {
-            return (null, Errors.RateLimited());
-        }
-
-        return (customerId, null);
-    }
-
-    /// <summary>
-    /// Converts an unexpected persistence failure into a sanitized log line
-    /// plus the frozen 500 body. PostgreSQL exceptions are never logged whole:
-    /// their <c>Detail</c> can echo user-supplied names.
-    /// </summary>
-    private async Task<IResult> GuardedAsync(Func<Task<IResult>> action, string operation)
-    {
-        try
-        {
-            return await action();
-        }
-        catch (PostgresException exception)
-        {
-            _logger.LogError(
-                "finance_operation_failed operation={Operation} error_class={ErrorClass} sql_state={SqlState}",
-                operation,
-                "postgres",
-                exception.SqlState);
-            return Errors.Internal();
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(
-                "finance_operation_failed operation={Operation} error_class={ErrorClass}",
-                operation,
-                exception.GetType().Name);
-            return Errors.Internal();
-        }
-    }
+    private Task<IResult> GuardedAsync(Func<Task<IResult>> action, string operation) =>
+        guard.GuardedAsync(action, operation, _logger);
 
     // --- Financial accounts ------------------------------------------------
 

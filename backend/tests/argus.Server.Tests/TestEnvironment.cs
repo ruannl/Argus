@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using argus.Server.Data;
+using argus.Server.Imports;
 using argus.Server.Mail;
 
 namespace argus.Server.Tests;
@@ -225,10 +226,17 @@ public sealed class KitFactory : WebApplicationFactory<Program>
 
     public CapturingLoggerProvider LogCapture { get; } = new();
 
-    public KitFactory()
+    public KitFactory() : this(null)
     {
+    }
+
+    internal KitFactory(IImportFaultInjector? faultInjector)
+    {
+        FaultInjector = faultInjector;
         TestEnvironment.Configure();
     }
+
+    public IImportFaultInjector? FaultInjector { get; }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -238,6 +246,8 @@ public sealed class KitFactory : WebApplicationFactory<Program>
             services.AddSingleton<IMailer>(Mailer);
             services.AddSingleton<ILoggerProvider>(LogCapture);
             services.AddSingleton<IStartupFilter, TestRemoteIpStartupFilter>();
+            services.AddSingleton<IImportFaultInjector>(
+                FaultInjector ?? NoopImportFaultInjector.Instance);
         });
     }
 

@@ -597,8 +597,8 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         var first = await InsertTransactionAsync(customerId, accountId, groceriesId);
         var second = await InsertTransactionAsync(customerId, accountId, groceriesId);
         await ExecuteSqlAsync($"""
-            INSERT INTO transaction_merchant_tags (transaction_id, merchant_tag_id)
-            VALUES ('{first}', '{tagId}'), ('{second}', '{tagId}');
+            INSERT INTO transaction_merchant_tags (customer_id, transaction_id, merchant_tag_id)
+            VALUES ('{customerId}', '{first}', '{tagId}'), ('{customerId}', '{second}', '{tagId}');
             """);
 
         var before = FindByName(await ListTagsAsync(session), "Woolworths");

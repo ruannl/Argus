@@ -11,10 +11,19 @@ const runtimeMocks = vi.hoisted(() => ({
     delete: vi.fn(),
   },
   redirect: vi.fn(),
+  router: {
+    push: vi.fn(),
+    replace: vi.fn(),
+    refresh: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    prefetch: vi.fn(),
+  },
 }));
 
 export const testCookieStore = runtimeMocks.cookieStore;
 export const testRedirect = runtimeMocks.redirect;
+export const testRouter = runtimeMocks.router;
 
 vi.mock("server-only", () => ({}));
 
@@ -24,6 +33,7 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/navigation", () => ({
   redirect: runtimeMocks.redirect,
+  useRouter: () => runtimeMocks.router,
 }));
 
 vi.mock("next/server", () => ({
@@ -48,6 +58,12 @@ afterEach(() => {
   testCookieStore.set.mockReset();
   testCookieStore.delete.mockReset();
   testRedirect.mockReset();
+  testRouter.push.mockReset();
+  testRouter.replace.mockReset();
+  testRouter.refresh.mockReset();
+  testRouter.back.mockReset();
+  testRouter.forward.mockReset();
+  testRouter.prefetch.mockReset();
 });
 
 afterAll(() => {
