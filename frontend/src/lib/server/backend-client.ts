@@ -584,3 +584,610 @@ export async function deleteMerchantTag(
     `/v1/finance/merchant-tags/${encodeURIComponent(id)}`,
   );
 }
+
+// --- Statement import -------------------------------------------------------
+
+export type ImportErrorKind =
+  | "invalid_request"
+  | "file_too_large"
+  | "unsupported_format"
+  | "unsupported_encoding"
+  | "unsafe_archive"
+  | "encrypted_pdf"
+  | "text_pdf_required"
+  | "unsupported_layout"
+  | "processing_limit"
+  | "format_confirmation_required"
+  | "pdf_import_deferred"
+  | "import_busy"
+  | "not_found"
+  | "review_expired"
+  | "import_deleted"
+  | "review_stale"
+  | "version_conflict"
+  | "statement_repeat"
+  | "idempotency_conflict"
+  | "account_archived"
+  | "identity_conflict"
+  | "tag_unavailable"
+  | "no_included_rows"
+  | "invalid_rows"
+  | "duplicate_decision_required"
+  | "rate_limited"
+  | "unavailable";
+
+export type ImportRequestResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; kind: ImportErrorKind; existingImportIds?: string[] };
+
+export type ImportParserConfig = {
+  format?: "fnb" | "standard_bank" | "generic" | null;
+  header_line?: number | null;
+  delimiter?: string | null;
+  date_format?: string | null;
+  decimal_separator?: string | null;
+  thousands_separator?: string | null;
+  amount_mode?: "signed" | "debit_credit" | null;
+  date_column?: number | null;
+  description_column?: number | null;
+  amount_column?: number | null;
+  debit_column?: number | null;
+  credit_column?: number | null;
+  direction?: "normal" | "inverted" | null;
+  negative_style?: string | null;
+  confirm_empty_description?: boolean;
+  stable_id_column?: number | null;
+  source_namespace?: string | null;
+  century?: number | null;
+};
+
+export type ImportParseOptions = {
+  financial_account_id: string;
+  source_kind: "fnb" | "generic_csv" | "standard_bank_pdf";
+  parser_config?: ImportParserConfig | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  currency?: "ZAR" | null;
+  confirm_zar?: boolean | null;
+  statement_override?: boolean | null;
+};
+
+export type ImportLimits = {
+  max_file_bytes: number;
+  max_data_rows: number;
+  max_pdf_pages: number;
+  max_description_scalars: number;
+};
+
+export type ImportPreviewRow = {
+  row_id: string;
+  source_line: number;
+  source_page: number | null;
+  source_row_number: number;
+  raw_values: Record<string, string | null>;
+  transaction_date: string | null;
+  description: string;
+  amount: string | null;
+  validation_codes: string[];
+  warnings: string[];
+};
+
+export type ImportInspectResult = {
+  detected_source_kind: string;
+  limits: ImportLimits;
+  proposed_start_date: string | null;
+  proposed_end_date: string | null;
+  mapping: Record<string, string>;
+  required_confirmations: string[];
+  warnings: string[];
+  preview: ImportPreviewRow[];
+  preview_truncated: boolean;
+  can_prepare: boolean;
+};
+
+export type ImportNearCandidate = {
+  candidate_id: string;
+  source: string;
+  import_id: string | null;
+  transaction_date: string;
+  amount: string;
+  description: string;
+  similarity: number;
+  reasons: string[];
+};
+
+export type ImportReviewRow = {
+  row_id: string;
+  source_line: number;
+  source_page: number | null;
+  source_row_number: number;
+  raw_values: Record<string, string | null>;
+  transaction_date: string | null;
+  description: string;
+  amount: string | null;
+  validation_codes: string[];
+  warnings: string[];
+  duplicate_state: string;
+  duplicate_reasons: string[];
+  matching_import_ids: string[];
+  near_candidates: ImportNearCandidate[];
+  near_candidate_total: number;
+  within_file_group: string | null;
+  within_file_state: string;
+  skip: boolean;
+  override: boolean;
+  suggested_tag_ids: string[];
+  selected_tag_ids: string[];
+};
+
+export type ImportReviewSummary = {
+  id: string;
+  financial_account_id: string;
+  source_kind: string;
+  start_date: string | null;
+  end_date: string | null;
+  version: number;
+  status: string;
+  expires_at: string;
+  total_rows: number;
+  imported_count: number;
+  suppressed_count: number;
+  skipped_count: number;
+  invalid_unskipped_count: number;
+  within_file_pending_count: number;
+  possible_duplicate_count: number;
+  exact_override_count: number;
+  statement_override: boolean;
+  statement_override_count: number;
+  summary_hash: string;
+};
+
+export type ImportReviewPage = {
+  rows: ImportReviewRow[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type ImportReviewDetail = {
+  summary: ImportReviewSummary;
+  page: ImportReviewPage;
+};
+
+export type ImportOpenReview = {
+  id: string;
+  financial_account_id: string;
+  source_kind: string;
+  start_date: string | null;
+  end_date: string | null;
+  version: number;
+  expires_at: string;
+  total_rows: number;
+  imported_count: number;
+  suppressed_count: number;
+  skipped_count: number;
+  created_at: string;
+};
+
+export type ImportReviewDecision = {
+  row_id: string;
+  skip?: boolean;
+  override?: boolean;
+  within_file_state?: "keep" | "skip";
+  within_file_group?: string;
+  within_file_action?: "keep_all" | "skip_all";
+  selected_tag_ids?: string[];
+};
+
+export type ImportStatementSummary = {
+  id: string;
+  financial_account_id: string;
+  source_type: string;
+  statement_label: string;
+  start_date: string;
+  end_date: string;
+  total_rows: number;
+  imported_count: number;
+  suppressed_count: number;
+  skipped_count: number;
+  possible_duplicate_count: number;
+  exact_override_count: number;
+  statement_override_count: number;
+  is_hidden: boolean;
+  version: number;
+  live_hidden_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ImportStatementRow = {
+  id: string;
+  source_row_number: number;
+  source_page: number | null;
+  transaction_date: string;
+  description: string;
+  amount: string;
+  is_hidden_by_user: boolean;
+  effective_hidden: boolean;
+  tags: { id: string; display_name: string }[];
+};
+
+export type ImportStatementDetail = {
+  statement: ImportStatementSummary;
+  rows: ImportStatementRow[];
+  page: number;
+  page_size: number;
+  expected_transaction_count: number;
+};
+
+export type ImportHistoryPage = {
+  items: ImportStatementSummary[];
+  next_cursor: string | null;
+};
+
+export type ImportCommitResult = {
+  replayed: boolean;
+  statement: ImportStatementSummary;
+};
+
+export type ImportAbandonResult = {
+  committed: boolean;
+  statement: ImportStatementSummary | null;
+  replayed: boolean;
+};
+
+export type ImportDeleteResult = {
+  deleted: boolean;
+  deleted_transaction_count: number;
+};
+
+const IMPORT_ERROR_KINDS = new Set<string>([
+  "invalid_request",
+  "file_too_large",
+  "unsupported_format",
+  "unsupported_encoding",
+  "unsafe_archive",
+  "encrypted_pdf",
+  "text_pdf_required",
+  "unsupported_layout",
+  "processing_limit",
+  "format_confirmation_required",
+  "pdf_import_deferred",
+  "import_busy",
+  "not_found",
+  "review_expired",
+  "import_deleted",
+  "review_stale",
+  "version_conflict",
+  "statement_repeat",
+  "idempotency_conflict",
+  "account_archived",
+  "identity_conflict",
+  "tag_unavailable",
+  "no_included_rows",
+  "invalid_rows",
+  "duplicate_decision_required",
+  "rate_limited",
+]);
+
+function importHeaders(sessionToken: string, hasJsonBody: boolean): Record<string, string> {
+  const headers: Record<string, string> = {
+    [REQUEST_ID_HEADER]: newRequestId(),
+    [APPLICATION_SECRET_HEADER]: requiredEnvironment("ARGUS_API_SECRET"),
+    [SESSION_HEADER]: sessionToken,
+    [FRONTEND_ORIGIN_HEADER]: requiredEnvironment("ARGUS_FRONTEND_URL"),
+  };
+  if (hasJsonBody) {
+    headers["Content-Type"] = "application/json";
+  }
+  return headers;
+}
+
+async function classifyImportFailure(
+  response: Response,
+): Promise<{ kind: ImportErrorKind; existingImportIds?: string[] }> {
+  if (response.status === 429) {
+    return { kind: "rate_limited" };
+  }
+  if (response.status === 404) {
+    return { kind: "not_found" };
+  }
+  if (response.status === 413) {
+    return { kind: "file_too_large" };
+  }
+  if (response.status === 415) {
+    return { kind: "unsupported_format" };
+  }
+  if (response.status === 410) {
+    try {
+      const body: unknown = await response.json();
+      const error = typeof body === "object" && body !== null && "error" in body
+        ? (body as { error?: unknown }).error
+        : null;
+      if (error === "import_deleted" || error === "review_expired") {
+        return { kind: error };
+      }
+    } catch {
+      // An unparseable 410 is still a terminal review/import response.
+    }
+    return { kind: "review_expired" };
+  }
+
+  try {
+    const body: unknown = await response.json();
+    if (typeof body === "object" && body !== null && "error" in body) {
+      const error = (body as { error?: unknown }).error;
+      if (typeof error === "string" && IMPORT_ERROR_KINDS.has(error)) {
+        const existing = (body as { existing_import_ids?: unknown }).existing_import_ids;
+        return {
+          kind: error as ImportErrorKind,
+          existingImportIds: Array.isArray(existing)
+            ? existing.filter((value): value is string => typeof value === "string")
+            : undefined,
+        };
+      }
+    }
+  } catch {
+    // Fall through to unavailable.
+  }
+
+  return { kind: "unavailable" };
+}
+
+async function importRequest<T>(
+  sessionToken: string,
+  method: "GET" | "POST" | "PATCH" | "DELETE",
+  path: string,
+  body?: Record<string, unknown>,
+): Promise<ImportRequestResult<T>> {
+  if (!sessionToken) {
+    return { ok: false, kind: "unavailable" };
+  }
+
+  try {
+    const init: RequestInit = {
+      method,
+      headers: importHeaders(sessionToken, body !== undefined),
+      cache: "no-store",
+    };
+    if (body !== undefined) {
+      init.body = JSON.stringify(body);
+    }
+    const response = await fetch(`${backendUrl()}${path}`, init);
+    if (!response.ok) {
+      const failure = await classifyImportFailure(response);
+      return { ok: false, ...failure };
+    }
+    return { ok: true, value: (await response.json()) as T };
+  } catch {
+    return { ok: false, kind: "unavailable" };
+  }
+}
+
+async function uploadImport<T>(
+  sessionToken: string,
+  path: string,
+  fileBytes: Uint8Array,
+  filename: string,
+  optionsJson: string,
+  signal?: AbortSignal,
+): Promise<ImportRequestResult<T>> {
+  if (!sessionToken) {
+    return { ok: false, kind: "unavailable" };
+  }
+
+  try {
+    const form = new FormData();
+    form.append("options", optionsJson);
+    const copy = new Uint8Array(fileBytes.byteLength);
+    copy.set(fileBytes);
+    form.append(
+      "file",
+      new Blob([copy.buffer as ArrayBuffer], { type: "application/octet-stream" }),
+      filename,
+    );
+    const response = await fetch(`${backendUrl()}${path}`, {
+      method: "POST",
+      headers: importHeaders(sessionToken, false),
+      body: form,
+      cache: "no-store",
+      signal,
+    });
+    if (!response.ok) {
+      const failure = await classifyImportFailure(response);
+      return { ok: false, ...failure };
+    }
+    return { ok: true, value: (await response.json()) as T };
+  } catch {
+    return { ok: false, kind: "unavailable" };
+  }
+}
+
+export async function inspectImportFile(
+  sessionToken: string,
+  fileBytes: Uint8Array,
+  options: ImportParseOptions,
+  filename = "statement.bin",
+  signal?: AbortSignal,
+): Promise<ImportRequestResult<ImportInspectResult>> {
+  return uploadImport<ImportInspectResult>(
+    sessionToken,
+    "/v1/finance/imports/inspect",
+    fileBytes,
+    filename,
+    JSON.stringify(options),
+    signal,
+  );
+}
+
+export async function prepareImportReview(
+  sessionToken: string,
+  fileBytes: Uint8Array,
+  options: ImportParseOptions,
+  filename = "statement.bin",
+  signal?: AbortSignal,
+): Promise<ImportRequestResult<ImportReviewDetail>> {
+  return uploadImport<ImportReviewDetail>(
+    sessionToken,
+    "/v1/finance/imports/reviews",
+    fileBytes,
+    filename,
+    JSON.stringify(options),
+    signal,
+  );
+}
+
+export async function listOpenImportReviews(
+  sessionToken: string,
+): Promise<ImportRequestResult<{ reviews: ImportOpenReview[] }>> {
+  return importRequest<{ reviews: ImportOpenReview[] }>(
+    sessionToken,
+    "GET",
+    "/v1/finance/imports/reviews",
+  );
+}
+
+export async function getImportReview(
+  sessionToken: string,
+  reviewId: string,
+  page = 1,
+  pageSize = 100,
+): Promise<ImportRequestResult<ImportReviewDetail>> {
+  return importRequest<ImportReviewDetail>(
+    sessionToken,
+    "GET",
+    `/v1/finance/imports/reviews/${encodeURIComponent(reviewId)}?page=${page}&page_size=${pageSize}`,
+  );
+}
+
+export async function patchImportReview(
+  sessionToken: string,
+  reviewId: string,
+  expectedReviewVersion: number,
+  decisions: ImportReviewDecision[],
+  statementOverride?: boolean,
+): Promise<ImportRequestResult<ImportReviewSummary>> {
+  const body: Record<string, unknown> = {
+    expected_review_version: expectedReviewVersion,
+    decisions,
+  };
+  if (statementOverride !== undefined) {
+    body.statement_override = statementOverride;
+  }
+  return importRequest<ImportReviewSummary>(
+    sessionToken,
+    "PATCH",
+    `/v1/finance/imports/reviews/${encodeURIComponent(reviewId)}`,
+    body,
+  );
+}
+
+export async function refreshImportReview(
+  sessionToken: string,
+  reviewId: string,
+  expectedReviewVersion: number,
+): Promise<ImportRequestResult<ImportReviewSummary>> {
+  return importRequest<ImportReviewSummary>(
+    sessionToken,
+    "POST",
+    `/v1/finance/imports/reviews/${encodeURIComponent(reviewId)}/refresh`,
+    { expected_review_version: expectedReviewVersion },
+  );
+}
+
+export async function commitImportReview(
+  sessionToken: string,
+  reviewId: string,
+  expectedReviewVersion: number,
+  confirmedSummaryHash: string,
+): Promise<ImportRequestResult<ImportCommitResult>> {
+  return importRequest<ImportCommitResult>(
+    sessionToken,
+    "POST",
+    `/v1/finance/imports/reviews/${encodeURIComponent(reviewId)}/commit`,
+    {
+      expected_review_version: expectedReviewVersion,
+      confirmed_summary_hash: confirmedSummaryHash,
+    },
+  );
+}
+
+export async function abandonImportReview(
+  sessionToken: string,
+  reviewId: string,
+  expectedReviewVersion: number,
+): Promise<ImportRequestResult<ImportAbandonResult>> {
+  return importRequest<ImportAbandonResult>(
+    sessionToken,
+    "POST",
+    `/v1/finance/imports/reviews/${encodeURIComponent(reviewId)}/abandon`,
+    { expected_review_version: expectedReviewVersion },
+  );
+}
+
+export async function listImportHistory(
+  sessionToken: string,
+  options?: { accountId?: string; state?: "all" | "visible" | "hidden"; cursor?: string; limit?: number },
+): Promise<ImportRequestResult<ImportHistoryPage>> {
+  const params = new URLSearchParams();
+  if (options?.accountId) params.set("account_id", options.accountId);
+  if (options?.state) params.set("state", options.state);
+  if (options?.cursor) params.set("cursor", options.cursor);
+  if (options?.limit) params.set("limit", String(options.limit));
+  const query = params.toString();
+  return importRequest<ImportHistoryPage>(
+    sessionToken,
+    "GET",
+    `/v1/finance/imports${query ? `?${query}` : ""}`,
+  );
+}
+
+export async function getImportStatement(
+  sessionToken: string,
+  statementId: string,
+  page = 1,
+  pageSize = 100,
+): Promise<ImportRequestResult<ImportStatementDetail>> {
+  return importRequest<ImportStatementDetail>(
+    sessionToken,
+    "GET",
+    `/v1/finance/imports/${encodeURIComponent(statementId)}?page=${page}&page_size=${pageSize}`,
+  );
+}
+
+export async function setImportVisibility(
+  sessionToken: string,
+  statementId: string,
+  hidden: boolean,
+  expectedVersion: number,
+  expectedTransactionCount: number,
+): Promise<ImportRequestResult<ImportStatementSummary>> {
+  return importRequest<ImportStatementSummary>(
+    sessionToken,
+    "POST",
+    `/v1/finance/imports/${encodeURIComponent(statementId)}/${hidden ? "hide" : "restore"}`,
+    {
+      expected_version: expectedVersion,
+      expected_transaction_count: expectedTransactionCount,
+      confirm: true,
+    },
+  );
+}
+
+export async function deleteImportStatement(
+  sessionToken: string,
+  statementId: string,
+  expectedVersion: number,
+  expectedTransactionCount: number,
+): Promise<ImportRequestResult<ImportDeleteResult>> {
+  return importRequest<ImportDeleteResult>(
+    sessionToken,
+    "DELETE",
+    `/v1/finance/imports/${encodeURIComponent(statementId)}`,
+    {
+      expected_version: expectedVersion,
+      expected_transaction_count: expectedTransactionCount,
+      confirm: true,
+    },
+  );
+}

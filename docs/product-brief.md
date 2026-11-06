@@ -5,6 +5,14 @@
 **Scope:** Product behaviour and outcomes. This is not an architecture plan.  
 **Evidence level:** Source inspection of the working tree. No runtime observation, analytics, or user research was available.
 
+> **Scope amendment (2026-11-06, operator-directed):** Standard Bank PDF import
+> is deferred to Thread #6 while the FNB CSV/ZIP and generic mapped CSV path is
+> completed and reviewed. Until that thread lands, the product rejects
+> `standard_bank_pdf` requests with `pdf_import_deferred` and the Imports UI
+> offers only FNB CSV/ZIP and generic mapped CSV. The PDF requirements and
+> criteria below remain future scope, not current release scope. The pending
+> production-PDF amendment at the end is deferred, not accepted.
+
 ## 1. Executive summary
 
 Argus is intended to be a personal finance insights application. The repository does not yet contain that product.
@@ -19,7 +27,7 @@ The smallest coherent Argus product is:
 
 ZAR is the confirmed initial currency. Multi-currency and foreign exchange are future capabilities. Categories answer what the money was for; merchant tags answer where it went.
 
-Two real FNB CSV exports and two Standard Bank PDF statements were supplied after the first draft. They confirm the first two automatic import presets—FNB CSV (ZIP or bare CSV) and text-based Standard Bank PDF—alongside generic CSV column mapping and format disambiguation in the initial release.
+Two real FNB CSV exports and two Standard Bank PDF statements were supplied after the first draft. They confirm the intended first two automatic import presets—FNB CSV (ZIP or bare CSV) and text-based Standard Bank PDF—alongside generic CSV column mapping and format disambiguation in the initial release. Standard Bank PDF is currently deferred by the scope amendment above; FNB CSV and generic mapped CSV remain active.
 
 The product stops at insight. It does not budget, advise, aggregate bank feeds, track investments, or chat with the user.
 
@@ -45,7 +53,7 @@ The product stops at insight. It does not budget, advise, aggregate bank feeds, 
 > - **Idempotency and scope boundaries:** Imports are atomic (`IMP-7`) and occurrence-aware idempotent per financial account (`DUP-12`), including hidden transactions unless their parent import was deleted. The MVP excludes OCR for scanned PDFs, multi-currency conversion, balance importing or reconciliation, automatic categorisation or auto-applied merchant tags, split transactions, budgets, financial advice, bank feeds, and whole-customer account deletion.
 >
 > **Here is observable success.**  
-> - **Positive behaviour:** A verified subscriber can create ZAR financial accounts, import the FNB CSV/ZIP and Standard Bank PDF fixture structures and generic mapped CSVs after confirming ZAR and statement start/end dates, bulk-assign categories and multiple merchant tags across pages (`AC-CAT-2`), and view Overview summary cards, bar-first charts, period comparisons, and coverage warnings that reconcile to the filtered transaction list and drill down with shared filters.
+> - **Positive behaviour:** A verified subscriber can create ZAR financial accounts, import the FNB CSV/ZIP and generic mapped CSV structures after confirming ZAR and statement start/end dates (Standard Bank PDF is deferred per the scope amendment), bulk-assign categories and multiple merchant tags across pages (`AC-CAT-2`), and view Overview summary cards, bar-first charts, period comparisons, and coverage warnings that reconcile to the filtered transaction list and drill down with shared filters.
 > - **Negative and failure behaviour:** Archive uploads with zero or multiple CSVs, nested archives, encrypted archives, path traversal, or oversized payloads, as well as scanned, password-protected, or unrecognized-layout PDFs, are rejected before commit with plain-language reasons and zero persisted records (`AC-IMP-10`, `AC-IMP-15`, `AC-IMP-20`). Invalid rows block commit until marked skipped (`AC-IMP-2`). Overlapping imports and retried commits create zero duplicate transactions (`AC-IMP-21`, `AC-IMP-23`). Stale concurrent edits are rejected without silent overwrite, and deleting a committed import removes only that statement's transactions and restores clean re-import eligibility.
 
 ## 2. Product vision and principles
@@ -1177,3 +1185,117 @@ Architecture planning and implementation are divided into four sequential, repos
 ### 13.2 Instructions for Architect
 
 The architecture agent should treat Section 1.1 and Sections 6, 7, and 9 as the product contract, Sections 4.9 and 4.10 as the sample-derived format contracts, Section 12.3 and 12.4 as the confirmed decisions and planning defaults, and Section 13.1 as the delivery programme topology. Preserve the existing account, session, admin, billing, and visual foundations described in Section 4.
+
+## Pending production-PDF amendment (2026-11-05)
+
+**DEFERRED — not approved (2026-11-06).** The operator deferred Standard Bank
+PDF import to Thread #6. This amendment and Plan 2 revision 4 / C-PDF-2 remain
+future planning input; they are not current release scope and must not be
+implemented or treated as accepted until Thread #6 is explicitly activated.
+The approved body above and the 2026-11-06 scope amendment remain authoritative.
+This appendix does not claim implementation, private product acceptance, a new
+review verdict or publication authority.
+
+### Purpose and production inputs
+
+The operator confirms that the two Standard Bank statements described in
+Section 4.10 are intended production inputs, not test-only examples. Their
+structural expectations remain 4 pages / 49 transactions / 66 continuation
+lines and 18 pages / 297 transactions / 356 continuation lines. All pages,
+including page 1, have the six-column table. They are 612×792 PDF 2.0 documents,
+use Standard AES-256 V=5/R=6 encryption with an empty user password, carry the
+same masthead raster asset on each page, and have complete first/later-page
+account metadata and a terminal statement summary. The real source files and
+all financial values remain private and are never repository fixtures.
+
+The Plan's earlier synthetic-only/no-raster/all-encryption rejection policy
+does not meet that production intent. Proposed revision 4 broadens the accepted
+container/template, not the transaction meanings, ledger policy or privacy
+rules. No actual date, amount, description, account value, address or filename
+is included in this amendment.
+
+### Proposed replacement protection wording
+
+Replace **IMP-17** with:
+
+> Reject PDFs requiring a nonempty **user password**, and unsupported or
+> malformed protection, without prompting for passwords, guessing passwords,
+> using owner access, external decryption or changing the original PDF.
+> Support unencrypted PDFs and the recognized Standard Bank AES-256
+> Standard-handler V=5/R=6 template only when the empty user password is
+> independently verified before page extraction. Merely opening the document
+> is insufficient because a library may accept an owner password first.
+> No password input or password storage is introduced.
+
+For this preset, the words **password-protected** in Section 1.1's negative
+outcome, Section 4.10 item 7, Section 5.2 recovery, SEC-3, financial rule 20,
+MVP-21, AC-IMP-16 and the password-protected error-table row mean a document
+requiring a nonempty user password or outside the permitted protection profile.
+They do not prohibit the approved empty-user container simply because an
+encryption dictionary exists. Encrypted ZIP policy is unchanged.
+
+Replace **AC-IMP-16** with:
+
+> Given a PDF requiring a nonempty user password, accepting only empty-owner
+> access, or carrying unsupported/malformed protection, upload rejects safely
+> before any prepared review or committed financial effect. An approved
+> empty-user AES-256 R6 production-template control succeeds without supplying
+> a nonempty or owner password. No protection diagnostic or source value leaks.
+
+**Separate explicit decision:** the two target documents disable the PDF
+text-copy permission bit although they open with the empty user password.
+Supporting them therefore permits the account import despite that owner-set
+advisory restriction. It does not change permission bits, recover an owner
+password, claim bank authenticity or grant backend ownership from PDF metadata.
+Approval must explicitly include this decision; otherwise these exact files
+remain unsupported. Customer/session/account authorization stays unchanged.
+
+### Proposed replacement image/text and metadata wording
+
+Clarify **IMP-16**, Section 4.10 items 1/6/7, financial rule 20 and
+**AC-IMP-15** as follows:
+
+> Every transaction in the supported template is supplied by its selectable,
+> readable text layer. Image-only/scanned bodies and missing/unreadable or
+> ambiguous text reject; no OCR or external service is used. A text-bearing
+> page may carry only the specific privately confirmed nonfinancial masthead
+> asset, with fixed encoded identity/interpretation and approved placement
+> outside the transaction and summary areas. Size or apparent logo shape alone
+> is not evidence. Unknown/replaced/relocated/additional images reject, even
+> beneath a valid text header. The operator confirms the allowed asset and
+> fixed boilerplate privately; customer images and values never become a
+> learned allowlist.
+
+> The real first-page and later-page metadata forms, Available balance and
+> terminal statement-summary production are recognized by their complete
+> labels, typed field slots, positions and order. Each production consumes only
+> its own text. A title or Account label never permits skipping an arbitrary
+> preamble, extra line or body text. Metadata and all Balance/summary values
+> are neither returned, normalized into a description, persisted, logged nor
+> used as transaction amount, fingerprint or account/currency authority.
+
+Section 4.10's position rule is clarified to use the actual complete header and
+table gutters on 612×792 pages, not midpoints between short header words. Long
+description text may extend beyond the old midpoint boundary while remaining
+inside its real description cell. Amounts are taken only from unambiguous flow
+cells. Numeric description fragments are not amount candidates by value alone;
+true overlap/uncertain separation rejects rather than borrowing Balance.
+Payments and Bank fees remain outflows, Deposits inflows, and all exact-money,
+sign, zero/multiple-flow and immutable-invalid-row rules remain unchanged.
+
+### Private evidence and authority
+
+Keep Section 12.1's no-real-sample-commit rule unchanged. Synthetic repository
+fixtures reproduce the real protection, all-page layout, forms, decorative
+asset policy and description geometry with invented values. Actual source
+files, filenames, field/value manifests and diagnostic CSVs stay outside Git,
+logs and HiveMind. Private comparisons must verify every row and continuation
+through the published product child; row counts or earlier heuristic CSVs do
+not establish fidelity. Durable evidence uses sample aliases, structural
+counts, boolean comparisons, product/test identities and limits only.
+
+All other approved outcomes and the four-child programme remain unchanged.
+Thread #3 owns the correction; Thread #6 tracks the residual findings and is
+not a newly scheduled programme child. The latest implementation NO-GO remains
+in force. This proposal cannot close those findings or authorize work on
+Threads #4/#5, a new review, implementation or publication by itself.

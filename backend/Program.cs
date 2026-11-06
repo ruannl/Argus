@@ -7,6 +7,20 @@ using argus.Server.Http;
 using argus.Server.Mail;
 using argus.Server.Security;
 
+// The PDF parser child must run before configuration, migrations, logging, or
+// web services are loaded. It reads only its bounded stdin frame and writes
+// bounded sanitized JSON to stdout.
+if (args.Contains("--parse-statement-pdf", StringComparer.Ordinal))
+{
+    // The runner terminates this child by process group when a descendant
+    // outlives a timed-out or abnormal root and keeps an inherited pipe open.
+    argus.Server.Imports.ParserProcessIsolation.JoinOwnProcessGroup();
+    return await argus.Server.Imports.PdfParserChild.RunAsync(
+        Console.OpenStandardInput(),
+        Console.OpenStandardOutput(),
+        Console.OpenStandardError());
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 AppSettings settings;
@@ -64,10 +78,18 @@ builder.Services.AddSingleton<Store>();
 builder.Services.AddSingleton<FinanceStore>();
 builder.Services.AddSingleton<Policy>();
 builder.Services.AddSingleton<RateLimiter>();
+builder.Services.AddSingleton<FinanceGuard>();
 builder.Services.AddSingleton<IPwnedScreener, HibpScreener>();
 builder.Services.AddSingleton<IMailer, ResendMailer>();
 builder.Services.AddSingleton<AccountApi>();
 builder.Services.AddSingleton<FinanceApi>();
+builder.Services.AddSingleton<argus.Server.Imports.ParserAdmission>();
+builder.Services.AddSingleton<argus.Server.Imports.PdfParserRunner>();
+builder.Services.AddSingleton<argus.Server.Imports.IImportFaultInjector>(
+    argus.Server.Imports.NoopImportFaultInjector.Instance);
+builder.Services.AddSingleton<StatementImportStore>();
+builder.Services.AddSingleton<StatementImportApi>();
+builder.Services.AddHostedService<ImportCleanupService>();
 
 var app = builder.Build();
 
@@ -79,6 +101,15 @@ app.UseExceptionHandler(handler => handler.Run(async context =>
 }));
 
 app.UseCors();
+
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/v1/finance/imports"))
+    {
+        context.Response.Headers.CacheControl = "no-store";
+    }
+    await next();
+});
 
 app.Use(async (context, next) =>
 {
@@ -113,6 +144,7 @@ if (args.Contains("seed"))
 
 app.Services.GetRequiredService<AccountApi>().Map(app);
 app.Services.GetRequiredService<FinanceApi>().Map(app);
+app.Services.GetRequiredService<StatementImportApi>().Map(app);
 
 app.Run();
 return 0;

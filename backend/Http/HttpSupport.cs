@@ -202,6 +202,26 @@ public static class JsonBody
         }
     }
 
+    public static ParseResult<T> ParseBytes<T>(ReadOnlySpan<byte> body)
+    {
+        if (body.IsEmpty)
+        {
+            return new ParseResult<T>(default, false, false);
+        }
+        try
+        {
+            var value = JsonSerializer.Deserialize<T>(body, Options);
+            return value is null
+                ? new ParseResult<T>(default, false, false)
+                : new ParseResult<T>(value, true, false);
+        }
+        catch (JsonException exception)
+        {
+            var unknown = exception.Message.Contains("could not be mapped", StringComparison.OrdinalIgnoreCase);
+            return new ParseResult<T>(default, false, unknown);
+        }
+    }
+
     public static async Task<ParseResult<T>> ReadAsync<T>(
         HttpRequest request,
         CancellationToken cancellationToken = default)

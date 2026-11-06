@@ -7,6 +7,11 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: "jsdom",
+    server: {
+      deps: {
+        inline: ["next-auth", "@auth/core"],
+      },
+    },
     environmentOptions: {
       jsdom: {
         url: "http://127.0.0.1:3100",
@@ -19,6 +24,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "next/server": path.resolve(__dirname, "./node_modules/next/server.js"),
     },
   },
 });

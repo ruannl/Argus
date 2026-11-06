@@ -8,6 +8,17 @@ enterprise-grade ASP.NET Core backend.
 Customers receive this kit through the StarterFoundry CLI. This repository
 is the kit source; Git-based clone-and-rename is not a customer path.
 
+## Statement imports
+
+The Imports workspace currently supports FNB CSV/ZIP and generic mapped CSV
+statements. Standard Bank PDF import is deferred to a follow-up thread; the API
+rejects PDF requests with `pdf_import_deferred`. Uploads are inspected and
+mapped before a durable review is prepared; the review shows every row with
+validation, duplicate, and merchant-tag decisions. Commits are atomic and
+idempotent, and committed statements can be hidden, restored, or deleted with
+their owned transactions. See `docs/statement-import-runbook.md` for limits,
+privacy, parser deployment, and recovery.
+
 ## What's included
 
 - **Customer accounts** — registration, email verification, login, logout,

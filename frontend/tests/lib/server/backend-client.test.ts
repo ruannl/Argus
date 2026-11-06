@@ -10,15 +10,21 @@ import {
   createCategory,
   createFinancialAccount,
   createMerchantTag,
+  commitImportReview,
   deleteCategory,
+  deleteImportStatement,
+  inspectImportFile,
   deleteMerchantTag,
   getBackendHealth,
   getCurrentAccount,
   listCategories,
   listFinancialAccounts,
+  listImportHistory,
   listMerchantTags,
+  listOpenImportReviews,
   loginAccount,
   logoutSession,
+  prepareImportReview,
   requestPasswordReset,
   registerAccount,
   resendVerification,
@@ -740,6 +746,179 @@ describe("server finance client", () => {
 
   it("returns unavailable without fetching when the session token is empty", async () => {
     await expect(listFinancialAccounts("")).resolves.toEqual({
+      ok: false,
+      kind: "unavailable",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("server import client", () => {
+  beforeEach(() => {
+    vi.stubEnv("ARGUS_BACKEND_URL", "http://backend.test/");
+    vi.stubEnv("ARGUS_API_SECRET", "application-secret");
+    vi.stubEnv("ARGUS_FRONTEND_URL", "http://frontend.test");
+    fetchMock.mockReset();
+    globalThis.fetch = fetchMock;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.unstubAllEnvs();
+  });
+
+  const review = {
+    summary: {
+      id: "00000000-0000-0000-0000-000000000001",
+      financial_account_id: "00000000-0000-0000-0000-000000000002",
+      source_kind: "fnb_csv",
+      start_date: "2024-01-01",
+      end_date: "2024-01-31",
+      version: 1,
+      status: "Prepared",
+      expires_at: "2030-01-02T00:00:00.0000000Z",
+      total_rows: 2,
+      imported_count: 2,
+      suppressed_count: 0,
+      skipped_count: 0,
+      possible_duplicate_count: 0,
+      exact_override_count: 0,
+      statement_override: false,
+      statement_override_count: 0,
+      summary_hash: "hash",
+    },
+    page: { rows: [], total: 0, page: 1, page_size: 100 },
+  };
+
+  it("uploads inspect multipart with trust headers and no JSON content type", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        detected_source_kind: "fnb_csv",
+        limits: { max_file_bytes: 1, max_data_rows: 1, max_pdf_pages: 1, max_description_scalars: 1 },
+        proposed_start_date: null,
+        proposed_end_date: null,
+        mapping: {},
+        required_confirmations: [],
+        warnings: [],
+        preview: [],
+        preview_truncated: false,
+        can_prepare: true,
+      }), { status: 200 }),
+    );
+
+    await expect(inspectImportFile(
+      "opaque-session-token",
+      new Uint8Array([1, 2, 3]),
+      { financial_account_id: "account", source_kind: "fnb" },
+    )).resolves.toEqual(expect.objectContaining({ ok: true }));
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://backend.test/v1/finance/imports/inspect");
+    expect(init?.method).toBe("POST");
+    expect(init?.headers).toEqual(expect.objectContaining({
+      [APPLICATION_SECRET_HEADER]: "application-secret",
+      [SESSION_HEADER]: "opaque-session-token",
+      [FRONTEND_ORIGIN_HEADER]: "http://frontend.test",
+    }));
+    expect((init?.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+    expect(init?.body).toBeInstanceOf(FormData);
+    const form = init?.body as FormData;
+    expect(JSON.parse(String(form.get("options")))).toEqual({
+      financial_account_id: "account",
+      source_kind: "fnb",
+    });
+    expect(form.get("file")).toBeInstanceOf(Blob);
+  });
+
+  it("prepares a review through the multipart route", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(review), { status: 201 }));
+
+    await expect(prepareImportReview(
+      "opaque-session-token",
+      new Uint8Array([1]),
+      { financial_account_id: "account", source_kind: "fnb" },
+    )).resolves.toEqual({ ok: true, value: review });
+    expect(fetchMock.mock.calls[0][0]).toBe("http://backend.test/v1/finance/imports/reviews");
+  });
+
+  it("classifies a deferred PDF upload as a specific error", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "pdf_import_deferred" }), { status: 400 }),
+    );
+
+    await expect(inspectImportFile(
+      "opaque-session-token",
+      new Uint8Array([1]),
+      { financial_account_id: "account", source_kind: "standard_bank_pdf" },
+    )).resolves.toEqual({ ok: false, kind: "pdf_import_deferred" });
+  });
+
+  it("returns statement repeat IDs from the commit error body", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        error: "statement_repeat",
+        existing_import_ids: ["00000000-0000-0000-0000-000000000010"],
+      }), { status: 409 }),
+    );
+
+    await expect(commitImportReview("opaque-session-token", "review", 2, "hash")).resolves.toEqual({
+      ok: false,
+      kind: "statement_repeat",
+      existingImportIds: ["00000000-0000-0000-0000-000000000010"],
+    });
+  });
+
+  it("maps a replayed commit and sends the confirmation body", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ replayed: true, statement: {} }), { status: 200 }),
+    );
+
+    await expect(commitImportReview("opaque-session-token", "review", 3, "hash")).resolves.toEqual({
+      ok: true,
+      value: { replayed: true, statement: {} },
+    });
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(
+      JSON.stringify({ expected_review_version: 3, confirmed_summary_hash: "hash" }),
+    );
+  });
+
+  it("lists history with account, state, cursor, and limit query values", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ items: [], next_cursor: null }), { status: 200 }),
+    );
+
+    await listImportHistory("opaque-session-token", {
+      accountId: "account",
+      state: "hidden",
+      cursor: "next",
+      limit: 25,
+    });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "http://backend.test/v1/finance/imports?account_id=account&state=hidden&cursor=next&limit=25",
+    );
+  });
+
+  it("sends DELETE with the confirmation JSON body", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ deleted: true, deleted_transaction_count: 4 }), { status: 200 }),
+    );
+
+    await expect(deleteImportStatement("opaque-session-token", "statement", 2, 4)).resolves.toEqual({
+      ok: true,
+      value: { deleted: true, deleted_transaction_count: 4 },
+    });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://backend.test/v1/finance/imports/statement");
+    expect(init?.method).toBe("DELETE");
+    expect(init?.body).toBe(JSON.stringify({
+      expected_version: 2,
+      expected_transaction_count: 4,
+      confirm: true,
+    }));
+  });
+
+  it("returns unavailable without fetching when the session token is empty", async () => {
+    await expect(listOpenImportReviews("")).resolves.toEqual({
       ok: false,
       kind: "unavailable",
     });

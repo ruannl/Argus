@@ -24,7 +24,8 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         await using var connection = await db.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText =
-            "TRUNCATE transaction_merchant_tags, transactions, statement_imports, merchant_tags, " +
+            "TRUNCATE import_review_rows, import_reviews, import_commit_receipts, import_quota_locks, " +
+            "transaction_merchant_tags, transactions, statement_imports, merchant_tags, " +
             "categories, financial_accounts, customers, sessions, email_verification_tokens, " +
             "password_reset_tokens CASCADE";
         await command.ExecuteNonQueryAsync();
@@ -82,6 +83,38 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         string? origin = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Delete, path);
+        AddHeaders(request, secret, session, origin);
+        return request;
+    }
+
+    protected static HttpRequestMessage DeleteJson(
+        string path,
+        string json,
+        string? secret = TestEnvironment.ApiSecret,
+        string? session = null,
+        string? origin = null)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Delete, path)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+        AddHeaders(request, secret, session, origin);
+        return request;
+    }
+
+    protected static HttpRequestMessage MultipartPost(
+        string path,
+        byte[] file,
+        string optionsJson,
+        string? secret = TestEnvironment.ApiSecret,
+        string? session = null,
+        string? origin = null,
+        string filename = "statement.bin")
+    {
+        var content = new MultipartFormDataContent();
+        content.Add(new StringContent(optionsJson, Encoding.UTF8, "application/json"), "options");
+        content.Add(new ByteArrayContent(file), "file", filename);
+        var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
         AddHeaders(request, secret, session, origin);
         return request;
     }
@@ -147,6 +180,15 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         return (await BodyAsync(login)).GetProperty("token").GetString()!;
     }
 
+    protected async Task<long> CountWhereAsync(string table, string predicate)
+    {
+        var db = Factory.CreateDb();
+        await using var connection = await db.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM {table} WHERE {predicate}";
+        return (long)(await command.ExecuteScalarAsync())!;
+    }
+
     protected async Task<long> CountRowsAsync(string table)
     {
         var db = Factory.CreateDb();
@@ -154,6 +196,24 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         await using var command = connection.CreateCommand();
         command.CommandText = $"SELECT COUNT(*) FROM {table}";
         return (long)(await command.ExecuteScalarAsync())!;
+    }
+
+    protected async Task<long> ScalarAsync(string sql)
+    {
+        var db = Factory.CreateDb();
+        await using var connection = await db.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return Convert.ToInt64(await command.ExecuteScalarAsync());
+    }
+
+    protected async Task<string?> StringScalarAsync(string sql)
+    {
+        var db = Factory.CreateDb();
+        await using var connection = await db.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return await command.ExecuteScalarAsync() as string;
     }
 
     protected async Task ExecuteSqlAsync(string sql)
