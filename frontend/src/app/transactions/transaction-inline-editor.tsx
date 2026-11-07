@@ -9,6 +9,7 @@ type TransactionInlineEditorProps = {
   row: TransactionRow;
   categories: Category[];
   tags: MerchantTag[];
+  classificationDisabled?: boolean;
   onSaved: () => void;
   onStale: (message: string) => void;
 };
@@ -17,6 +18,7 @@ export default function TransactionInlineEditor({
   row,
   categories,
   tags,
+  classificationDisabled = false,
   onSaved,
   onStale,
 }: TransactionInlineEditorProps) {
@@ -32,6 +34,7 @@ export default function TransactionInlineEditor({
     categoryId: row.category.id,
   });
   const draftIsStale = row.version !== base.version;
+  const controlsDisabled = busy || draftIsStale || classificationDisabled;
 
   const assignable = categories.filter(
     (category) => !category.is_archived || category.id === row.category.id,
@@ -42,6 +45,10 @@ export default function TransactionInlineEditor({
   const addOptions = tags.filter((tag) => !tag.is_archived && !assignedIds.has(tag.id));
 
   async function save() {
+    if (classificationDisabled) {
+      setMessage("Classification options are unavailable until the page inventory is reloaded.");
+      return;
+    }
     if (draftIsStale) {
       setMessage(
         "This transaction changed while you were editing. Reopen the inline editor to review the latest values before saving.",
@@ -79,8 +86,8 @@ export default function TransactionInlineEditor({
         if (result.kind === "version_conflict" || result.kind === "not_found") {
           onStale(
             result.kind === "not_found"
-              ? "That transaction no longer exists in your workspace. The list has been refreshed."
-              : "This transaction changed while you were editing. The latest row values are loaded; reopen the inline editor to save.",
+              ? "That transaction no longer exists in your workspace. The list refresh was requested."
+              : "This transaction changed while you were editing. The editor was closed; reopen it after the list refreshes.",
           );
           return;
         }
@@ -88,7 +95,7 @@ export default function TransactionInlineEditor({
           onStale(
             result.kind === "unauthorized"
               ? "Your session expired. Sign in again before retrying."
-              : "The inline save outcome is uncertain. The list has been refreshed; check the saved value before retrying.",
+              : "The inline save outcome is uncertain. The list refresh was requested; check the saved value before retrying.",
           );
           return;
         }
@@ -105,7 +112,7 @@ export default function TransactionInlineEditor({
       onSaved();
     } catch {
       onStale(
-        "The inline save outcome is uncertain. The list has been refreshed; check the saved value before retrying.",
+        "The inline save outcome is uncertain. The list refresh was requested; check the saved value before retrying.",
       );
     } finally {
       setBusy(false);
@@ -119,7 +126,7 @@ export default function TransactionInlineEditor({
           Inline category for {row.description || "this transaction"}
           <select
             className="mt-1 w-full rounded-lg border border-line bg-page px-2 py-1.5 text-sm text-ink"
-            disabled={busy || draftIsStale}
+            disabled={controlsDisabled}
             onChange={(event) => setCategoryId(event.target.value)}
             value={categoryId}
           >
@@ -135,7 +142,7 @@ export default function TransactionInlineEditor({
           Add tags inline for {row.description || "this transaction"}
           <select
             className="mt-1 h-20 w-full rounded-lg border border-line bg-page px-2 py-1.5 text-sm text-ink"
-            disabled={busy || draftIsStale}
+            disabled={controlsDisabled}
             multiple
             onChange={(event) =>
               setAddIds(Array.from(event.target.selectedOptions, (option) => option.value))
@@ -151,7 +158,7 @@ export default function TransactionInlineEditor({
         </label>
       </div>
       {row.merchant_tags.length > 0 ? (
-        <fieldset className="mt-2" disabled={busy || draftIsStale}>
+        <fieldset className="mt-2" disabled={controlsDisabled}>
           <legend className="text-xs font-semibold text-ink">Remove assigned tags inline</legend>
           <div className="mt-1 flex flex-wrap gap-2">
             {row.merchant_tags.map((tag) => {
@@ -177,6 +184,15 @@ export default function TransactionInlineEditor({
           </div>
         </fieldset>
       ) : null}
+      {classificationDisabled ? (
+        <p
+          className="mt-2 rounded-lg border border-warning-line bg-warning-soft p-2 text-xs font-semibold text-warning-ink"
+          role="alert"
+        >
+          Categories or tags did not load, so this editor is disabled. Use Retry inventory before
+          editing.
+        </p>
+      ) : null}
       {draftIsStale ? (
         <p
           className="mt-2 rounded-lg border border-warning-line bg-warning-soft p-2 text-xs font-semibold text-warning-ink"
@@ -189,7 +205,7 @@ export default function TransactionInlineEditor({
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button
           className="rounded-full border border-line bg-page px-3 py-1.5 text-xs font-bold text-ink disabled:opacity-60"
-          disabled={busy || draftIsStale}
+          disabled={controlsDisabled}
           onClick={() => void save()}
           type="button"
         >

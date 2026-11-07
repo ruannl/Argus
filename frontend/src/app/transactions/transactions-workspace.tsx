@@ -154,6 +154,7 @@ export default function TransactionsWorkspace({
   const [pendingPreparation, setPendingPreparation] = useState<PendingPreparation | null>(null);
   const [knownRejection, setKnownRejection] = useState(false);
   const [terminalStatus, setTerminalStatus] = useState<"Abandoned" | "Expired" | null>(null);
+  const [terminalOperationId, setTerminalOperationId] = useState<string | null>(null);
   const [captureContext, setCaptureContext] = useState<{
     listCount: number | null;
     filters: TransactionFilters;
@@ -171,6 +172,7 @@ export default function TransactionsWorkspace({
   const applyingRef = useRef(false);
   const operationIdRef = useRef<string | null>(initialOperationId);
   const busyOwnerRef = useRef(0);
+  const statusGenerationRef = useRef(0);
   const viewRef = useRef<TransactionsInitialQuery>(initialQuery);
   const detailOriginRef = useRef<HTMLElement | null>(null);
   const detailRequestRef = useRef(0);
@@ -279,6 +281,7 @@ export default function TransactionsWorkspace({
         setRecovery(operation);
       } else {
         setTerminalStatus(operation.status);
+        setTerminalOperationId(operation.operation_id);
       }
     }).catch(() => {
       if (!cancelled) {
@@ -465,22 +468,45 @@ export default function TransactionsWorkspace({
   }
 
   function rememberOperation(id: string) {
+    // Any status request for an earlier operation is now obsolete. Its result
+    // must never replace the recovery state of this operation.
+    statusGenerationRef.current += 1;
+    setRecoveryLoading(false);
     operationIdRef.current = id;
     setOperationId(id);
     syncCurrentUrl();
   }
 
   function acknowledgeOutcome() {
-    operationIdRef.current = null;
-    setOperationId(null);
-    setPendingPreparation(null);
-    setKnownRejection(false);
+    const currentId = operationIdRef.current;
+    const displayedId =
+      terminalOperationId ??
+      receipt?.operation_id ??
+      recovery?.operation_id ??
+      prepared?.operation_id ??
+      pendingPreparation?.input.operation_id ??
+      null;
+    const matchesCurrent = displayedId === null ? currentId === null : displayedId === currentId;
+
+    // Invalidate any in-flight status request for the acknowledged outcome.
+    statusGenerationRef.current += 1;
     setTerminalStatus(null);
+    setTerminalOperationId(null);
     setReceipt(null);
     setRecovery(null);
     setPrepared(null);
-    setCaptureContext(null);
     setMessage(null);
+
+    if (matchesCurrent) {
+      setPendingPreparation(null);
+      setKnownRejection(false);
+      setCaptureContext(null);
+      operationIdRef.current = null;
+      setOperationId(null);
+    } else {
+      // The acknowledged outcome belonged to a different operation. Keep the
+      // current operation's retry input and recovery identity intact.
+    }
     syncCurrentUrl();
   }
 
@@ -495,6 +521,7 @@ export default function TransactionsWorkspace({
     setRecovery(null);
     setPendingPreparation(null);
     setTerminalStatus(null);
+    setTerminalOperationId(null);
     setSelection(new Map());
     setAllMatching(false);
     resetBulkControls();
@@ -518,9 +545,15 @@ export default function TransactionsWorkspace({
   }
 
   async function checkOperationStatus(id: string) {
+    const request = ++statusGenerationRef.current;
     setRecoveryLoading(true);
     try {
       const result = await loadOperationAction(id);
+      if (request !== statusGenerationRef.current || operationIdRef.current !== id) {
+        // A newer status request or a different operation owns the recovery
+        // state now. This result must not replace it.
+        return;
+      }
       if (!result.ok) {
         setMessage({
           tone: "error",
@@ -535,21 +568,31 @@ export default function TransactionsWorkspace({
       } else if (result.value.status === "Prepared") {
         setPrepared(null);
         setRecovery(result.value);
+        setTerminalStatus(null);
+        setTerminalOperationId(null);
         setMessage(null);
       } else {
         setPrepared(null);
         setRecovery(null);
         setPendingPreparation(null);
         setTerminalStatus(result.value.status);
+        setTerminalOperationId(result.value.operation_id);
       }
     } catch {
-      setMessage({ tone: "error", text: "Operation status is unavailable. Check status again." });
+      if (request === statusGenerationRef.current && operationIdRef.current === id) {
+        setMessage({ tone: "error", text: "Operation status is unavailable. Check status again." });
+      }
     } finally {
-      setRecoveryLoading(false);
+      if (request === statusGenerationRef.current) {
+        setRecoveryLoading(false);
+      }
     }
   }
 
   async function sendPreparation(pending: PendingPreparation) {
+    // A retry or new preparation supersedes any status read already in flight.
+    statusGenerationRef.current += 1;
+    setRecoveryLoading(false);
     const owner = ++busyOwnerRef.current;
     setBusy(true);
     setMessage(null);
@@ -574,6 +617,8 @@ export default function TransactionsWorkspace({
       if (operation.status === "Applied") {
         showAppliedReceipt(receiptFromStatus(operation));
       } else if (operation.status === "Prepared") {
+        setTerminalStatus(null);
+        setTerminalOperationId(null);
         if (pending.intent === intentRef.current) {
           setPrepared(operation);
           setRecovery(null);
@@ -587,6 +632,7 @@ export default function TransactionsWorkspace({
         setPrepared(null);
         setRecovery(null);
         setTerminalStatus(operation.status);
+        setTerminalOperationId(operation.operation_id);
       }
     } catch {
       setMessage({
@@ -654,6 +700,8 @@ export default function TransactionsWorkspace({
       return;
     }
     const operation = prepared;
+    statusGenerationRef.current += 1;
+    setRecoveryLoading(false);
     const intent = intentRef.current;
     const owner = ++busyOwnerRef.current;
     setBusy(true);
@@ -667,7 +715,16 @@ export default function TransactionsWorkspace({
       );
       if (!result.ok) {
         if (result.kind === "unavailable" || result.kind === "unauthorized") {
+          const statusRequest = ++statusGenerationRef.current;
           const recovered = await loadOperationAction(operation.operation_id);
+          if (
+            statusRequest !== statusGenerationRef.current ||
+            operationIdRef.current !== operation.operation_id
+          ) {
+            // A newer operation/status owns recovery now; do not install an
+            // obsolete apply result over it.
+            return;
+          }
           if (recovered.ok) {
             const recoveredOperation = recovered.value;
             if (recoveredOperation.status === "Applied") {
@@ -675,6 +732,8 @@ export default function TransactionsWorkspace({
               return;
             }
             if (recoveredOperation.status === "Prepared") {
+              setTerminalStatus(null);
+              setTerminalOperationId(null);
               if (intent === intentRef.current) {
                 setPrepared(recoveredOperation);
               } else {
@@ -685,6 +744,7 @@ export default function TransactionsWorkspace({
               setPrepared(null);
               setRecovery(null);
               setTerminalStatus(recoveredOperation.status);
+              setTerminalOperationId(recoveredOperation.operation_id);
               setMessage({
                 tone: "status",
                 text: recoveredOperation.status === "Expired"
@@ -707,11 +767,14 @@ export default function TransactionsWorkspace({
         ) {
           setPrepared(null);
           setRecovery(operation);
+          setTerminalStatus(null);
+          setTerminalOperationId(null);
           refreshCurrentView();
         } else if (result.kind === "operation_expired" || result.kind === "operation_abandoned") {
           setPrepared(null);
           setRecovery(null);
           setTerminalStatus(result.kind === "operation_expired" ? "Expired" : "Abandoned");
+          setTerminalOperationId(operation.operation_id);
         }
         return;
       }
@@ -733,11 +796,18 @@ export default function TransactionsWorkspace({
     if (applyingRef.current) {
       return;
     }
+    // This deliberate terminal action supersedes any pending status read for
+    // the same operation; a late status must not overwrite its result.
+    statusGenerationRef.current += 1;
+    setRecoveryLoading(false);
     const owner = ++busyOwnerRef.current;
     setBusy(true);
     setMessage(null);
     try {
       const result = await abandonOperationAction(id);
+      if (operationIdRef.current !== id) {
+        return;
+      }
       if (!result.ok) {
         setMessage({ tone: "error", text: result.message, details: result.details });
         return;
@@ -749,6 +819,7 @@ export default function TransactionsWorkspace({
         setRecovery(null);
         setPendingPreparation(null);
         setTerminalStatus(result.value.status);
+        setTerminalOperationId(id);
         setMessage({
           tone: "status",
           text: result.value.status === "Abandoned"
@@ -759,7 +830,9 @@ export default function TransactionsWorkspace({
         setMessage({ tone: "error", text: "The operation outcome is unresolved. Check its status again." });
       }
     } catch {
-      setMessage({ tone: "error", text: "The abandon outcome is uncertain. Check operation status again." });
+      if (operationIdRef.current === id) {
+        setMessage({ tone: "error", text: "The abandon outcome is uncertain. Check operation status again." });
+      }
     } finally {
       if (owner === busyOwnerRef.current) {
         setBusy(false);
@@ -844,9 +917,19 @@ export default function TransactionsWorkspace({
         next.delete(id);
         return next;
       });
-      refreshList();
+      // The edit may finish after the user changed filters, page or sort. Use
+      // the live view rather than this callback's render-time closure so the
+      // reload cannot install old-filter rows under the new controls.
+      const current = viewRef.current;
+      void runQuery(
+        current.filters,
+        current.page,
+        current.pageSize,
+        current.sortBy,
+        current.sortDirection,
+      );
     },
-    [invalidateConfirmation, refreshList],
+    [invalidateConfirmation, runQuery],
   );
 
   // A stale or uncertain single edit retires its draft, tells the user why, and
@@ -1367,6 +1450,7 @@ export default function TransactionsWorkspace({
                     {inlineEditorId === row.id ? (
                       <TransactionInlineEditor
                         categories={categories}
+                        classificationDisabled={inventoryFailed}
                         onSaved={() => handleRowSaved(row.id)}
                         onStale={(text) => handleRowStale(row.id, text)}
                         row={row}

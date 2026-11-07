@@ -70,6 +70,8 @@ export default function TransactionDetailView({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<Message | null>(null);
   const [confirmVisibility, setConfirmVisibility] = useState(false);
+  const [requiresReload, setRequiresReload] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
 
   const activeCategories = categories.filter(
     (category) => !category.is_archived || category.id === transaction.category.id,
@@ -84,61 +86,13 @@ export default function TransactionDetailView({
     (tag) => !tag.is_archived && !assignedIds.has(tag.id) && !addIds.includes(tag.id),
   );
 
-  const handleFailure = useCallback(
-    async (result: Extract<TransactionActionResult<unknown>, { ok: false }>) => {
-      if (result.kind === "not_found") {
-        if (onUnavailable) {
-          onUnavailable();
-        } else {
-          setMessage({
-            tone: "error",
-            text: "This transaction no longer exists in your workspace.",
-            details: result.details,
-          });
-        }
-        return;
-      }
-      if (
-        result.kind === "version_conflict" ||
-        result.kind === "selection_stale" ||
-        result.kind === "unavailable"
-      ) {
-        const refreshed = await loadTransactionAction(transaction.id);
-        if (refreshed.ok) {
-          setDetail(refreshed.value);
-          setCategoryId(refreshed.value.transaction.category.id);
-          setAddIds([]);
-          setRemoveIds([]);
-          setMessage({
-            tone: "error",
-            text:
-              result.kind === "unavailable"
-                ? "The save outcome is uncertain. The latest saved state has been loaded; check it before retrying."
-                : result.message,
-            details: result.details,
-          });
-        } else if (refreshed.kind === "not_found") {
-          if (onUnavailable) {
-            onUnavailable();
-          } else {
-            setMessage({
-              tone: "error",
-              text: "This transaction no longer exists in your workspace.",
-            });
-          }
-        } else {
-          setMessage({
-            tone: "error",
-            text: "The save could not be confirmed and the latest values could not be reloaded. Retry loading this transaction before saving again.",
-            details: result.details,
-          });
-        }
-        return;
-      }
-      setMessage({ tone: "error", text: result.message, details: result.details });
-    },
-    [onUnavailable, transaction.id],
-  );
+  const retireUnavailable = useCallback(() => {
+    if (onUnavailable) {
+      onUnavailable();
+    } else {
+      setUnavailable(true);
+    }
+  }, [onUnavailable]);
 
   const refreshDetail = useCallback(async () => {
     const refreshed = await loadTransactionAction(transaction.id);
@@ -147,9 +101,67 @@ export default function TransactionDetailView({
       setCategoryId(refreshed.value.transaction.category.id);
       setAddIds([]);
       setRemoveIds([]);
+      setRequiresReload(false);
+    } else if (refreshed.kind === "not_found") {
+      retireUnavailable();
+    } else {
+      setRequiresReload(true);
     }
     return refreshed;
-  }, [transaction.id]);
+  }, [retireUnavailable, transaction.id]);
+
+  const handleFailure = useCallback(
+    async (result: Extract<TransactionActionResult<unknown>, { ok: false }>) => {
+      if (result.kind === "not_found") {
+        retireUnavailable();
+        return;
+      }
+      if (
+        result.kind === "version_conflict" ||
+        result.kind === "selection_stale" ||
+        result.kind === "unavailable"
+      ) {
+        const refreshed = await refreshDetail();
+        if (refreshed.ok) {
+          setMessage({
+            tone: "error",
+            text:
+              result.kind === "unavailable"
+                ? "The save outcome is uncertain. The latest saved state has been loaded; check it before retrying."
+                : result.message,
+            details: result.details,
+          });
+        } else if (refreshed.kind !== "not_found") {
+          setMessage({
+            tone: "error",
+            text: "The save could not be confirmed and the latest values could not be reloaded. Further saves are disabled until this transaction reloads.",
+            details: result.details,
+          });
+        }
+        return;
+      }
+      setMessage({ tone: "error", text: result.message, details: result.details });
+    },
+    [refreshDetail, retireUnavailable],
+  );
+
+  async function reloadCurrentDetail() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const refreshed = await refreshDetail();
+      if (refreshed.ok) {
+        setMessage({ tone: "status", text: "Latest transaction values loaded." });
+      } else if (refreshed.kind !== "not_found") {
+        setMessage({
+          tone: "error",
+          text: "The transaction still could not be reloaded. Retry in a moment.",
+        });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function saveMetadata(
     changes: {
@@ -191,19 +203,12 @@ export default function TransactionDetailView({
         return true;
       }
       if (refreshed.kind === "not_found") {
-        if (onUnavailable) {
-          onUnavailable();
-        } else {
-          setMessage({
-            tone: "status",
-            text: `${successText} This transaction no longer exists in your workspace.`,
-          });
-        }
+        retireUnavailable();
         return false;
       }
       setMessage({
         tone: "status",
-        text: `${successText} The rest of this detail could not be refreshed, so suggestions may be stale. Reload before the next save.`,
+        text: `${successText} The rest of this detail could not be refreshed, so suggestions may be stale. Further saves are disabled until this transaction reloads.`,
       });
       return true;
     } catch {
@@ -214,18 +219,11 @@ export default function TransactionDetailView({
           text: "The save outcome is uncertain. The latest saved state has been loaded; check it before retrying.",
         });
       } else if (refreshed.kind === "not_found") {
-        if (onUnavailable) {
-          onUnavailable();
-        } else {
-          setMessage({
-            tone: "error",
-            text: "The save outcome is uncertain and this transaction no longer exists in your workspace.",
-          });
-        }
+        retireUnavailable();
       } else {
         setMessage({
           tone: "error",
-          text: "The save outcome is uncertain and the latest state could not be reloaded. Retry loading this transaction before saving again.",
+          text: "The save outcome is uncertain and the latest state could not be reloaded. Further saves are disabled until this transaction reloads.",
         });
       }
       return false;
@@ -270,6 +268,44 @@ export default function TransactionDetailView({
     await saveMetadata(
       { is_hidden_by_user: nextHidden },
       nextHidden ? "Transaction hidden." : "Transaction restored.",
+    );
+  }
+
+  if (unavailable) {
+    return (
+      <section
+        aria-labelledby="transaction-unavailable-title"
+        className="rounded-[2rem] border border-warning-line bg-warning-soft p-5 sm:p-7"
+      >
+        <h2
+          className="text-xl font-semibold text-warning-ink"
+          id="transaction-unavailable-title"
+        >
+          Transaction no longer available
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-warning-ink">
+          This transaction no longer exists in your workspace. It may have been deleted with its
+          statement; there is no source to edit or recreate.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {onClose ? (
+            <button
+              autoFocus
+              className="rounded-full border border-line bg-surface px-4 py-2 text-sm font-bold text-ink"
+              onClick={onClose}
+              type="button"
+            >
+              Close detail
+            </button>
+          ) : null}
+          <Link
+            className="rounded-full border border-line bg-surface px-4 py-2 text-sm font-bold text-ink"
+            href="/transactions"
+          >
+            Back to transactions
+          </Link>
+        </div>
+      </section>
     );
   }
 
@@ -398,9 +434,29 @@ export default function TransactionDetailView({
         </div>
       ) : null}
 
+      {requiresReload ? (
+        <div
+          className="mt-4 rounded-xl border border-warning-line bg-warning-soft p-3 text-sm font-semibold text-warning-ink"
+          role="alert"
+        >
+          <p>
+            The latest values could not be reloaded. Further saves are disabled until this
+            transaction reloads.
+          </p>
+          <button
+            className="mt-2 rounded-full border border-warning-line bg-surface px-4 py-2 text-sm font-bold text-warning-ink disabled:opacity-60"
+            disabled={busy}
+            onClick={() => void reloadCurrentDetail()}
+            type="button"
+          >
+            Reload transaction
+          </button>
+        </div>
+      ) : null}
+
       <fieldset
         className="mt-6 rounded-2xl border border-line p-4"
-        disabled={busy || classificationDisabled}
+        disabled={busy || classificationDisabled || requiresReload}
       >
         <legend className="px-2 text-sm font-bold text-ink">Classification</legend>
         {classificationDisabled ? (
@@ -514,7 +570,7 @@ export default function TransactionDetailView({
                     <button
                       aria-label={`Remove pending tag ${tag?.display_name ?? id}`}
                       className="ml-2 underline underline-offset-2 disabled:opacity-60"
-                      disabled={busy || classificationDisabled}
+                      disabled={busy || classificationDisabled || requiresReload}
                       onClick={() =>
                         setAddIds((current) => current.filter((candidate) => candidate !== id))
                       }
@@ -532,7 +588,7 @@ export default function TransactionDetailView({
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             className="rounded-full border border-line bg-surface px-4 py-2 text-sm font-bold text-ink"
-            disabled={busy}
+            disabled={busy || requiresReload}
             onClick={() => void saveSelectedChanges()}
             type="button"
           >
@@ -540,7 +596,7 @@ export default function TransactionDetailView({
           </button>
           <button
             className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-            disabled={busy}
+            disabled={busy || requiresReload}
             onClick={() => {
               setCategoryId(transaction.category.id);
               setAddIds([]);
@@ -568,7 +624,7 @@ export default function TransactionDetailView({
           {detail.suggested_tags.map((tag) => (
             <button
               className="rounded-full border border-accent-soft-line bg-accent-soft px-3 py-1 text-xs font-bold text-accent-soft-ink disabled:opacity-60"
-              disabled={busy || classificationDisabled}
+              disabled={busy || classificationDisabled || requiresReload}
               key={tag.id}
               onClick={() => void acceptSuggestion(tag.id)}
               type="button"
@@ -619,7 +675,7 @@ export default function TransactionDetailView({
             <div className="mt-2 flex flex-wrap gap-2">
               <button
                 className="rounded-full border border-line bg-surface px-4 py-2 text-sm font-bold text-ink"
-                disabled={busy}
+                disabled={busy || requiresReload}
                 onClick={() => void toggleHidden()}
                 type="button"
               >
@@ -637,7 +693,7 @@ export default function TransactionDetailView({
         ) : (
           <button
             className="mt-3 rounded-full border border-line px-4 py-2 text-sm font-bold text-ink disabled:opacity-60"
-            disabled={busy || (transaction.statement_import.is_hidden && transaction.is_hidden_by_user)}
+            disabled={busy || requiresReload || (transaction.statement_import.is_hidden && transaction.is_hidden_by_user)}
             onClick={() => setConfirmVisibility(true)}
             type="button"
           >

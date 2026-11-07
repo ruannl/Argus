@@ -230,8 +230,36 @@ describe("transaction detail", () => {
     await user.selectOptions(screen.getByLabelText("Category"), "cat-2");
     await user.click(screen.getByRole("button", { name: "Save classification" }));
 
-    expect(await screen.findByText(/could not be reloaded/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/^The latest values could not be reloaded\./),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/latest values have been refreshed/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save classification" })).toBeDisabled();
+
+    vi.mocked(loadTransactionAction).mockResolvedValue({ ok: true, value: makeDetail() });
+    await user.click(screen.getByRole("button", { name: "Reload transaction" }));
+    expect(await screen.findByText("Latest transaction values loaded.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save classification" })).toBeEnabled();
+  });
+
+  it("retires a standalone detail when a save reports deletion", async () => {
+    const user = userEvent.setup();
+    vi.mocked(saveTransactionAction).mockResolvedValue({
+      ok: false,
+      kind: "not_found",
+      message: "Not found.",
+    });
+    render(
+      <TransactionDetailView categories={categories} initialDetail={makeDetail()} tags={tags} />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("Category"), "cat-2");
+    await user.click(screen.getByRole("button", { name: "Save classification" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Transaction no longer available" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save classification" })).not.toBeInTheDocument();
   });
 
   it("reports terminal unavailability when a save targets a deleted row", async () => {
@@ -288,6 +316,8 @@ describe("transaction detail", () => {
     expect(await screen.findByText(/could not be refreshed/i)).toBeInTheDocument();
     expect(screen.getByText(/version 4/)).toBeInTheDocument();
     expect((screen.getByLabelText("Category") as HTMLSelectElement).value).toBe("cat-2");
+    expect(screen.getByRole("button", { name: "Save classification" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reload transaction" })).toBeInTheDocument();
   });
 
   it("explains a hidden parent and disables individual restore", () => {

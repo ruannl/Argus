@@ -173,14 +173,16 @@ function detailFor(source: TransactionPage["transactions"][number]): Transaction
   };
 }
 
-function renderWorkspace(overrides: {
+type WorkspaceOverrides = {
   initialOperationId?: string | null;
   initialPage?: TransactionPage | null;
   initialError?: string | null;
   inventoryFailed?: boolean;
   tags?: MerchantTag[];
-} = {}) {
-  return render(
+};
+
+function workspaceElement(overrides: WorkspaceOverrides = {}) {
+  return (
     <TransactionsWorkspace
       account={account}
       accounts={[
@@ -202,8 +204,12 @@ function renderWorkspace(overrides: {
       initialQuery={initialQuery}
       inventoryFailed={overrides.inventoryFailed ?? false}
       tags={overrides.tags ?? []}
-    />,
+    />
   );
+}
+
+function renderWorkspace(overrides: WorkspaceOverrides = {}) {
+  return render(workspaceElement(overrides));
 }
 
 describe("transactions workspace", () => {
@@ -714,7 +720,7 @@ describe("transactions workspace", () => {
     await user.click(screen.getByRole("button", { name: "Save inline changes" }));
 
     expect(
-      await screen.findByText(/changed while you were editing.*latest row values are loaded/i),
+      await screen.findByText(/changed while you were editing.*reopen it after the list refreshes/i),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("Inline category for Row one")).not.toBeInTheDocument();
     await waitFor(() => expect(queryTransactionsAction).toHaveBeenCalled());
@@ -904,5 +910,243 @@ describe("transactions workspace", () => {
     expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(prepared.operation_id);
     await user.click(screen.getByRole("button", { name: "Abandon and prepare again" }));
     expect(abandonOperationAction).toHaveBeenCalledWith(prepared.operation_id);
+  });
+
+  it("does not claim a completed list refresh when the inline reload fails", async () => {
+    const user = userEvent.setup();
+    vi.mocked(saveTransactionAction).mockResolvedValue({
+      ok: false,
+      kind: "version_conflict",
+      message: "This transaction changed since you loaded it.",
+    });
+    vi.mocked(queryTransactionsAction).mockResolvedValue({
+      ok: false,
+      kind: "unavailable",
+      message: "Query unavailable.",
+    });
+    renderWorkspace({ tags: [merchantTag] });
+
+    await user.click(screen.getByRole("button", { name: "Edit inline" }));
+    await user.selectOptions(screen.getByLabelText("Inline category for Row one"), "cat-2");
+    await user.click(screen.getByRole("button", { name: "Save inline changes" }));
+
+    expect(
+      await screen.findByText(/changed while you were editing.*reopen it after the list refreshes/i),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Query unavailable.")).toBeInTheDocument();
+    expect(screen.queryByText(/has been refreshed/i)).not.toBeInTheDocument();
+  });
+
+  it("disables an already-open inline editor when inventory becomes incomplete", async () => {
+    const user = userEvent.setup();
+    const view = renderWorkspace({ tags: [merchantTag] });
+    await user.click(screen.getByRole("button", { name: "Edit inline" }));
+
+    view.rerender(workspaceElement({ inventoryFailed: true, tags: [merchantTag] }));
+
+    expect(
+      screen.getByText(/did not load, so this editor is disabled/i),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/Inline category for/)).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save inline changes" })).toBeDisabled();
+  });
+
+  it("applies a late inline save refresh to the current view", async () => {
+    const user = userEvent.setup();
+    let resolveSave!: (value: Awaited<ReturnType<typeof saveTransactionAction>>) => void;
+    vi.mocked(saveTransactionAction).mockReturnValue(
+      new Promise((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    vi.mocked(queryTransactionsAction).mockResolvedValue({
+      ok: true,
+      value: {
+        ...pageData,
+        transactions: [],
+        matching_visible_count: 0,
+        matching_hidden_count: 0,
+        matching_total: 0,
+        filtered_total: 0,
+      },
+    });
+    renderWorkspace();
+
+    await user.click(screen.getByRole("button", { name: "Edit inline" }));
+    await user.selectOptions(screen.getByLabelText("Inline category for Row one"), "cat-2");
+    await user.click(screen.getByRole("button", { name: "Save inline changes" }));
+    await user.click(screen.getByRole("button", { name: "Hidden" }));
+
+    await waitFor(() =>
+      expect(
+        vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility,
+      ).toBe("hidden"),
+    );
+
+    await act(async () => {
+      resolveSave({
+        ok: true,
+        value: {
+          transaction: { ...row, version: 2, category: { ...row.category, id: "cat-2" } },
+          selected_count: 1,
+          changed_count: 1,
+          unchanged_count: 0,
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(
+        vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility,
+      ).toBe("hidden"),
+    );
+  });
+
+  it("applies a late drawer save refresh to the current view", async () => {
+    const user = userEvent.setup();
+    let resolveSave!: (value: Awaited<ReturnType<typeof saveTransactionAction>>) => void;
+    vi.mocked(saveTransactionAction).mockReturnValue(
+      new Promise((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    vi.mocked(loadTransactionAction).mockResolvedValue({
+      ok: true,
+      value: detailFor(row),
+    });
+    vi.mocked(queryTransactionsAction).mockResolvedValue({
+      ok: true,
+      value: {
+        ...pageData,
+        transactions: [],
+        matching_visible_count: 0,
+        matching_hidden_count: 0,
+        matching_total: 0,
+        filtered_total: 0,
+      },
+    });
+    renderWorkspace();
+
+    await user.click(screen.getByRole("button", { name: /Row one/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(within(dialog).getByLabelText("Category"), "cat-2");
+    await user.click(within(dialog).getByRole("button", { name: "Save classification" }));
+    await user.click(within(dialog).getByRole("button", { name: "Close detail" }));
+    await user.click(screen.getByRole("button", { name: "Hidden" }));
+
+    await waitFor(() =>
+      expect(
+        vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility,
+      ).toBe("hidden"),
+    );
+
+    await act(async () => {
+      resolveSave({
+        ok: true,
+        value: {
+          transaction: { ...row, version: 2, category: { ...row.category, id: "cat-2" } },
+          selected_count: 1,
+          changed_count: 1,
+          unchanged_count: 0,
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(
+        vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility,
+      ).toBe("hidden"),
+    );
+  });
+
+  it("does not let a late status result replace a newer operation's recovery", async () => {
+    const user = userEvent.setup();
+    const operationA = prepared;
+    const operationB = {
+      ...prepared,
+      operation_id: "22222222-2222-4222-8222-222222222222",
+    };
+    let resolveStatusA!: (value: Awaited<ReturnType<typeof loadOperationAction>>) => void;
+    vi.mocked(loadOperationAction)
+      .mockResolvedValueOnce({ ok: true, value: operationA })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveStatusA = resolve;
+        }),
+      )
+      .mockResolvedValueOnce({
+        ok: false,
+        kind: "unavailable",
+        message: "Status unavailable.",
+      })
+      .mockResolvedValue({
+        ok: false,
+        kind: "unavailable",
+        message: "Status unavailable.",
+      });
+    vi.mocked(abandonOperationAction)
+      .mockResolvedValueOnce({ ok: true, value: abandoned })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: {
+          operation_id: operationB.operation_id,
+          status: "Applied",
+          selected_count: 1,
+          changed_count: 1,
+          unchanged_count: 0,
+          applied_at: "2026-01-01T00:01:00Z",
+          replayed: false,
+        },
+      });
+    vi.mocked(prepareTransactionsAction).mockResolvedValue({
+      ok: true,
+      value: { operation: operationB, created: true },
+    });
+    vi.mocked(applyOperationAction).mockResolvedValue({
+      ok: false,
+      kind: "unavailable",
+      message: "Apply unavailable.",
+    });
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(operationB.operation_id as never);
+
+    renderWorkspace({ initialOperationId: operationA.operation_id });
+    await screen.findByRole("heading", { name: "Recovered confirmation" });
+
+    await user.click(screen.getByRole("button", { name: "Check operation status" }));
+    await user.click(screen.getByRole("button", { name: "Abandon and prepare again" }));
+    await screen.findByRole("heading", { name: "Operation abandoned" });
+    await user.click(screen.getByRole("button", { name: "Acknowledge outcome" }));
+    expect(new URL(window.location.href).searchParams.has("operation_id")).toBe(false);
+
+    await user.click(screen.getByRole("checkbox", { name: /Select transaction Row one/ }));
+    await user.selectOptions(screen.getByLabelText("Set category"), "cat-2");
+    await user.click(screen.getByRole("button", { name: "Review change" }));
+    await screen.findByRole("heading", { name: "Confirm this change" });
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      operationB.operation_id,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Apply change" }));
+    expect(await screen.findByText(/apply outcome is uncertain/i)).toBeInTheDocument();
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      operationB.operation_id,
+    );
+
+    await act(async () => {
+      resolveStatusA({ ok: true, value: operationA });
+    });
+
+    expect(screen.queryByRole("heading", { name: "Recovered confirmation" })).not.toBeInTheDocument();
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      operationB.operation_id,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Cancel and abandon" }));
+    expect(await screen.findByRole("heading", { name: "Applied receipt" })).toBeInTheDocument();
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      operationB.operation_id,
+    );
+    await user.click(screen.getByRole("button", { name: "Dismiss receipt" }));
+    expect(new URL(window.location.href).searchParams.has("operation_id")).toBe(false);
   });
 });

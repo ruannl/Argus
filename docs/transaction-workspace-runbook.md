@@ -118,8 +118,12 @@ operator approval.
 
 ## Verification evidence (corrected baseline, 2026-11-07)
 
-The following battery ran on the corrected tree after the final review findings
-were addressed. The local commit contains exactly this baseline; no push, pull
+The following battery ran after the Plan 3 implementation was corrected and the
+in-scope whole-tree review findings were addressed (W2, M1–M3, M5 and the M6
+evidence record). The whole-tree review's W1 (pre-existing login/password-reset
+race), M4 (shared account preflight) and L1 (import expiry policy) are outside
+this correction scope and require Architect disposition; this runbook does not
+claim they are fixed. The local tree is committed locally; no push, pull
 request, deployment or repeat review was authorized.
 
 - Backend: `dotnet format argus.Server.csproj --verify-no-changes` and the test
@@ -131,8 +135,12 @@ request, deployment or repeat review was authorized.
   rollback at transaction/tag/receipt boundaries, post-commit lost-response
   restart replay, composite cleanup pairs with overlapping operation UUIDs,
   post-lock expiry, the foreign-owner route matrix, and the 50,000-member
-  boundary.
-- Frontend: `npm run lint` is clean; Vitest passed **223 tests** in 28 files;
+  boundary. The whole-tree review independently reran the non-database
+  configuration tests, frontend Vitest/lint and TypeScript checks, and the live
+  health/route checks. It did not rerun the full isolation suite, Playwright or
+  the browser walkthrough, so the 298/17 results remain implementer-reported
+  execution, not an independently repeated full battery.
+- Frontend: `npm run lint` is clean; Vitest passed **229 tests** in 28 files;
   `npm run build` succeeds for both transaction routes; Playwright passed all
   **17** existing smoke tests, including the unauthenticated nested detail
   route.
@@ -140,12 +148,18 @@ request, deployment or repeat review was authorized.
   dense tags and a 1,000-row hidden parent): visible list 81 ms, search 31 ms,
   category+amount filter 69 ms, hidden view 45 ms on the local PostgreSQL
   instance. The recorded execution plan is a limit over index-driven nested
-  loops, not a sequential scan. These are local synthetic observations, not a
-  production service-level guarantee.
+  loops, not a sequential scan. The 20,000-row pass is in
+  `/tmp/opencode/measurement-corrected.log`; that combined capture also contains
+  a failed 50,000-row fixture setup, so its 50,000-row result is not the
+  passing measurement. These are local synthetic observations, not a production
+  service-level guarantee.
 - 50,000-member bulk measurement: prepare 990 ms, apply 1,936 ms, receipt replay
   7 ms; 25,000 rows changed and 25,000 already matched, committed atomically.
   The public 50,000 bound was exercised as a whole, not as independent pages.
-  These are local synthetic observations, not a capacity promise.
+  This result is in the separate passing capture
+  `/tmp/opencode/measurement-50k-corrected.log`, not the earlier combined
+  capture whose fixture setup timed out. These are local synthetic
+  observations, not a capacity promise.
 - Composed browser walkthrough (run `20261107T1630`, synthetic dev customer,
   fresh dev frontend on :3000 and current backend on :3001): a synthetic FNB CSV
   was imported through the real upload/review/commit flow into a canary
@@ -156,10 +170,18 @@ request, deployment or repeat review was authorized.
   apply with a receipt that survived reload, prepare/reload/abandon recovery,
   a parent-hidden bulk restore refused at preparation with an Imports link,
   parent restore, drawer Tab/Shift-Tab containment and Escape focus return at
-  320 px, no horizontal overflow at 320/375/1280 px, and both themes were all
-  exercised. Search text stayed out of the URL and browser storage. This is
-  live local runtime observation; it is not CI, production or a substitute for
-  the automated suites.
+  320 px, no horizontal overflow at 320/375/1280 px, and both themes were
+  exercised. Search text stayed out of the URL and browser storage.
+  **Evidence limit:** the retained
+  `/tmp/opencode/walkthrough-20261107T1630/report.json` is an accumulated
+  per-step artifact across interrupted runs. It ends with a rate-limited
+  sign-in failure and contains repeated skipped entries, so it is not one clean
+  end-to-end run; the successful checks are live per-step observations, not a
+  single completed run. The retained dark screenshot shows the loaded list
+  after the drawer closed, and the 320 px light screenshot shows the
+  rate-limited/incomplete state; they do not visually prove every claimed
+  loaded or drawer state. This is live local runtime observation, not CI,
+  production or a substitute for the automated suites.
 - The existing Playwright smoke suite is unauthenticated and does not establish
   authenticated finance composition; the walkthrough above is the composed
   evidence, and it used synthetic values only.
@@ -193,7 +215,17 @@ rejected inside action validation, a valid search whose unknown owned
 statement filter was rejected by the backend with `404`, and a session-expiry
 attempt after the session cookie was cleared. The session-expiry request never
 reached the action: the proxy redirected the action POST to `/login`, which is
-recorded as a proxy boundary rather than action-validation evidence.
+recorded as a proxy boundary rather than action-validation evidence. The
+canary script itself recorded only that the backend-rejection attempt was made;
+the expected `404` is visible in the backend capture for that run, so that case
+is inspected-log evidence rather than a script assertion.
+
+Not established by this run: an all-matching preparation carrying private
+search text, malformed financial-field inputs, and an action-level
+session-expiry rejection were not exercised. The screenshots retained from the
+walkthrough do not cover every claimed loaded/drawer state. These cases are
+**NOT RUN** for the privacy claim and must not be inferred from the covered
+searches.
 
 The complete unsanitized captures contained **0** matches for the synthetic
 search, description, account, institution, category and tag names and the
@@ -212,7 +244,7 @@ clean canary run above took no screenshots and recorded no hydration-mismatch
 line. Do not take a screenshot during a privacy canary; use
 `page.screenshot({ caret: "initial" })` if one is required.
 
-
+## Known boundaries
 
 - Search cost is a bounded literal substring scan per customer; trigram
   extensions, full-text services and background bulk jobs are out of scope.

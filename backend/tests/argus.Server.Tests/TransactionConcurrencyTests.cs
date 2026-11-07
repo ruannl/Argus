@@ -821,6 +821,30 @@ public sealed class TransactionConcurrencyTests(KitFactory factory) : Transactio
             customerId, accountId, statementId, expenseId,
             new DateOnly(2024, 2, 1), "Single race row", -1m, 1);
 
+        var db = Factory.CreateDb();
+        await using var blocker = await db.OpenAsync();
+        await using var blockerTransaction = await blocker.BeginTransactionAsync();
+        int blockerPid;
+        await using (var lockCommand = blocker.CreateCommand())
+        {
+            lockCommand.Transaction = blockerTransaction;
+            lockCommand.CommandText = """
+                SELECT 1 FROM transactions
+                WHERE customer_id = @customer AND id = @row
+                FOR UPDATE
+                """;
+            lockCommand.Parameters.AddWithValue("customer", customerId);
+            lockCommand.Parameters.AddWithValue("row", rowId);
+            Assert.NotNull(await lockCommand.ExecuteScalarAsync());
+        }
+        await using (var pid = blocker.CreateCommand())
+        {
+            pid.Transaction = blockerTransaction;
+            pid.CommandText = "SELECT pg_backend_pid()";
+            blockerPid = (int)(await pid.ExecuteScalarAsync())!;
+        }
+
+        await using var observer = await db.OpenAsync();
         var first = SendAsync(Patch(
             $"/v1/finance/transactions/{rowId}",
             Json(new { expected_version = 1, changes = new { category_id = target } }),
@@ -834,6 +858,14 @@ public sealed class TransactionConcurrencyTests(KitFactory factory) : Transactio
                 confirm = true,
             }),
             session: session));
+        try
+        {
+            await WaitForBlockedRequestAsync(observer, blockerPid, requiredCount: 2);
+        }
+        finally
+        {
+            await blockerTransaction.RollbackAsync();
+        }
         var responses = await Task.WhenAll(first, second);
         Assert.Equal(1, responses.Count(response => response.StatusCode == HttpStatusCode.OK));
         Assert.Equal(1, responses.Count(response => response.StatusCode == HttpStatusCode.Conflict));
@@ -1072,11 +1104,43 @@ public sealed class TransactionConcurrencyTests(KitFactory factory) : Transactio
             Explicit((rowId, 1)),
             new { category_id = target });
 
+        var db = Factory.CreateDb();
+        await using var blocker = await db.OpenAsync();
+        await using var blockerTransaction = await blocker.BeginTransactionAsync();
+        int blockerPid;
+        await using (var lockCommand = blocker.CreateCommand())
+        {
+            lockCommand.Transaction = blockerTransaction;
+            lockCommand.CommandText = """
+                SELECT 1 FROM financial_accounts
+                WHERE customer_id = @customer AND id = @account
+                FOR UPDATE
+                """;
+            lockCommand.Parameters.AddWithValue("customer", customerId);
+            lockCommand.Parameters.AddWithValue("account", accountId);
+            Assert.NotNull(await lockCommand.ExecuteScalarAsync());
+        }
+        await using (var pid = blocker.CreateCommand())
+        {
+            pid.Transaction = blockerTransaction;
+            pid.CommandText = "SELECT pg_backend_pid()";
+            blockerPid = (int)(await pid.ExecuteScalarAsync())!;
+        }
+
+        await using var observer = await db.OpenAsync();
         var applyTask = SendAsync(ApplyRequest(session, operation));
         var hideTask = SendAsync(Post(
             $"/v1/finance/imports/{statementId}/hide",
             Json(new { expected_version = 1, expected_transaction_count = 1, confirm = true }),
             session: session));
+        try
+        {
+            await WaitForBlockedRequestAsync(observer, blockerPid, requiredCount: 2);
+        }
+        finally
+        {
+            await blockerTransaction.RollbackAsync();
+        }
         var applyResponse = await applyTask;
         var hideResponse = await hideTask;
 
@@ -1170,12 +1234,26 @@ public sealed class TransactionConcurrencyTests(KitFactory factory) : Transactio
             lockCommand.Parameters.AddWithValue("tag_id", tagId);
             Assert.NotNull(await lockCommand.ExecuteScalarAsync());
         }
+        int blockerPid;
+        await using (var pid = lockConnection.CreateCommand())
+        {
+            pid.Transaction = lockTransaction;
+            pid.CommandText = "SELECT pg_backend_pid()";
+            blockerPid = (int)(await pid.ExecuteScalarAsync())!;
+        }
 
+        await using var observer = await db.OpenAsync();
         var commitTask = SendAsync(Post(
             $"/v1/finance/imports/reviews/{reviewId}/commit", commitBody, session: session));
         var applyTask = SendAsync(ApplyRequest(session, operation));
-        await Task.Delay(750);
-        await lockTransaction.RollbackAsync();
+        try
+        {
+            await WaitForBlockedRequestAsync(observer, blockerPid, requiredCount: 2);
+        }
+        finally
+        {
+            await lockTransaction.RollbackAsync();
+        }
 
         var commitResponse = await commitTask;
         var applyResponse = await applyTask;
@@ -1215,9 +1293,41 @@ public sealed class TransactionConcurrencyTests(KitFactory factory) : Transactio
             Explicit((rowId, 1)),
             new { category_id = target });
 
+        var db = Factory.CreateDb();
+        await using var blocker = await db.OpenAsync();
+        await using var blockerTransaction = await blocker.BeginTransactionAsync();
+        int blockerPid;
+        await using (var lockCommand = blocker.CreateCommand())
+        {
+            lockCommand.Transaction = blockerTransaction;
+            lockCommand.CommandText = """
+                SELECT 1 FROM transactions
+                WHERE customer_id = @customer AND id = @row
+                FOR UPDATE
+                """;
+            lockCommand.Parameters.AddWithValue("customer", customerId);
+            lockCommand.Parameters.AddWithValue("row", rowId);
+            Assert.NotNull(await lockCommand.ExecuteScalarAsync());
+        }
+        await using (var pid = blocker.CreateCommand())
+        {
+            pid.Transaction = blockerTransaction;
+            pid.CommandText = "SELECT pg_backend_pid()";
+            blockerPid = (int)(await pid.ExecuteScalarAsync())!;
+        }
+
+        await using var observer = await db.OpenAsync();
         var applyTask = SendAsync(ApplyRequest(session, operation));
         var deleteTask = SendAsync(Delete(
             $"/v1/finance/categories/{sourceCategory}", session: session));
+        try
+        {
+            await WaitForBlockedRequestAsync(observer, blockerPid, requiredCount: 2);
+        }
+        finally
+        {
+            await blockerTransaction.RollbackAsync();
+        }
         var applyResponse = await applyTask;
         var deleteResponse = await deleteTask;
 
