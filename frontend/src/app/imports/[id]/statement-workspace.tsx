@@ -224,9 +224,14 @@ export default function StatementWorkspace({ detail }: StatementWorkspaceProps) 
           <h2 className="text-xl font-semibold tracking-[-0.02em] text-ink">
             Transactions created by this statement
           </h2>
-          <span className="text-xs text-muted">
-            Read-only. Individual transaction editing belongs to the Transactions workspace.
-          </span>
+          <Link
+            className="text-xs font-semibold text-ink underline underline-offset-4"
+            href={`/transactions?statement_import_id=${summary.id}&visibility=${
+              summary.is_hidden ? "hidden" : "all"
+            }`}
+          >
+            Open this statement’s rows in the Transactions workspace
+          </Link>
         </div>
         {detail.rows.length === 0 ? (
           <p className="rounded-2xl border border-line bg-surface p-4 text-sm text-muted">
@@ -249,6 +254,12 @@ export default function StatementWorkspace({ detail }: StatementWorkspaceProps) 
                   <p className="mt-1 max-w-2xl break-words text-sm leading-6 text-muted">
                     {row.description}
                   </p>
+                  <Link
+                    className="mt-1 inline-block text-xs font-semibold text-ink underline underline-offset-4"
+                    href={`/transactions/${row.id}`}
+                  >
+                    Open transaction detail
+                  </Link>
                 </div>
                 <p className="font-mono text-lg font-semibold tabular-nums text-ink">
                   {row.amount}

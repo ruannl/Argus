@@ -440,6 +440,18 @@ residual findings and the separate real-statement blockers are tracked in
 follow-up Thread #6. No further review was requested; publication and Threads
 #4/#5 remain blocked.
 
+## Workspace handoff
+
+Committed statements remain the source of the read-only row list shown on
+Imports. Classification, tag changes and the individual hide flag belong to the
+Transactions workspace; each statement links to its rows there and to each
+owned row's detail page. Statement visibility still owns the parent layer, so a
+parent-hidden row is restored from Imports first. See
+`docs/transaction-workspace-runbook.md` for filters, version conflicts, frozen
+bulk snapshots and recovery. This handoff does not change any import count,
+fingerprint, occurrence, receipt, visibility or deletion behaviour described
+above.
+
 ## Safe error codes
 
 The deferred production-template proposal adds no route or password field. Its

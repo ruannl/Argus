@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using argus.Server.Finance;
 using argus.Server.Imports;
 using Npgsql;
 using NpgsqlTypes;
@@ -1181,7 +1182,7 @@ public sealed class StatementImportStore
             connection, transaction, customerId, cancellationToken);
         foreach (var snapshot in snapshots)
         {
-            foreach (var tagId in SuggestTags(snapshot.Row.NormalizedDescription, activeTags))
+            foreach (var tagId in TagSuggestions.Match(snapshot.Row.NormalizedDescription, activeTags))
             {
                 snapshot.SuggestedTagIds.Add(tagId);
             }
@@ -3298,49 +3299,6 @@ public sealed class StatementImportStore
                 reader.GetString(1).Split(' ', StringSplitOptions.RemoveEmptyEntries)));
         }
         return tags;
-    }
-
-    private static IEnumerable<Guid> SuggestTags(
-        string normalizedDescription,
-        IReadOnlyList<(Guid Id, string[] Tokens)> tags)
-    {
-        if (string.IsNullOrWhiteSpace(normalizedDescription))
-        {
-            yield break;
-        }
-        var descriptionTokens = normalizedDescription.Split(
-            ' ', StringSplitOptions.RemoveEmptyEntries);
-        foreach (var (id, tagTokens) in tags)
-        {
-            if (tagTokens.Length == 0 || tagTokens.Length > descriptionTokens.Length)
-            {
-                continue;
-            }
-            var found = false;
-            for (var start = 0; start <= descriptionTokens.Length - tagTokens.Length; start++)
-            {
-                var match = true;
-                for (var offset = 0; offset < tagTokens.Length; offset++)
-                {
-                    if (!string.Equals(
-                            descriptionTokens[start + offset], tagTokens[offset],
-                            StringComparison.Ordinal))
-                    {
-                        match = false;
-                        break;
-                    }
-                }
-                if (match)
-                {
-                    found = true;
-                    break;
-                }
-            }
-            if (found)
-            {
-                yield return id;
-            }
-        }
     }
 
     private static async Task<Guid?> FindSystemCategoryAsync(

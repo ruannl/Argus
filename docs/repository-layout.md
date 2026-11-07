@@ -16,12 +16,14 @@ commands with the working directory inside the relevant tree.
 │   ├── Brand.cs              canonical brand/header/env constants
 │   ├── Configuration/        fail-closed prefixed configuration
 │   ├── Data/                 Npgsql connection, migrations, Store, FinanceStore,
-│   │                         StatementImportStore, import cleanup service
+│   │                         StatementImportStore, TransactionStore, cleanup services
+│   ├── Transactions/         filter/action/limit contracts, fault seam, shared DTOs
+│   ├── Finance/              pure tag-suggestion matcher shared with imports
 │   ├── Imports/              bounded FNB/generic CSV parsers, identity/fingerprint
 │   │                         code, and the dormant PDF parser/child runner
 │   ├── Security/             argon2id, tokens, policy, rate limiter, HIBP
-│   ├── Http/                 error bodies, trust checks, account, finance and import
-│   │                         endpoints, bounded multipart reader
+│   ├── Http/                 error bodies, trust checks, account, finance, import
+│   │                         and transaction endpoints, bounded bodies
 │   ├── Mail/                 Resend mailer
 │   ├── Billing/              HMAC webhook verification and event parsing
 │   ├── Seed.cs               idempotent dev-account seeding
@@ -35,8 +37,9 @@ commands with the working directory inside the relevant tree.
 │   ├── src/app/              App Router routes (landing, auth, workspace)
 │   ├── src/app/settings/     Accounts, Categories, Merchant tags, Profile
 │   ├── src/app/imports/      upload/confirm workspace, review pages, statement detail
+│   ├── src/app/transactions/ list/filter/bulk workspace, detail drawer/standalone page
 │   ├── src/components/       app shell, account details, session clearing
-│   ├── src/lib/server/       server-only backend client, finance actions, import actions
+│   ├── src/lib/server/       server-only backend client, finance/import/transaction actions
 │   ├── src/lib/brand.ts      canonical brand constants
 │   ├── tests/                Vitest; tests/e2e is Playwright
 │   ├── package.json / package-lock.json
@@ -110,6 +113,13 @@ npm run test:e2e
 | POST | `/v1/finance/imports/{id}/hide` | Hide the parent statement layer |
 | POST | `/v1/finance/imports/{id}/restore` | Restore the parent statement layer |
 | DELETE | `/v1/finance/imports/{id}` | Delete the statement and exactly its owned transactions |
+| POST | `/v1/finance/transactions/query` | Owned list with filters, counts and pagination |
+| GET | `/v1/finance/transactions/{id}` | Owned detail with unapplied tag suggestions |
+| PATCH | `/v1/finance/transactions/{id}` | Versioned category/tag/hide metadata edit |
+| POST | `/v1/finance/transactions/operations/prepare` | Freeze an explicit or all-matching bulk scope |
+| GET | `/v1/finance/transactions/operations/{id}` | Safe operation status and receipt recovery |
+| POST | `/v1/finance/transactions/operations/{id}/apply` | Apply a saved scope atomically once |
+| POST | `/v1/finance/transactions/operations/{id}/abandon` | Abandon a prepared operation |
 
 Account routes require the trusted-frontend application-secret header and
 independently validate the acting user's session. Error bodies are
@@ -131,6 +141,13 @@ remain dormant until the follow-up thread re-enables them. Raw uploads and real 
 never persisted. The durable review stores only sanitized mapped rows and
 expires after 24 hours; committed receipts retain identifiers and counts for
 retry safety. See `docs/statement-import-runbook.md`.
+
+Transaction queries and edits reuse the same caller/session/subscriber guard and
+owner scoping. Search text travels only in bounded request bodies; list URLs
+carry nonsensitive ids, enums, dates and page choices. Bulk scope is frozen in
+PostgreSQL operation manifests; apply, abandon, expiry and receipts are
+recoverable after reload or restart. See
+`docs/transaction-workspace-runbook.md`.
 
 ## CI
 

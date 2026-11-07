@@ -585,6 +585,421 @@ export async function deleteMerchantTag(
   );
 }
 
+// --- Transaction workspace -------------------------------------------------
+
+export type TransactionVisibility = "visible" | "hidden" | "all";
+
+export type TransactionFilters = {
+  search?: string;
+  start_date?: string;
+  end_date?: string;
+  financial_account_id?: string;
+  statement_import_id?: string;
+  category_id?: string;
+  merchant_tag?: string;
+  category_kind?: CategoryKind;
+  direction?: "in" | "out" | "zero";
+  visibility?: TransactionVisibility;
+};
+
+export type TransactionQuery = {
+  filters?: TransactionFilters;
+  page?: number;
+  page_size?: number;
+  sort_by?: "date" | "amount" | "description";
+  sort_direction?: "asc" | "desc";
+};
+
+export type TransactionAccountRef = {
+  id: string;
+  display_name: string;
+  is_archived: boolean;
+};
+
+export type TransactionCategoryRef = {
+  id: string;
+  display_name: string;
+  kind: CategoryKind;
+  is_system: boolean;
+  is_archived: boolean;
+};
+
+export type TransactionTagRef = {
+  id: string;
+  display_name: string;
+  is_archived: boolean;
+};
+
+export type TransactionStatementRef = {
+  id: string;
+  statement_label: string;
+  source_type: string;
+  is_hidden: boolean;
+};
+
+export type TransactionRow = {
+  id: string;
+  version: number;
+  transaction_date: string;
+  description: string;
+  amount: string;
+  currency: "ZAR";
+  direction: "in" | "out" | "zero";
+  financial_account: TransactionAccountRef;
+  category: TransactionCategoryRef;
+  merchant_tags: TransactionTagRef[];
+  statement_import: TransactionStatementRef;
+  is_hidden_by_user: boolean;
+  effective_hidden: boolean;
+  hidden_reason: "none" | "individual" | "statement" | "both";
+};
+
+export type TransactionPage = {
+  transactions: TransactionRow[];
+  inventory_count: number;
+  matching_visible_count: number;
+  matching_hidden_count: number;
+  matching_total: number;
+  filtered_total: number;
+  page: number;
+  page_size: number;
+  sort_by: string;
+  sort_direction: string;
+};
+
+export type TransactionDetail = {
+  transaction: TransactionRow;
+  suggested_tags: TransactionTagRef[];
+  has_more_suggestions: boolean;
+  source_page: number | null;
+  source_row_number: number;
+};
+
+export type TransactionChanges = {
+  category_id?: string;
+  add_tag_ids?: string[];
+  remove_tag_ids?: string[];
+  is_hidden_by_user?: boolean;
+};
+
+export type TransactionPatchInput = {
+  expected_version: number;
+  changes: TransactionChanges;
+  confirm?: boolean;
+};
+
+export type TransactionSelection =
+  | {
+      mode: "explicit";
+      transactions: { id: string; expected_version: number }[];
+    }
+  | {
+      mode: "all_matching";
+      filters: TransactionFilters;
+    };
+
+export type TransactionPrepareInput = {
+  operation_id: string;
+  selection: TransactionSelection;
+  changes: TransactionChanges;
+};
+
+export type TransactionOperationAction = {
+  category: TransactionCategoryRef | null;
+  add_tags: TransactionTagRef[];
+  remove_tags: TransactionTagRef[];
+  is_hidden_by_user: boolean | null;
+  stale: boolean;
+};
+
+export type TransactionOperationStatus = "Prepared" | "Applied" | "Abandoned" | "Expired";
+
+export type TransactionOperation = {
+  operation_id: string;
+  status: TransactionOperationStatus;
+  selection_mode: "explicit" | "all_matching";
+  captured_at: string;
+  expires_at: string;
+  selected_count: number;
+  changed_count: number;
+  unchanged_count: number;
+  confirmation_hash: string | null;
+  applied_at: string | null;
+  terminal_at: string | null;
+  action: TransactionOperationAction | null;
+};
+
+export type TransactionPrepareResult = {
+  operation: TransactionOperation;
+  created: boolean;
+};
+
+export type TransactionApplyResult = {
+  operation_id: string;
+  status: TransactionOperationStatus;
+  selected_count: number;
+  changed_count: number;
+  unchanged_count: number;
+  applied_at: string | null;
+  replayed: boolean;
+};
+
+export type TransactionMutationResult = {
+  transaction: TransactionRow;
+  selected_count: number;
+  changed_count: number;
+  unchanged_count: number;
+};
+
+export type TransactionErrorKind =
+  | "invalid_request"
+  | "empty_selection"
+  | "category_unavailable"
+  | "tag_unavailable"
+  | "tag_limit_exceeded"
+  | "selection_too_large"
+  | "request_too_large"
+  | "version_conflict"
+  | "selection_stale"
+  | "classification_changed"
+  | "parent_hidden"
+  | "idempotency_conflict"
+  | "operation_busy"
+  | "operation_expired"
+  | "operation_abandoned"
+  | "operation_quota"
+  | "not_found"
+  | "rate_limited"
+  | "unauthorized"
+  | "unavailable";
+
+export type TransactionErrorDetails = {
+  statements?: { id: string; statement_label: string }[];
+  stale_count?: number;
+  missing_count?: number;
+};
+
+export type TransactionRequestResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; kind: TransactionErrorKind; details?: TransactionErrorDetails };
+
+const TRANSACTION_ERROR_KINDS = new Set<string>([
+  "invalid_request",
+  "empty_selection",
+  "category_unavailable",
+  "tag_unavailable",
+  "tag_limit_exceeded",
+  "selection_too_large",
+  "request_too_large",
+  "version_conflict",
+  "selection_stale",
+  "classification_changed",
+  "parent_hidden",
+  "idempotency_conflict",
+  "operation_busy",
+  "operation_expired",
+  "operation_abandoned",
+  "operation_quota",
+  "not_found",
+  "rate_limited",
+]);
+
+async function classifyTransactionFailure(
+  response: Response,
+): Promise<{ kind: TransactionErrorKind; details?: TransactionErrorDetails }> {
+  if (response.status === 401) {
+    return { kind: "unauthorized" };
+  }
+  if (response.status === 429) {
+    return { kind: "rate_limited" };
+  }
+  if (response.status === 404) {
+    return { kind: "not_found" };
+  }
+  if (response.status === 413) {
+    return { kind: "request_too_large" };
+  }
+  if (response.status === 410) {
+    try {
+      const body: unknown = await response.json();
+      const error = typeof body === "object" && body !== null && "error" in body
+        ? (body as { error?: unknown }).error
+        : null;
+      if (error === "operation_abandoned" || error === "operation_expired") {
+        return { kind: error };
+      }
+    } catch {
+      // An unparseable 410 remains a terminal operation response.
+    }
+    return { kind: "operation_expired" };
+  }
+
+  try {
+    const body: unknown = await response.json();
+    if (typeof body === "object" && body !== null && "error" in body) {
+      const error = (body as { error?: unknown }).error;
+      if (typeof error === "string" && TRANSACTION_ERROR_KINDS.has(error)) {
+        return {
+          kind: error as TransactionErrorKind,
+          details: transactionErrorDetails(body),
+        };
+      }
+    }
+  } catch {
+    // Fall through to unavailable.
+  }
+
+  return { kind: "unavailable" };
+}
+
+function transactionErrorDetails(body: object): TransactionErrorDetails | undefined {
+  const source = body as {
+    statements?: unknown;
+    stale_count?: unknown;
+    missing_count?: unknown;
+  };
+  const details: TransactionErrorDetails = {};
+  if (Array.isArray(source.statements)) {
+    details.statements = source.statements
+      .filter(
+        (value): value is { id: string; statement_label: string } =>
+          typeof value === "object" &&
+          value !== null &&
+          typeof (value as { id?: unknown }).id === "string" &&
+          typeof (value as { statement_label?: unknown }).statement_label === "string",
+      )
+      .slice(0, 5)
+      .map((value) => ({ id: value.id, statement_label: value.statement_label }));
+  }
+  if (typeof source.stale_count === "number") {
+    details.stale_count = source.stale_count;
+  }
+  if (typeof source.missing_count === "number") {
+    details.missing_count = source.missing_count;
+  }
+  return Object.keys(details).length === 0 ? undefined : details;
+}
+
+async function transactionRequest<T>(
+  sessionToken: string,
+  method: "GET" | "POST" | "PATCH",
+  path: string,
+  body?: Record<string, unknown>,
+): Promise<TransactionRequestResult<T>> {
+  if (!sessionToken) {
+    return { ok: false, kind: "unavailable" };
+  }
+
+  try {
+    const init: RequestInit = {
+      method,
+      headers: financeHeaders(sessionToken, body !== undefined),
+      cache: "no-store",
+    };
+    if (body !== undefined) {
+      init.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(`${backendUrl()}${path}`, init);
+    if (!response.ok) {
+      const failure = await classifyTransactionFailure(response);
+      return { ok: false, ...failure };
+    }
+    return { ok: true, value: (await response.json()) as T };
+  } catch {
+    return { ok: false, kind: "unavailable" };
+  }
+}
+
+export async function queryTransactions(
+  sessionToken: string,
+  query: TransactionQuery,
+): Promise<TransactionRequestResult<TransactionPage>> {
+  return transactionRequest<TransactionPage>(
+    sessionToken,
+    "POST",
+    "/v1/finance/transactions/query",
+    query as Record<string, unknown>,
+  );
+}
+
+export async function getTransaction(
+  sessionToken: string,
+  id: string,
+): Promise<TransactionRequestResult<TransactionDetail>> {
+  return transactionRequest<TransactionDetail>(
+    sessionToken,
+    "GET",
+    `/v1/finance/transactions/${encodeURIComponent(id)}`,
+  );
+}
+
+export async function patchTransaction(
+  sessionToken: string,
+  id: string,
+  input: TransactionPatchInput,
+): Promise<TransactionRequestResult<TransactionMutationResult>> {
+  return transactionRequest<TransactionMutationResult>(
+    sessionToken,
+    "PATCH",
+    `/v1/finance/transactions/${encodeURIComponent(id)}`,
+    input as unknown as Record<string, unknown>,
+  );
+}
+
+export async function prepareTransactionOperation(
+  sessionToken: string,
+  input: TransactionPrepareInput,
+): Promise<TransactionRequestResult<TransactionPrepareResult>> {
+  return transactionRequest<TransactionPrepareResult>(
+    sessionToken,
+    "POST",
+    "/v1/finance/transactions/operations/prepare",
+    input as unknown as Record<string, unknown>,
+  );
+}
+
+export async function getTransactionOperation(
+  sessionToken: string,
+  operationId: string,
+): Promise<TransactionRequestResult<TransactionOperation>> {
+  return transactionRequest<TransactionOperation>(
+    sessionToken,
+    "GET",
+    `/v1/finance/transactions/operations/${encodeURIComponent(operationId)}`,
+  );
+}
+
+export async function applyTransactionOperation(
+  sessionToken: string,
+  operationId: string,
+  confirmationHash: string,
+  expectedSelectedCount: number,
+): Promise<TransactionRequestResult<TransactionApplyResult>> {
+  return transactionRequest<TransactionApplyResult>(
+    sessionToken,
+    "POST",
+    `/v1/finance/transactions/operations/${encodeURIComponent(operationId)}/apply`,
+    {
+      confirmation_hash: confirmationHash,
+      expected_selected_count: expectedSelectedCount,
+      confirm: true,
+    },
+  );
+}
+
+export async function abandonTransactionOperation(
+  sessionToken: string,
+  operationId: string,
+): Promise<TransactionRequestResult<TransactionApplyResult>> {
+  return transactionRequest<TransactionApplyResult>(
+    sessionToken,
+    "POST",
+    `/v1/finance/transactions/operations/${encodeURIComponent(operationId)}/abandon`,
+    {},
+  );
+}
+
 // --- Statement import -------------------------------------------------------
 
 export type ImportErrorKind =

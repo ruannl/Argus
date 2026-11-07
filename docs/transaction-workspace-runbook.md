@@ -1,0 +1,222 @@
+# Transaction workspace runbook
+
+Operational guidance for the Plan 3 transaction workspace: list and detail
+reads, versioned classification, visible/hidden layers, bulk preparation and
+apply, recovery, limits, and migration 0007. It describes the shipped
+behaviour; the governing contract remains `docs/plans/03-transactions-and-classification.md`
+and the approved product brief.
+
+## Capability summary
+
+- `/transactions` lists owned transactions with description-or-tag substring
+  search, inclusive date bounds, account, statement, category, single-tag or
+  Untagged, category-kind, direction and visibility filters. Sorting is by
+  date, exact numeric amount, or description, always with transaction id as the
+  tie-breaker. Page sizes are 25, 50 and 100.
+- Counts are inventory and row counts, never money totals: `inventory_count`
+  ignores filters; visible and hidden matching counts apply every filter except
+  visibility; `filtered_total` applies visibility and drives pagination.
+- `/transactions/{id}` and the list drawer show source identity as read-only
+  text. Category, merchant tags and the individual hide flag are editable.
+- Tag suggestions reuse the import whole-token matcher. They are never applied
+  automatically; accepting a chip sends an explicit versioned add-tag edit.
+- Hiding keeps the record and duplicate identity. Parent statement hiding wins;
+  individual restore is refused with `parent_hidden` until the statement is
+  restored in Imports.
+- Bulk changes use an explicit selection (up to 1,000 rows) or all rows matching
+  one filter snapshot (up to 50,000). Preparation freezes exact ids and
+  versions; later imports are not included. Apply is all-or-nothing and writes a
+  durable receipt.
+- There is no individual transaction delete, no source-field edit, and no
+  reporting/overview computation in this surface.
+
+## Limits and bounds
+
+| Concern | Value |
+| --- | --- |
+| Search | one literal substring, at most 200 Unicode scalars |
+| Query body | 16 KiB, checked by actual read length |
+| Edit/prepare/apply body | 256 KiB, checked by actual read length |
+| Page size | 25 (default), 50, 100 |
+| Explicit selection | 1–1,000 unique id/version tuples |
+| All-matching selection | at most 50,000; 50,001 returns `selection_too_large` |
+| Tags per request | at most 100 ids in each add/remove set, disjoint |
+| Tags per transaction | at most 100 after an add; no-add removals may reduce a legacy set |
+| Open prepared operations | 5 per customer |
+| Live manifest entries | 100,000 per customer |
+| Preparation rate | 20 per customer per 15-minute window |
+| Operation expiry | 15 minutes absolute from capture |
+| Workspace statement bound | 30 seconds per statement |
+| Lock wait bound | 5 seconds |
+
+## Lifecycle and recovery
+
+`Prepared → Applied | Abandoned | Expired` is terminal after the first terminal
+state. An applied receipt is checked before expiry or member validation, so a
+lost response, a reload, a new host, or a later statement deletion can replay
+the same result without re-applying effects. A differing confirmation hash or
+selected count is refused. Expired and abandoned operations cannot apply.
+
+The current `/transactions` URL may carry a nonsensitive `operation_id` for
+recovery. On reload the page fetches status and never applies automatically.
+Applied receipts and terminal refusals are shown; a still-Prepared operation can
+be abandoned and prepared afresh, but not applied after the original private
+search/filter context is lost. Cleanup expires Prepared operations at startup
+and every fifteen minutes even if no request arrives.
+
+A failed apply leaves the operation Prepared for retry, abandon or expiry; it
+does not imply any row changed. Serialization, deadlock, lock-timeout and
+statement-timeout failures roll back and return `409 operation_busy`; retry the
+same operation rather than preparing a new one. A lost or uncertain response
+must be resolved through status/receipt before describing the outcome.
+
+## Errors
+
+| Status | Codes |
+| --- | --- |
+| 400 | `invalid_request`, `empty_selection`, `category_unavailable`, `tag_unavailable`, `tag_limit_exceeded`, `selection_too_large` |
+| 401 / 403 | `unauthorized` / bodyless origin rejection |
+| 404 | `not_found` for unknown or foreign ids, filters, targets and operations |
+| 409 | `version_conflict`, `selection_stale`, `classification_changed`, `parent_hidden`, `idempotency_conflict`, `operation_busy` |
+| 410 | `operation_expired`, `operation_abandoned` |
+| 413 | `request_too_large` |
+| 429 | `rate_limited`, `operation_quota` |
+| 500 | `internal_server_error`; no internal detail is returned or logged with user data |
+
+Stale failures may include owned `stale_count`/`missing_count` values and a
+bounded list of owned statement links for parent-hidden restores. They never
+include amounts, descriptions, foreign ids or SQL detail.
+
+## Concurrency and lock order
+
+New workspace writes use the order: **owned accounts ascending → operation
+header (bulk only) → chosen category → referenced tags ascending → transactions
+ascending**. Chosen category/tag rows are locked `FOR SHARE`, so renaming,
+archiving, deleting or changing a target fails the confirmation with
+`classification_changed` instead of reinterpreting it. Category and tag deletion
+lock their affected transaction rows in ascending id order before the broad
+reassignment/removal; their existing target-entity-first order is unchanged.
+Statement import, statement visibility and statement deletion keep their account
+first lock prefix. Cleanup locks only operation headers.
+
+## Migration and rollback
+
+Migration `0007_transaction_workspace` adds `transaction_operations` and
+`transaction_operation_items`, plus transaction indexes on
+`(customer_id, transaction_date, id)` and `(customer_id, amount, id)`. It is
+additive: it does not backfill or change source identity values. Manifest rows
+deliberately have no live transaction/statement foreign key, so a deleted member
+makes apply stale rather than silently shrinking the frozen scope; the parent
+header cascades.
+
+Before applying to valuable data, take a database backup with the existing
+recovery process. A populated upgrade from `0006` is covered by
+`TransactionMigrationTests`. Application rollback may leave the additive schema,
+indexes and compact receipts in place; older code does not use them. Do not drop
+receipts while an operation may be retried. Restoring a backup needs explicit
+operator approval.
+
+## Verification evidence (corrected baseline, 2026-11-07)
+
+The following battery ran on the corrected tree after the final review findings
+were addressed. The local commit contains exactly this baseline; no push, pull
+request, deployment or repeat review was authorized.
+
+- Backend: `dotnet format argus.Server.csproj --verify-no-changes` and the test
+  project equivalent are clean. The full isolation suite passed **298 tests**
+  against the dedicated `argus_test` database (2m 11s). `dotnet build -c Release`
+  completed with 0 warnings and 0 errors. Coverage includes query/filter/count/
+  sort, single and bulk mutation, tag algebra, parent-hidden refusal, stale and
+  classification conflicts, abandon/expiry/quota, migration upgrade, fault
+  rollback at transaction/tag/receipt boundaries, post-commit lost-response
+  restart replay, composite cleanup pairs with overlapping operation UUIDs,
+  post-lock expiry, the foreign-owner route matrix, and the 50,000-member
+  boundary.
+- Frontend: `npm run lint` is clean; Vitest passed **223 tests** in 28 files;
+  `npm run build` succeeds for both transaction routes; Playwright passed all
+  **17** existing smoke tests, including the unauthenticated nested detail
+  route.
+- 20,000-row measurement (21,000 owned rows plus another customer's 5,000,
+  dense tags and a 1,000-row hidden parent): visible list 81 ms, search 31 ms,
+  category+amount filter 69 ms, hidden view 45 ms on the local PostgreSQL
+  instance. The recorded execution plan is a limit over index-driven nested
+  loops, not a sequential scan. These are local synthetic observations, not a
+  production service-level guarantee.
+- 50,000-member bulk measurement: prepare 990 ms, apply 1,936 ms, receipt replay
+  7 ms; 25,000 rows changed and 25,000 already matched, committed atomically.
+  The public 50,000 bound was exercised as a whole, not as independent pages.
+  These are local synthetic observations, not a capacity promise.
+- Composed browser walkthrough (run `20261107T1630`, synthetic dev customer,
+  fresh dev frontend on :3000 and current backend on :3001): a synthetic FNB CSV
+  was imported through the real upload/review/commit flow into a canary
+  account; settings categories and tags were created (including an archived
+  tag); description search, inline category plus multi-tag edit, explicit
+  suggestion acceptance, confirmed hide/restore, a second browser session
+  conflicting on a stale version and refreshing, all-matching bulk category
+  apply with a receipt that survived reload, prepare/reload/abandon recovery,
+  a parent-hidden bulk restore refused at preparation with an Imports link,
+  parent restore, drawer Tab/Shift-Tab containment and Escape focus return at
+  320 px, no horizontal overflow at 320/375/1280 px, and both themes were all
+  exercised. Search text stayed out of the URL and browser storage. This is
+  live local runtime observation; it is not CI, production or a substitute for
+  the automated suites.
+- The existing Playwright smoke suite is unauthenticated and does not establish
+  authenticated finance composition; the walkthrough above is the composed
+  evidence, and it used synthetic values only.
+
+## Private Server Action logging
+
+`frontend/next.config.ts` sets `logging: { serverFunctions: false }`. Next.js
+16.4.3 captures Server Function invocation arguments in development before the
+action authenticates or validates them, and writes invocation lines after the
+request. The supported setting prevents that capture at its source. It applies
+globally to development Server Functions: function names, arguments, duration
+and source locations are no longer printed. Incoming request lines,
+fetch/browser logging, application diagnostics, and backend structured logs and
+`audit.*` events are separate and unchanged. `logging: false`, console
+suppression, post-capture redaction, a transport change or a dependency patch
+are not part of this contract. Removing the setting while private Server
+Actions remain reachable reopens the disclosure, so it is not a safe
+troubleshooting rollback.
+
+Pre-correction evidence remains at
+`/tmp/opencode/frontend-walkthrough.log:38` (retained, not edited): a
+development invocation line containing the synthetic private search
+`{"filters":{"search":"Cafe",...}}`.
+
+The corrected privacy run used fresh, separate captures
+`/tmp/opencode/frontend-canary-20261107-1640.log` and
+`/tmp/opencode/backend-corrected-20261107-1615.log`, with Next.js 16.4.3 in
+development and the current backend. It exercised a successful description
+search that returned its row, a malformed search over 200 Unicode scalars
+rejected inside action validation, a valid search whose unknown owned
+statement filter was rejected by the backend with `404`, and a session-expiry
+attempt after the session cookie was cleared. The session-expiry request never
+reached the action: the proxy redirected the action POST to `/login`, which is
+recorded as a proxy boundary rather than action-validation evidence.
+
+The complete unsanitized captures contained **0** matches for the synthetic
+search, description, account, institution, category and tag names and the
+amount canary, and **0** framework Server Function invocation lines. Positive
+controls in the same run: the frontend capture contains ordinary GET/POST
+request lines, and the backend capture contains `audit.*` events and
+`http_request` lines. No canary appears in a URL or in browser storage.
+
+Tooling note: an earlier intermediate capture
+(`/tmp/opencode/frontend-corrected-20261107-1615.log`) recorded a React
+hydration-mismatch diagnostic after Playwright's screenshot caret-hiding
+injected a transient `caret-color` style during hydration. That development
+diagnostic printed rendered component props, including synthetic names, and is
+a screenshot-injection artifact rather than the Server Function logger. The
+clean canary run above took no screenshots and recorded no hydration-mismatch
+line. Do not take a screenshot during a privacy canary; use
+`page.screenshot({ caret: "initial" })` if one is required.
+
+
+
+- Search cost is a bounded literal substring scan per customer; trigram
+  extensions, full-text services and background bulk jobs are out of scope.
+- Live manifests are capped and expire; terminal receipts remain compact for
+  idempotency. A receipt-retention policy change would alter replay guarantees.
+- Overview, charts, category/tag money totals and coverage analytics belong to
+  Thread #5. Standard Bank PDF remains deferred to Thread #6.

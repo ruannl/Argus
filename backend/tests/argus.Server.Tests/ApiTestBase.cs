@@ -25,6 +25,7 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         await using var command = connection.CreateCommand();
         command.CommandText =
             "TRUNCATE import_review_rows, import_reviews, import_commit_receipts, import_quota_locks, " +
+            "transaction_operation_items, transaction_operations, " +
             "transaction_merchant_tags, transactions, statement_imports, merchant_tags, " +
             "categories, financial_accounts, customers, sessions, email_verification_tokens, " +
             "password_reset_tokens CASCADE";

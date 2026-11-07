@@ -21,6 +21,10 @@ public sealed class RateLimiter
     /// </summary>
     public bool CheckFinanceIp(string ip) => Check($"finance_ip:{ip}", 300);
 
+    /// <summary>Transaction bulk preparation is twenty requests per customer per window.</summary>
+    public bool CheckTransactionPreparation(Guid customerId) =>
+        Check($"transaction_prepare:{customerId:N}", 20);
+
     /// <summary>Inspect/prepare is ten requests per customer per window.</summary>
     public bool CheckImportCustomer(Guid customerId) =>
         Check($"import_customer:{customerId:N}", 10);

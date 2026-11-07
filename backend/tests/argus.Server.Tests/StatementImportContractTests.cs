@@ -597,6 +597,79 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
     }
 
     [Fact]
+    public async Task WorkspaceClassificationAndHiddenLayersDoNotReleaseImportOccurrences()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var file = StatementFixtureBuilder.BuildFnbCsv(3, chequeAccount: false).Bytes;
+        var first = await PrepareAsync(
+            session, accountId, file, new DateOnly(2024, 1, 1), new DateOnly(2024, 1, 31));
+        var firstId = first.GetProperty("summary").GetProperty("id").GetGuid();
+        var firstCommit = await SendAsync(Post(
+            $"{ReviewsPath}/{firstId}/commit", Json(CommitBody(first)), session: session));
+        Assert.Equal(HttpStatusCode.Created, firstCommit.StatusCode);
+        var statementId = (await BodyAsync(firstCommit)).GetProperty("statement").GetProperty("id").GetGuid();
+        var statementDetail = await SendAsync(Get($"{ImportsPath}/{statementId}", session: session));
+        var transactionId = (await BodyAsync(statementDetail)).GetProperty("rows")[0].GetProperty("id").GetGuid();
+        var identityBefore = await StringScalarAsync(
+            $"SELECT identity_key FROM transactions WHERE customer_id = '{customerId}' AND id = '{transactionId}'");
+
+        var categoriesResponse = await SendAsync(Get("/v1/finance/categories", session: session));
+        var categoryId = (await BodyAsync(categoriesResponse)).GetProperty("categories").EnumerateArray()
+            .First(category => category.GetProperty("kind").GetString() == "Expense")
+            .GetProperty("id").GetGuid();
+        var tagResponse = await SendAsync(Post(
+            "/v1/finance/merchant-tags", Json(new { display_name = "Synthetic overlap tag" }), session: session));
+        Assert.Equal(HttpStatusCode.Created, tagResponse.StatusCode);
+        var tagId = (await BodyAsync(tagResponse)).GetProperty("id").GetGuid();
+        var edit = await SendAsync(Patch(
+            $"/v1/finance/transactions/{transactionId}",
+            Json(new
+            {
+                expected_version = 1,
+                changes = new { category_id = categoryId, add_tag_ids = new[] { tagId }, is_hidden_by_user = true },
+                confirm = true,
+            }), session: session));
+        Assert.Equal(HttpStatusCode.OK, edit.StatusCode);
+
+        var hideParent = await SendAsync(Post(
+            $"{ImportsPath}/{statementId}/hide",
+            Json(new { expected_version = 1, expected_transaction_count = 3, confirm = true }),
+            session: session));
+        Assert.Equal(HttpStatusCode.OK, hideParent.StatusCode);
+
+        var second = await PrepareAsync(
+            session, accountId, file, new DateOnly(2024, 1, 1), new DateOnly(2024, 1, 31));
+        Assert.Equal(0, second.GetProperty("summary").GetProperty("imported_count").GetInt32());
+        Assert.Equal(3, second.GetProperty("summary").GetProperty("suppressed_count").GetInt32());
+        var secondId = second.GetProperty("summary").GetProperty("id").GetGuid();
+        var overrideResponse = await SendAsync(Patch(
+            $"{ReviewsPath}/{secondId}",
+            Json(new { expected_review_version = Version(second), decisions = Array.Empty<object>(), statement_override = true }),
+            session: session));
+        Assert.Equal(HttpStatusCode.OK, overrideResponse.StatusCode);
+        var overridden = await BodyAsync(overrideResponse);
+        var secondCommit = await SendAsync(Post(
+            $"{ReviewsPath}/{secondId}/commit", Json(CommitBody(overridden)), session: session));
+        Assert.Equal(HttpStatusCode.Created, secondCommit.StatusCode);
+        Assert.Equal(0, (await BodyAsync(secondCommit)).GetProperty("statement").GetProperty("imported_count").GetInt32());
+
+        Assert.Equal(3L, await CountRowsAsync("transactions"));
+        Assert.Equal(identityBefore, await StringScalarAsync(
+            $"SELECT identity_key FROM transactions WHERE customer_id = '{customerId}' AND id = '{transactionId}'"));
+        Assert.Equal(1L, await ScalarAsync($"""
+            SELECT COUNT(*) FROM transactions
+            WHERE customer_id = '{customerId}' AND id = '{transactionId}'
+              AND category_id = '{categoryId}' AND is_hidden_by_user = TRUE
+            """));
+        Assert.Equal(1L, await ScalarAsync($"""
+            SELECT COUNT(*) FROM transaction_merchant_tags
+            WHERE customer_id = '{customerId}' AND transaction_id = '{transactionId}'
+              AND merchant_tag_id = '{tagId}'
+            """));
+    }
+
+    [Fact]
     public async Task HideRestorePreservesIndividualFlagAndDeleteReleasesIdentities()
     {
         var (session, _) = await NewCustomerAsync();
