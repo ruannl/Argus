@@ -11,32 +11,23 @@ public static class Errors
 {
     public static IResult Unauthorized() => Results.Json(new { error = "unauthorized" }, statusCode: 401);
 
-    public static IResult InvalidCredentials() =>
-        Results.Json(new { error = "invalid_credentials" }, statusCode: 401);
+    public static IResult InvalidCredentials() => Results.Json(new { error = "invalid_credentials" }, statusCode: 401);
 
-    public static IResult InvalidRequest() =>
-        Results.Json(new { error = "invalid_request" }, statusCode: 400);
+    public static IResult InvalidRequest() => Results.Json(new { error = "invalid_request" }, statusCode: 400);
 
-    public static IResult InvalidToken() =>
-        Results.Json(new { error = "invalid_token" }, statusCode: 400);
+    public static IResult InvalidToken() => Results.Json(new { error = "invalid_token" }, statusCode: 400);
 
-    public static IResult RateLimited() =>
-        Results.Json(new { error = "rate_limited" }, statusCode: 429);
+    public static IResult RateLimited() => Results.Json(new { error = "rate_limited" }, statusCode: 429);
 
-    public static IResult Internal() =>
-        Results.Json(new { error = "internal_server_error" }, statusCode: 500);
+    public static IResult Internal() => Results.Json(new { error = "internal_server_error" }, statusCode: 500);
 
-    public static IResult NotFound() =>
-        Results.Json(new { error = "not_found" }, statusCode: 404);
+    public static IResult NotFound() => Results.Json(new { error = "not_found" }, statusCode: 404);
 
-    public static IResult DuplicateName() =>
-        Results.Json(new { error = "duplicate_name" }, statusCode: 409);
+    public static IResult DuplicateName() => Results.Json(new { error = "duplicate_name" }, statusCode: 409);
 
-    public static IResult SystemCategoryImmutable() =>
-        Results.Json(new { error = "system_category_immutable" }, statusCode: 400);
+    public static IResult SystemCategoryImmutable() => Results.Json(new { error = "system_category_immutable" }, statusCode: 400);
 
-    public static IResult KindChangeConfirmationRequired() =>
-        Results.Json(new { error = "kind_change_confirmation_required" }, statusCode: 400);
+    public static IResult KindChangeConfirmationRequired() => Results.Json(new { error = "kind_change_confirmation_required" }, statusCode: 400);
 
     public static IResult OriginRejected() => Results.StatusCode(403);
 }
@@ -158,7 +149,7 @@ public static class JsonBody
             bool institutionProvided = false;
             string? institution = null;
 
-            foreach (var property in document.RootElement.EnumerateObject())
+            foreach (JsonProperty property in document.RootElement.EnumerateObject())
             {
                 switch (property.Name)
                 {
@@ -211,7 +202,7 @@ public static class JsonBody
 
         try
         {
-            var value = JsonSerializer.Deserialize<T>(body, _options);
+            T? value = JsonSerializer.Deserialize<T>(body, _options);
             return value is null ? new ParseResult<T>(default, false, false) : new ParseResult<T>(value, true, false);
         }
         catch (JsonException exception)
@@ -242,7 +233,7 @@ public static class JsonBody
                 return new ParseResult<T>(default, false, false);
             }
 
-            var value = JsonSerializer.Deserialize<T>(body, _options);
+            T? value = JsonSerializer.Deserialize<T>(body, _options);
             return value is null ? new ParseResult<T>(default, false, false) : new ParseResult<T>(value, true, false);
         }
         catch (JsonException exception)
@@ -256,6 +247,5 @@ public static class JsonBody
 public static class Timestamps
 {
     /// <summary>RFC3339-style UTC timestamp used for every API timestamp field.</summary>
-    public static string Format(DateTime value) =>
-        DateTime.SpecifyKind(value, DateTimeKind.Utc).ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'");
+    public static string Format(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc).ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'");
 }

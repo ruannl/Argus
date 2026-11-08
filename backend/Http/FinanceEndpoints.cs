@@ -42,7 +42,7 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
         guard.AuthenticateAsync(context, cancellationToken);
 
     private Task<IResult> GuardedAsync(Func<Task<IResult>> action, string operation) =>
-        guard.GuardedAsync(action, operation, _logger);
+        FinanceGuard.GuardedAsync(action, operation, _logger);
 
     // --- Financial accounts ------------------------------------------------
 

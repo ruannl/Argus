@@ -1541,77 +1541,77 @@ public sealed class StatementImportStore
             foreach (var row in rows)
             {
                 await copy.StartRowAsync(cancellationToken);
-                copy.Write(row.RowId, NpgsqlDbType.Uuid);
-                copy.Write(reviewId, NpgsqlDbType.Uuid);
-                copy.Write(customerId, NpgsqlDbType.Uuid);
-                copy.Write(row.SourceLine, NpgsqlDbType.Integer);
+                await copy.WriteAsync(row.RowId, NpgsqlDbType.Uuid, cancellationToken);
+                await copy.WriteAsync(reviewId, NpgsqlDbType.Uuid, cancellationToken);
+                await copy.WriteAsync(customerId, NpgsqlDbType.Uuid, cancellationToken);
+                await copy.WriteAsync(row.SourceLine, NpgsqlDbType.Integer, cancellationToken);
                 if (row.SourcePage is null)
                 {
-                    copy.WriteNull();
+                    await copy.WriteNullAsync(cancellationToken);
                 }
                 else
                 {
-                    copy.Write(row.SourcePage.Value, NpgsqlDbType.Integer);
+                    await copy.WriteAsync(row.SourcePage.Value, NpgsqlDbType.Integer, cancellationToken);
                 }
-                copy.Write(row.SourceRowNumber, NpgsqlDbType.Integer);
-                copy.Write(JsonSerializer.Serialize(row.RawValues, _storageJson), NpgsqlDbType.Jsonb);
+                await copy.WriteAsync(row.SourceRowNumber, NpgsqlDbType.Integer, cancellationToken);
+                await copy.WriteAsync(JsonSerializer.Serialize(row.RawValues, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
                 if (row.TransactionDate is null)
                 {
-                    copy.WriteNull();
+                    await copy.WriteNullAsync(cancellationToken);
                 }
                 else
                 {
-                    copy.Write(row.TransactionDate.Value, NpgsqlDbType.Date);
+                    await copy.WriteAsync(row.TransactionDate.Value, NpgsqlDbType.Date, cancellationToken);
                 }
-                copy.Write(row.Description, NpgsqlDbType.Text);
-                copy.Write(row.NormalizedDescription, NpgsqlDbType.Text);
+                await copy.WriteAsync(row.Description, NpgsqlDbType.Text, cancellationToken);
+                await copy.WriteAsync(row.NormalizedDescription, NpgsqlDbType.Text, cancellationToken);
                 if (row.AmountCents is null)
                 {
-                    copy.WriteNull();
+                    await copy.WriteNullAsync(cancellationToken);
                 }
                 else
                 {
-                    copy.Write(row.AmountCents.Value, NpgsqlDbType.Bigint);
+                    await copy.WriteAsync(row.AmountCents.Value, NpgsqlDbType.Bigint, cancellationToken);
                 }
                 if (row.SourceIdNamespace is null)
                 {
-                    copy.WriteNull();
+                    await copy.WriteNullAsync(cancellationToken);
                 }
                 else
                 {
-                    copy.Write(row.SourceIdNamespace, NpgsqlDbType.Text);
+                    await copy.WriteAsync(row.SourceIdNamespace, NpgsqlDbType.Text, cancellationToken);
                 }
                 if (row.SourceIdValue is null)
                 {
-                    copy.WriteNull();
+                    await copy.WriteNullAsync(cancellationToken);
                 }
                 else
                 {
-                    copy.Write(row.SourceIdValue, NpgsqlDbType.Text);
+                    await copy.WriteAsync(row.SourceIdValue, NpgsqlDbType.Text, cancellationToken);
                 }
-                copy.Write(JsonSerializer.Serialize(row.ValidationCodes, _storageJson), NpgsqlDbType.Jsonb);
-                copy.Write(JsonSerializer.Serialize(row.Warnings, _storageJson), NpgsqlDbType.Jsonb);
-                copy.Write(row.DuplicateState, NpgsqlDbType.Text);
-                copy.Write(JsonSerializer.Serialize(row.DuplicateReasons, _storageJson), NpgsqlDbType.Jsonb);
-                copy.Write(JsonSerializer.Serialize(row.MatchingTransactionIds, _storageJson), NpgsqlDbType.Jsonb);
-                copy.Write(JsonSerializer.Serialize(row.MatchingImportIds, _storageJson), NpgsqlDbType.Jsonb);
-                copy.Write(JsonSerializer.Serialize(row.NearCandidates, _storageJson), NpgsqlDbType.Jsonb);
-                copy.Write(row.NearCandidateTotal, NpgsqlDbType.Integer);
+                await copy.WriteAsync(JsonSerializer.Serialize(row.ValidationCodes, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
+                await copy.WriteAsync(JsonSerializer.Serialize(row.Warnings, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
+                await copy.WriteAsync(row.DuplicateState, NpgsqlDbType.Text, cancellationToken);
+                await copy.WriteAsync(JsonSerializer.Serialize(row.DuplicateReasons, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
+                await copy.WriteAsync(JsonSerializer.Serialize(row.MatchingTransactionIds, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
+                await copy.WriteAsync(JsonSerializer.Serialize(row.MatchingImportIds, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
+                await copy.WriteAsync(JsonSerializer.Serialize(row.NearCandidates, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
+                await copy.WriteAsync(row.NearCandidateTotal, NpgsqlDbType.Integer, cancellationToken);
                 if (row.WithinFileGroup is null)
                 {
-                    copy.WriteNull();
+                    await copy.WriteNullAsync(cancellationToken);
                 }
                 else
                 {
-                    copy.Write(row.WithinFileGroup, NpgsqlDbType.Text);
+                    await copy.WriteAsync(row.WithinFileGroup, NpgsqlDbType.Text, cancellationToken);
                 }
-                copy.Write(row.WithinFileState, NpgsqlDbType.Text);
-                copy.Write(row.Skip, NpgsqlDbType.Boolean);
-                copy.Write(row.Override, NpgsqlDbType.Boolean);
-                copy.Write(JsonSerializer.Serialize(row.SuggestedTagIds, _storageJson), NpgsqlDbType.Jsonb);
-                copy.Write(JsonSerializer.Serialize(row.SelectedTagIds, _storageJson), NpgsqlDbType.Jsonb);
-                copy.Write(now, NpgsqlDbType.TimestampTz);
-                copy.Write(now, NpgsqlDbType.TimestampTz);
+                await copy.WriteAsync(row.WithinFileState, NpgsqlDbType.Text, cancellationToken);
+                await copy.WriteAsync(row.Skip, NpgsqlDbType.Boolean, cancellationToken);
+                await copy.WriteAsync(row.Override, NpgsqlDbType.Boolean, cancellationToken);
+                await copy.WriteAsync(JsonSerializer.Serialize(row.SuggestedTagIds, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
+                await copy.WriteAsync(JsonSerializer.Serialize(row.SelectedTagIds, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
+                await copy.WriteAsync(now, NpgsqlDbType.TimestampTz, cancellationToken);
+                await copy.WriteAsync(now, NpgsqlDbType.TimestampTz, cancellationToken);
             }
             await copy.CompleteAsync(cancellationToken);
         }
@@ -2317,7 +2317,7 @@ public sealed class StatementImportStore
         }
     }
 
-    private async Task<ImportCommitResult> ReplayReceiptAsync(NpgsqlConnection connection,
+    private static async Task<ImportCommitResult> ReplayReceiptAsync(NpgsqlConnection connection,
                                                               NpgsqlTransaction transaction,
                                                               Guid customerId,
                                                               Guid reviewId,
@@ -2682,7 +2682,7 @@ public sealed class StatementImportStore
                         updated_at = NOW()
                     WHERE id = ANY(@ids)
                     """;
-                headers.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, expired.ToArray());
+                headers.Parameters.AddWithValue("ids", expired.ToArray());
                 await headers.ExecuteNonQueryAsync(cancellationToken);
             }
         }
@@ -2800,14 +2800,20 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("statement_import_id", statementId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-        return await reader.ReadAsync(cancellationToken)
-            ? new ReceiptRecord(
-                reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2), reader.GetGuid(3),
-                reader.GetString(4), reader.GetString(5),
-                reader.IsDBNull(6) ? null : reader.GetGuid(6), reader.GetString(7),
-                reader.IsDBNull(8) ? null : reader.GetString(8),
-                reader.IsDBNull(9) ? null : reader.GetInt64(9))
-            : null;
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        Guid? statementImportId = reader.IsDBNull(6) ? (Guid?)null : reader.GetGuid(6);
+        string? deletionDigest = reader.IsDBNull(8) ? null : reader.GetString(8);
+        long? deletionExpectedCount = reader.IsDBNull(9) ? null : reader.GetInt64(9);
+
+        return new ReceiptRecord(
+            reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2), reader.GetGuid(3),
+            reader.GetString(4), reader.GetString(5),
+            statementImportId, reader.GetString(7),
+            deletionDigest, deletionExpectedCount);
     }
 
     private static async Task<ReceiptRecord?> ReadReceiptByStatementAsync(NpgsqlConnection connection,
@@ -2999,7 +3005,7 @@ public sealed class StatementImportStore
                 ORDER BY m.display_name, m.id
                 """;
             tagCommand.Parameters.AddWithValue("customer_id", customerId);
-            tagCommand.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, rows.Select(row => row.Id).ToArray());
+            tagCommand.Parameters.AddWithValue("ids", rows.Select(row => row.Id).ToArray());
             await using var reader = await tagCommand.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -3067,9 +3073,9 @@ public sealed class StatementImportStore
             FOR UPDATE
             """;
         command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, tagIds);
+        command.Parameters.AddWithValue("ids", tagIds);
         int available = 0;
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             available++;
@@ -3085,7 +3091,7 @@ public sealed class StatementImportStore
                                                                            string fingerprint,
                                                                            CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
+        await using NpgsqlCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
             SELECT id FROM statement_imports
@@ -3113,7 +3119,7 @@ public sealed class StatementImportStore
                                                                   string fingerprint,
                                                                   CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
+        await using NpgsqlCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
             SELECT COALESCE(MAX(fingerprint_occurrence), 0) + 1
@@ -3152,8 +3158,8 @@ public sealed class StatementImportStore
             """;
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("account_id", accountId);
-        command.Parameters.AddWithValue("keys", NpgsqlDbType.Array | NpgsqlDbType.Text, identityKeys);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        command.Parameters.AddWithValue("keys", identityKeys);
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             result[reader.GetString(0)] = reader.GetInt32(1);
@@ -3162,19 +3168,13 @@ public sealed class StatementImportStore
         return result;
     }
 
-    private static string ComputeIdentityKey(ImportReviewRowRecord row) =>
-        StatementIdentity.ComputeIdentityKey(
-            row.TransactionDate!.Value, row.AmountCents!.Value, row.NormalizedDescription);
+    private static string ComputeIdentityKey(ImportReviewRowRecord row) => StatementIdentity.ComputeIdentityKey(row.TransactionDate!.Value, row.AmountCents!.Value, row.NormalizedDescription);
 
-    private static string BuildStatementLabel(ImportReviewSummaryRecord review) =>
-        $"Statement {review.StartDate!.Value:yyyy-MM-dd} to {review.EndDate!.Value:yyyy-MM-dd}";
+    private static string BuildStatementLabel(ImportReviewSummaryRecord review) => $"Statement {review.StartDate!.Value:yyyy-MM-dd} to {review.EndDate!.Value:yyyy-MM-dd}";
 
-    private static string Digest(string value) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+    private static string Digest(string value) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
-    private static string EncodeCursor(DateTime createdAt, Guid id) =>
-        Convert.ToBase64String(Encoding.UTF8.GetBytes($"{createdAt:O}|{id}"))
-            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    private static string EncodeCursor(DateTime createdAt, Guid id) => Convert.ToBase64String(Encoding.UTF8.GetBytes($"{createdAt:O}|{id}")).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     private static (DateTime? CreatedAt, Guid? Id) DecodeCursor(string cursor)
     {

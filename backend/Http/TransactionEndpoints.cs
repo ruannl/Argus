@@ -28,8 +28,7 @@ public sealed class TransactionApi(FinanceGuard guard,
         app.MapPost("/v1/finance/transactions/operations/{id:guid}/abandon", AbandonAsync);
     }
 
-    private Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(HttpContext context, CancellationToken cancellationToken) =>
-        guard.AuthenticateAsync(context, cancellationToken);
+    private Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(HttpContext context, CancellationToken cancellationToken) => guard.AuthenticateAsync(context, cancellationToken);
 
     private async Task<IResult> GuardedAsync(Func<Task<IResult>> action, string operation)
     {
@@ -70,13 +69,13 @@ public sealed class TransactionApi(FinanceGuard guard,
     private Task<IResult> QueryAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            (Guid? customerId, IResult? failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
             }
 
-            var (request, bodyFailure) = await ReadBodyAsync<TransactionQueryRequest>(context.Request, TransactionLimits.QueryBodyBytes, cancellationToken);
+            (TransactionQueryRequest? request, IResult? bodyFailure) = await ReadBodyAsync<TransactionQueryRequest>(context.Request, TransactionLimits.QueryBodyBytes, cancellationToken);
             if (bodyFailure is not null)
             {
                 return bodyFailure;
@@ -87,26 +86,26 @@ public sealed class TransactionApi(FinanceGuard guard,
                 return Errors.InvalidRequest();
             }
 
-            var page = await store.QueryAsync(customerId!.Value, plan, cancellationToken);
+            TransactionPageResult page = await store.QueryAsync(customerId!.Value, plan, cancellationToken);
             return Results.Json(page);
         }, "transactions_query");
 
     private Task<IResult> GetAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            (Guid? customerId, IResult? failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
             }
 
-            var id = RouteGuid(context);
+            Guid? id = RouteGuid(context);
             if (id is null)
             {
                 return Errors.NotFound();
             }
 
-            var detail = await store.GetAsync(customerId!.Value, id.Value, cancellationToken);
+            TransactionDetailResult detail = await store.GetAsync(customerId!.Value, id.Value, cancellationToken);
             return Results.Json(detail);
         }, "transactions_detail");
 
@@ -115,7 +114,7 @@ public sealed class TransactionApi(FinanceGuard guard,
     private Task<IResult> PatchAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            (Guid? customerId, IResult? failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -127,7 +126,7 @@ public sealed class TransactionApi(FinanceGuard guard,
                 return Errors.NotFound();
             }
 
-            var (request, bodyFailure) = await ReadBodyAsync<TransactionPatchRequest>(context.Request, TransactionLimits.MutationBodyBytes, cancellationToken);
+            (TransactionPatchRequest? request, IResult? bodyFailure) = await ReadBodyAsync<TransactionPatchRequest>(context.Request, TransactionLimits.MutationBodyBytes, cancellationToken);
             if (bodyFailure is not null)
             {
                 return bodyFailure;
@@ -210,7 +209,7 @@ public sealed class TransactionApi(FinanceGuard guard,
                 return Errors.NotFound();
             }
 
-            var (request, bodyFailure) = await ReadBodyAsync<TransactionApplyRequest>(context.Request, TransactionLimits.MutationBodyBytes, cancellationToken);
+            (TransactionApplyRequest? request, IResult? bodyFailure) = await ReadBodyAsync<TransactionApplyRequest>(context.Request, TransactionLimits.MutationBodyBytes, cancellationToken);
             if (bodyFailure is not null)
             {
                 return bodyFailure;
@@ -221,7 +220,7 @@ public sealed class TransactionApi(FinanceGuard guard,
                 return Errors.InvalidRequest();
             }
 
-            var result = await store.ApplyAsync(customerId!.Value, id.Value, request.ConfirmationHash, request.ExpectedSelectedCount.Value, cancellationToken);
+            TransactionOperationApplyResponse result = await store.ApplyAsync(customerId!.Value, id.Value, request.ConfirmationHash, request.ExpectedSelectedCount.Value, cancellationToken);
             return Results.Json(result);
         }, "transactions_operation_apply");
 
@@ -276,7 +275,7 @@ public sealed class TransactionApi(FinanceGuard guard,
                 return (null, TransactionError(TransactionErrorCodes.RequestTooLarge));
             }
 
-            output.Write(buffer, 0, read);
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
         }
 
         if (output.Length == 0)
@@ -284,7 +283,7 @@ public sealed class TransactionApi(FinanceGuard guard,
             return (null, Errors.InvalidRequest());
         }
 
-        var parsed = JsonBody.ParseBytes<T>(output.ToArray());
+        JsonBody.ParseResult<T> parsed = JsonBody.ParseBytes<T>(output.ToArray());
         if (!parsed.Parsed)
         {
             return (null, Errors.InvalidRequest());
@@ -304,16 +303,13 @@ public sealed class TransactionApi(FinanceGuard guard,
         return Results.Json(payload, statusCode: StatusFor(exception.Code));
     }
 
-    internal static IResult TransactionError(string code) => Results.Json(
-        new { error = code },
-        statusCode: StatusFor(code));
+    internal static IResult TransactionError(string code) => Results.Json(new { error = code }, statusCode: StatusFor(code));
 
     private static int StatusFor(string code) => code switch
     {
         TransactionErrorCodes.NotFound => 404,
         TransactionErrorCodes.RequestTooLarge => 413,
-        TransactionErrorCodes.OperationExpired or
-            TransactionErrorCodes.OperationAbandoned => 410,
+        TransactionErrorCodes.OperationExpired or TransactionErrorCodes.OperationAbandoned => 410,
         TransactionErrorCodes.VersionConflict or
             TransactionErrorCodes.SelectionStale or
             TransactionErrorCodes.ClassificationChanged or

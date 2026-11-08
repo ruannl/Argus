@@ -57,7 +57,7 @@ public sealed class FinanceGuard(AppSettings settings, Store store, RateLimiter 
     /// plus the frozen 500 body. PostgreSQL exceptions are never logged whole:
     /// their Detail can echo user-supplied names or financial values.
     /// </summary>
-    public async Task<IResult> GuardedAsync(Func<Task<IResult>> action, string operation, ILogger logger)
+    public static async Task<IResult> GuardedAsync(Func<Task<IResult>> action, string operation, ILogger logger)
     {
         try
         {

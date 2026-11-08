@@ -71,7 +71,7 @@ public static class MultipartImportReader
             {
                 throw new StatementRejectedException(ParserReasons.FileTooLarge);
             }
-            output.Write(buffer, 0, read);
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
         }
 
         return output.ToArray();

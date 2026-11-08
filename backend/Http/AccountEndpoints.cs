@@ -28,7 +28,7 @@ public sealed class AccountApi(AppSettings settings,
 
     // Test-only ordering seam. It is never set from a request or environment
     // and cannot grant authority; the production path does not wait here.
-    private Func<Guid, CancellationToken, Task>? _beforeSessionIssuanceForTests = null;
+    private readonly Func<Guid, CancellationToken, Task>? _beforeSessionIssuanceForTests = null;
 
     public void Map(WebApplication app)
     {
