@@ -52,10 +52,7 @@ export default function ForgotPasswordForm() {
   return (
     <form action={formAction} className="mt-8 space-y-5">
       <div>
-        <label
-          className="block text-sm font-semibold text-ink"
-          htmlFor="forgot-password-email"
-        >
+        <label className="block text-sm font-semibold text-ink" htmlFor="forgot-password-email">
           Email
         </label>
         <input

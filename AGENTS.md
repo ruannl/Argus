@@ -196,6 +196,33 @@ runbook; `docs/secret-rotation.md` and `docs/tls-deployment-contract.md` cover
 secrets and public deployment; `docs/divergences.md` records intentional
 differences from the Rust sibling kit.
 
+## Code style
+
+- Use `backend/.editorconfig` for C#. Use Prettier for frontend source and test
+  formatting and `frontend/eslint.config.mjs` for Next.js linting.
+- Prefer explicit types over `var`, including `out` variables and tuple
+  deconstructions. The `.editorconfig` records this at suggestion level, so the
+  IDE applies it but `dotnet format --verify-no-changes` does not enforce it.
+- In C# declarations with four or more parameters, keep the first parameter on
+  the declaration line and align the remaining parameters under it, one per
+  line. Shorter lists can stay inline when readable. Wrap call sites as needed
+  for readability.
+- C# has no fixed maximum line length. Join statements when the result is at
+  most 240 characters. When a boolean condition or return expression spans
+  lines, break after `&&` or `||` and align the continuation under the first
+  operand.
+- Put a blank line after a guard clause that returns or continues, and before a
+  final `return`.
+- In a `catch` block, pass the caught exception as the first argument to the
+  logger. Do not pass exceptions that can embed user-supplied data, notably
+  `PostgresException` on finance and import paths; log `SqlState` and the
+  error class instead.
+- Remove unused C# usings and sort the rest with `System` first.
+- Format and lint the code you touch. Keep a repository-wide formatting pass
+  separate from feature changes. Load `argus-code-style` for cleanup and
+  `argus-verify` when selecting verification. Use `argus-api-change` for
+  coordinated REST API and frontend changes.
+
 ## Verification
 
 Run these before you push. CI runs the same battery.
@@ -204,12 +231,15 @@ Run these before you push. CI runs the same battery.
 # Backend
 cd backend
 dotnet format argus.Server.csproj --verify-no-changes
+dotnet format style argus.Server.csproj --diagnostics IDE0005 --severity info --verify-no-changes
 dotnet format tests/argus.Server.Tests/argus.Server.Tests.csproj --verify-no-changes
-dotnet test tests/argus.Server.Tests
-dotnet build -c Release
+dotnet format style tests/argus.Server.Tests/argus.Server.Tests.csproj --diagnostics IDE0005 --severity info --verify-no-changes
+dotnet test tests/argus.Server.Tests -warnaserror
+dotnet build -c Release -warnaserror
 
 # Frontend
 cd frontend
+npm run format:check
 npm run lint
 npm run test
 npm run build

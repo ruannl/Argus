@@ -13,23 +13,22 @@ namespace argus.Server.Http;
 /// requires the trusted-frontend proof first and then independently validates
 /// the acting user's opaque session.
 /// </summary>
-public sealed class AccountApi(
-    AppSettings settings,
-    Store store,
-    Policy policy,
-    RateLimiter rateLimiter,
-    IPwnedScreener pwned,
-    IMailer mailer,
-    ILoggerFactory loggerFactory)
+public sealed class AccountApi(AppSettings settings,
+                               Store store,
+                               Policy policy,
+                               RateLimiter rateLimiter,
+                               IPwnedScreener pwned,
+                               IMailer mailer,
+                               ILoggerFactory loggerFactory)
 {
-    private static readonly Lazy<string> DummyPasswordHash = new(() => PasswordHasher.Hash(Tokens.NewToken()));
+    private static readonly Lazy<string> _dummyPasswordHash = new(() => PasswordHasher.Hash(Tokens.NewToken()));
 
     private readonly ILogger _audit = loggerFactory.CreateLogger("audit");
     private readonly ILogger _logger = loggerFactory.CreateLogger("account");
 
     // Test-only ordering seam. It is never set from a request or environment
     // and cannot grant authority; the production path does not wait here.
-    private Func<Guid, CancellationToken, Task>? _beforeSessionIssuanceForTests = null;
+    private readonly Func<Guid, CancellationToken, Task>? _beforeSessionIssuanceForTests = null;
 
     public void Map(WebApplication app)
     {
@@ -51,6 +50,7 @@ public sealed class AccountApi(
         {
             return Errors.OriginRejected();
         }
+
         return Trust.ApplicationSecretValid(context, settings) ? null : Errors.Unauthorized();
     }
 
@@ -66,7 +66,7 @@ public sealed class AccountApi(
             return failure;
         }
 
-        var rawToken = Trust.SessionToken(context);
+        string? rawToken = Trust.SessionToken(context);
         if (rawToken is null)
         {
             return Errors.Unauthorized();
@@ -79,6 +79,7 @@ public sealed class AccountApi(
         }
 
         var customer = await store.FindCustomerByIdAsync(customerId.Value, cancellationToken);
+
         return customer is null ? Errors.Unauthorized() : Results.Json(AccountResponse.From(customer));
     }
 
@@ -94,16 +95,17 @@ public sealed class AccountApi(
         {
             return Errors.InvalidRequest();
         }
+
         var request = parsed.Value!;
 
-        var peerIp = context.Connection.RemoteIpAddress?.ToString();
+        string? peerIp = context.Connection.RemoteIpAddress?.ToString();
         if (peerIp is not null && !rateLimiter.CheckIp(peerIp))
         {
             return Errors.RateLimited();
         }
 
-        var canonicalEmail = policy.CanonicalizeEmail(request.Email);
-        var loginKey = canonicalEmail ?? StableKey(request.Email ?? string.Empty);
+        string? canonicalEmail = policy.CanonicalizeEmail(request.Email);
+        string loginKey = canonicalEmail ?? StableKey(request.Email ?? string.Empty);
         if (!rateLimiter.CheckLogin(loginKey))
         {
             return Errors.RateLimited();
@@ -125,12 +127,12 @@ public sealed class AccountApi(
 
         // Oversized passwords are replaced before hashing; the verify still runs
         // so an unknown email and a real one cost the same.
-        var passwordForVerify =
+        string passwordForVerify =
             request.Password is not null && Encoding.UTF8.GetByteCount(request.Password) > 1024
                 ? "\0"
                 : request.Password ?? string.Empty;
-        var hashToVerify = customer?.PasswordHash ?? DummyPasswordHash.Value;
-        var passwordMatches = PasswordHasher.Verify(passwordForVerify, hashToVerify);
+        string hashToVerify = customer?.PasswordHash ?? _dummyPasswordHash.Value;
+        bool passwordMatches = PasswordHasher.Verify(passwordForVerify, hashToVerify);
 
         if (lookupError is not null)
         {
@@ -146,25 +148,19 @@ public sealed class AccountApi(
 
         if (customer.LockedUntil is { } lockedUntil && lockedUntil > DateTime.UtcNow)
         {
-            _audit.LogInformation(
-                "audit.login_failure customer_id={CustomerId} reason={Reason}",
-                customer.Id,
-                "locked");
+            _audit.LogInformation("audit.login_failure customer_id={CustomerId} reason={Reason}", customer.Id, "locked");
             return Errors.InvalidCredentials();
         }
 
         if (!passwordMatches || customer.EmailVerifiedAt is null || customer.SubscriberActivatedAt is null)
         {
-            var reason = !passwordMatches ? "invalid_credentials" : "not_verified_or_active";
-            _audit.LogInformation(
-                "audit.login_failure customer_id={CustomerId} reason={Reason}",
-                customer.Id,
-                reason);
+            string reason = !passwordMatches ? "invalid_credentials" : "not_verified_or_active";
+            _audit.LogInformation("audit.login_failure customer_id={CustomerId} reason={Reason}", customer.Id, reason);
 
             // Only accounts that can actually sign in accumulate lockout
             // failures; counting onboarding failures would let an attacker
             // pre-lock a victim.
-            var loginable = customer.EmailVerifiedAt is not null && customer.SubscriberActivatedAt is not null;
+            bool loginable = customer.EmailVerifiedAt is not null && customer.SubscriberActivatedAt is not null;
             if (loginable && await store.RecordFailedLoginAsync(customer.Id, cancellationToken))
             {
                 _audit.LogWarning("audit.account_locked customer_id={CustomerId}", customer.Id);
@@ -185,18 +181,15 @@ public sealed class AccountApi(
             await beforeIssuance(customer.Id, cancellationToken);
         }
 
-        var issued = await store.CreateSessionForVerifiedHashAsync(
-            customer.Id, hashToVerify, cancellationToken);
+        var issued = await store.CreateSessionForVerifiedHashAsync(customer.Id, hashToVerify, cancellationToken);
         if (issued is null)
         {
-            _audit.LogInformation(
-                "audit.login_failure customer_id={CustomerId} reason={Reason}",
-                customer.Id,
-                "invalid_credentials");
+            _audit.LogInformation("audit.login_failure customer_id={CustomerId} reason={Reason}", customer.Id, "invalid_credentials");
             return Errors.InvalidCredentials();
         }
         var (token, expiresAt) = issued.Value;
         _audit.LogInformation("audit.login_success customer_id={CustomerId}", customer.Id);
+
         return Results.Json(new LoginResponse(token, Timestamps.Format(expiresAt)), statusCode: 200);
     }
 
@@ -207,7 +200,7 @@ public sealed class AccountApi(
             return failure;
         }
 
-        var rawToken = Trust.SessionToken(context);
+        string? rawToken = Trust.SessionToken(context);
         if (rawToken is null)
         {
             return Errors.Unauthorized();
@@ -218,6 +211,7 @@ public sealed class AccountApi(
         {
             _audit.LogInformation("audit.logout customer_id={CustomerId}", id);
         }
+
         return Results.StatusCode(204);
     }
 
@@ -233,29 +227,32 @@ public sealed class AccountApi(
         {
             return Errors.InvalidRequest();
         }
+
         var request = parsed.Value!;
 
-        var peerIp = context.Connection.RemoteIpAddress?.ToString();
+        string? peerIp = context.Connection.RemoteIpAddress?.ToString();
         if (peerIp is not null && !rateLimiter.CheckIp(peerIp))
         {
             return Errors.RateLimited();
         }
 
-        var canonicalEmail = policy.CanonicalizeEmail(request.Email);
+        string? canonicalEmail = policy.CanonicalizeEmail(request.Email);
         if (canonicalEmail is null)
         {
             return Errors.InvalidRequest();
         }
+
         if (!rateLimiter.CheckEmail(canonicalEmail))
         {
             return Errors.RateLimited();
         }
+
         if (!policy.ValidatePassword(request.Password))
         {
             return Errors.InvalidRequest();
         }
 
-        var pwnedResult = await ScreenPasswordAsync(request.Password!, cancellationToken);
+        bool? pwnedResult = await ScreenPasswordAsync(request.Password!, cancellationToken);
         if (pwnedResult is true)
         {
             _audit.LogWarning("audit.password_pwned");
@@ -268,27 +265,20 @@ public sealed class AccountApi(
 
         // Exactly one hash before the existence lookup: new accounts persist it,
         // existing accounts discard it, and timing does not expose which happened.
-        var passwordHash = PasswordHasher.Hash(request.Password!);
+        string passwordHash = PasswordHasher.Hash(request.Password!);
         var (customer, isNew) = await store.InsertCustomerAsync(canonicalEmail, passwordHash, cancellationToken);
 
         if (customer.EmailVerifiedAt is not null)
         {
             await SafeMail(() => mailer.SendAlreadyRegisteredAsync(customer.CanonicalEmail, settings.FrontendUrl, cancellationToken));
-            _audit.LogInformation(
-                "audit.register customer_id={CustomerId} outcome={Outcome}",
-                customer.Id,
-                "already_verified");
+            _audit.LogInformation("audit.register customer_id={CustomerId} outcome={Outcome}", customer.Id, "already_verified");
             return Results.Json(new { status = "accepted" }, statusCode: 202);
         }
 
-        var rawToken = isNew
-            ? await store.CreateVerificationTokenAsync(customer.Id, cancellationToken)
-            : await store.RotateVerificationTokenAsync(customer.Id, cancellationToken);
+        string rawToken = isNew ? await store.CreateVerificationTokenAsync(customer.Id, cancellationToken) : await store.RotateVerificationTokenAsync(customer.Id, cancellationToken);
         await SafeMail(() => mailer.SendVerificationAsync(customer.CanonicalEmail, rawToken, settings.FrontendUrl, cancellationToken));
-        _audit.LogInformation(
-            "audit.register customer_id={CustomerId} outcome={Outcome}",
-            customer.Id,
-            isNew ? "created" : "token_rotated");
+        _audit.LogInformation("audit.register customer_id={CustomerId} outcome={Outcome}", customer.Id, isNew ? "created" : "token_rotated");
+
         return Results.Json(new { status = "accepted" }, statusCode: 202);
     }
 
@@ -305,17 +295,18 @@ public sealed class AccountApi(
             return Errors.InvalidRequest();
         }
 
-        var peerIp = context.Connection.RemoteIpAddress?.ToString();
+        string? peerIp = context.Connection.RemoteIpAddress?.ToString();
         if (peerIp is not null && !rateLimiter.CheckIp(peerIp))
         {
             return Errors.RateLimited();
         }
 
-        var canonicalEmail = policy.CanonicalizeEmail(parsed.Value!.Email);
+        string? canonicalEmail = policy.CanonicalizeEmail(parsed.Value!.Email);
         if (canonicalEmail is null)
         {
             return Errors.InvalidRequest();
         }
+
         if (!rateLimiter.CheckEmail(canonicalEmail))
         {
             return Errors.RateLimited();
@@ -328,7 +319,7 @@ public sealed class AccountApi(
         }
         else if (customer is not null)
         {
-            var rawToken = await store.RotateVerificationTokenAsync(customer.Id, cancellationToken);
+            string rawToken = await store.RotateVerificationTokenAsync(customer.Id, cancellationToken);
             await SafeMail(() => mailer.SendVerificationAsync(customer.CanonicalEmail, rawToken, settings.FrontendUrl, cancellationToken));
         }
         // Unknown email: no egress, identical accepted response.
@@ -349,14 +340,14 @@ public sealed class AccountApi(
             return Errors.InvalidRequest();
         }
 
-        var peerIp = context.Connection.RemoteIpAddress?.ToString();
+        string? peerIp = context.Connection.RemoteIpAddress?.ToString();
         if (peerIp is not null && !rateLimiter.CheckIp(peerIp))
         {
             return Errors.RateLimited();
         }
 
-        var canonicalEmail = policy.CanonicalizeEmail(parsed.Value!.Email);
-        var rateLimitKey = canonicalEmail ?? StableKey(parsed.Value.Email ?? string.Empty);
+        string? canonicalEmail = policy.CanonicalizeEmail(parsed.Value!.Email);
+        string rateLimitKey = canonicalEmail ?? StableKey(parsed.Value.Email ?? string.Empty);
         if (!rateLimiter.CheckResetRequest(rateLimitKey))
         {
             return Errors.RateLimited();
@@ -388,6 +379,7 @@ public sealed class AccountApi(
         {
             return parsed.UnknownField ? Errors.InvalidRequest() : Errors.InvalidToken();
         }
+
         var request = parsed.Value!;
 
         if (!Tokens.HasValidShape(request.Token))
@@ -395,23 +387,24 @@ public sealed class AccountApi(
             return Errors.InvalidToken();
         }
 
-        var peerIp = context.Connection.RemoteIpAddress?.ToString();
+        string? peerIp = context.Connection.RemoteIpAddress?.ToString();
         if (peerIp is not null && !rateLimiter.CheckIp(peerIp))
         {
             return Errors.RateLimited();
         }
 
-        var tokenHash = Tokens.HashToken(request.Token!);
+        string tokenHash = Tokens.HashToken(request.Token!);
         if (!rateLimiter.CheckResetConsume(tokenHash))
         {
             return Errors.RateLimited();
         }
+
         if (!policy.ValidatePassword(request.Password))
         {
             return Errors.InvalidRequest();
         }
 
-        var pwnedResult = await ScreenPasswordAsync(request.Password!, cancellationToken);
+        bool? pwnedResult = await ScreenPasswordAsync(request.Password!, cancellationToken);
         if (pwnedResult is true)
         {
             _audit.LogWarning("audit.password_pwned");
@@ -422,7 +415,7 @@ public sealed class AccountApi(
             _audit.LogWarning("audit.pwned_check_unavailable");
         }
 
-        var passwordHash = PasswordHasher.Hash(request.Password!);
+        string passwordHash = PasswordHasher.Hash(request.Password!);
         var customerId = await store.ConsumePasswordResetAsync(tokenHash, passwordHash, cancellationToken);
         if (customerId is null)
         {
@@ -430,6 +423,7 @@ public sealed class AccountApi(
         }
 
         _audit.LogInformation("audit.password_reset_consumed customer_id={CustomerId}", customerId.Value);
+
         return Results.Json(new { status = "reset" });
     }
 
@@ -445,6 +439,7 @@ public sealed class AccountApi(
         {
             return parsed.UnknownField ? Errors.InvalidRequest() : Errors.InvalidToken();
         }
+
         var request = parsed.Value!;
 
         if (!Tokens.HasValidShape(request.Token))
@@ -452,13 +447,13 @@ public sealed class AccountApi(
             return Errors.InvalidToken();
         }
 
-        var peerIp = context.Connection.RemoteIpAddress?.ToString();
+        string? peerIp = context.Connection.RemoteIpAddress?.ToString();
         if (peerIp is not null && !rateLimiter.CheckIp(peerIp))
         {
             return Errors.RateLimited();
         }
 
-        var tokenHash = Tokens.HashToken(request.Token!);
+        string tokenHash = Tokens.HashToken(request.Token!);
         if (!rateLimiter.CheckVerifyToken(tokenHash))
         {
             return Errors.RateLimited();
@@ -471,6 +466,7 @@ public sealed class AccountApi(
         }
 
         _audit.LogInformation("audit.verify customer_id={CustomerId}", customerId.Value);
+
         return Results.Json(new { status = "verified" });
     }
 
@@ -488,12 +484,13 @@ public sealed class AccountApi(
             body = await reader.ReadToEndAsync(cancellationToken);
         }
 
-        var signature = context.Request.Headers[BillingEvents.WebhookSignatureHeader].ToString();
+        string signature = context.Request.Headers[BillingEvents.WebhookSignatureHeader].ToString();
         if (!BillingEvents.VerifyWebhook(body, signature, settings.BillingWebhookSecret))
         {
             return Results.StatusCode(401);
         }
-        if (!BillingEvents.TryParseEvent(body, out var eventType, out var customerId, out var nextBillingAt))
+
+        if (!BillingEvents.TryParseEvent(body, out string? eventType, out var customerId, out var nextBillingAt))
         {
             return Results.StatusCode(400);
         }
@@ -508,10 +505,8 @@ public sealed class AccountApi(
             return Results.StatusCode(500);
         }
 
-        _audit.LogInformation(
-            "audit.billing_event customer_id={CustomerId} event_kind={EventKind}",
-            customerId,
-            eventType);
+        _audit.LogInformation("audit.billing_event customer_id={CustomerId} event_kind={EventKind}", customerId, eventType);
+
         return Results.Ok();
     }
 
@@ -546,20 +541,20 @@ public sealed class AccountApi(
     /// </summary>
     private static string StableKey(string value)
     {
-        var normalized = value.Trim().ToLowerInvariant();
+        string normalized = value.Trim().ToLowerInvariant();
+
         return Encoding.UTF8.GetByteCount(normalized) > 320 ? Tokens.HashToken(normalized) : normalized;
     }
 }
 
-public sealed record AccountResponse(
-    Guid Id,
-    string Email,
-    bool EmailVerified,
-    bool SubscriberActive,
-    string? SubscriptionStartedAt,
-    string? NextBillingAt,
-    bool Lifetime,
-    bool Admin)
+public sealed record AccountResponse(Guid Id,
+                                     string Email,
+                                     bool EmailVerified,
+                                     bool SubscriberActive,
+                                     string? SubscriptionStartedAt,
+                                     string? NextBillingAt,
+                                     bool Lifetime,
+                                     bool Admin)
 {
     public static AccountResponse From(CustomerRecord customer) => new(
         customer.Id,

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
 namespace argus.Server.Configuration;
@@ -22,10 +23,12 @@ public sealed class AppSettings
     public string? SeedDevPassword { get; init; }
     public string? SeedUserPassword { get; init; }
 
+    [SuppressMessage("Major Code Smell", "S1075",
+        Justification = "Local development default; ARGUS_DATABASE_URL overrides it.")]
     public const string DefaultDatabaseUrl = "postgres://postgres@127.0.0.1:5432/argus";
 
-    private static readonly string[] AllowedLogLevels = ["trace", "debug", "info", "warn", "error"];
-    private static readonly string[] AllowedLogFormats = ["pretty", "json"];
+    private static readonly string[] _allowedLogLevels = ["trace", "debug", "info", "warn", "error"];
+    private static readonly string[] _allowedLogFormats = ["pretty", "json"];
 
     public static AppSettings Load()
     {
@@ -33,67 +36,65 @@ public sealed class AppSettings
 
         string? Raw(string name)
         {
-            var key = Brand.EnvPrefix + name;
-            var fromEnvironment = Environment.GetEnvironmentVariable(key);
+            string key = Brand.EnvPrefix + name;
+            string? fromEnvironment = Environment.GetEnvironmentVariable(key);
             if (!string.IsNullOrEmpty(fromEnvironment))
             {
                 return fromEnvironment;
             }
-            return envFile is not null && envFile.TryGetValue(key, out var fromFile) ? fromFile : null;
+
+            return envFile is not null && envFile.TryGetValue(key, out string? fromFile) ? fromFile : null;
         }
 
         string Required(string name)
         {
-            var value = Raw(name);
+            string? value = Raw(name);
             if (string.IsNullOrEmpty(value))
             {
                 throw new InvalidOperationException($"{Brand.EnvPrefix}{name} is required");
             }
+
             return value;
         }
 
-        var databaseUrl = Raw("DATABASE_URL") ?? DefaultDatabaseUrl;
+        string databaseUrl = Raw("DATABASE_URL") ?? DefaultDatabaseUrl;
         ValidateDatabaseUrl(databaseUrl);
 
-        var apiSecret = Required("API_SECRET");
+        string apiSecret = Required("API_SECRET");
         RequireMinimumBytes(apiSecret, 32, "API_SECRET");
 
-        var frontendUrl = Required("FRONTEND_URL");
+        string frontendUrl = Required("FRONTEND_URL");
         if (!IsValidOrigin(frontendUrl))
         {
-            throw new InvalidOperationException(
-                $"{Brand.EnvPrefix}FRONTEND_URL must be an absolute http(s) origin without a path");
+            throw new InvalidOperationException($"{Brand.EnvPrefix}FRONTEND_URL must be an absolute http(s) origin without a path");
         }
         frontendUrl = frontendUrl.TrimEnd('/');
 
-        var resendApiKey = Required("RESEND_API_KEY");
+        string resendApiKey = Required("RESEND_API_KEY");
         RequireMinimumBytes(resendApiKey, 20, "RESEND_API_KEY");
 
-        var resendFrom = Required("RESEND_FROM");
+        string resendFrom = Required("RESEND_FROM");
         if (!IsMailbox(resendFrom))
         {
-            throw new InvalidOperationException(
-                $"{Brand.EnvPrefix}RESEND_FROM must be a local@domain mailbox");
+            throw new InvalidOperationException($"{Brand.EnvPrefix}RESEND_FROM must be a local@domain mailbox");
         }
 
-        var billingSecret = Required("BILLING_WEBHOOK_SECRET");
+        string billingSecret = Required("BILLING_WEBHOOK_SECRET");
         RequireMinimumBytes(billingSecret, 32, "BILLING_WEBHOOK_SECRET");
 
-        var logLevel = Raw("LOG_LEVEL") ?? "info";
-        if (!AllowedLogLevels.Contains(logLevel))
+        string logLevel = Raw("LOG_LEVEL") ?? "info";
+        if (!_allowedLogLevels.Contains(logLevel))
         {
-            throw new InvalidOperationException(
-                $"{Brand.EnvPrefix}LOG_LEVEL must be one of {string.Join(", ", AllowedLogLevels)}");
+            throw new InvalidOperationException($"{Brand.EnvPrefix}LOG_LEVEL must be one of {string.Join(", ", _allowedLogLevels)}");
         }
 
-        var logFormat = Raw("LOG_FORMAT") ?? "pretty";
-        if (!AllowedLogFormats.Contains(logFormat))
+        string logFormat = Raw("LOG_FORMAT") ?? "pretty";
+        if (!_allowedLogFormats.Contains(logFormat))
         {
-            throw new InvalidOperationException(
-                $"{Brand.EnvPrefix}LOG_FORMAT must be one of {string.Join(", ", AllowedLogFormats)}");
+            throw new InvalidOperationException($"{Brand.EnvPrefix}LOG_FORMAT must be one of {string.Join(", ", _allowedLogFormats)}");
         }
 
-        if (!int.TryParse(Raw("PORT") ?? "3001", out var port) || port is < 1 or > 65535)
+        if (!int.TryParse(Raw("PORT") ?? "3001", out int port) || port is < 1 or > 65535)
         {
             throw new InvalidOperationException($"{Brand.EnvPrefix}PORT must be a valid TCP port");
         }
@@ -119,8 +120,7 @@ public sealed class AppSettings
     {
         if (Encoding.UTF8.GetByteCount(value) < minimum)
         {
-            throw new InvalidOperationException(
-                $"{Brand.EnvPrefix}{name} must be at least {minimum} bytes");
+            throw new InvalidOperationException($"{Brand.EnvPrefix}{name} must be at least {minimum} bytes");
         }
     }
 
@@ -130,18 +130,19 @@ public sealed class AppSettings
         {
             return false;
         }
+
         if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
         {
             return false;
         }
-        return string.IsNullOrEmpty(uri.Query)
-            && string.IsNullOrEmpty(uri.Fragment)
-            && (uri.AbsolutePath == "/" || uri.AbsolutePath.Length == 0);
+
+        return string.IsNullOrEmpty(uri.Query) && string.IsNullOrEmpty(uri.Fragment) && (uri.AbsolutePath == "/" || uri.AbsolutePath.Length == 0);
     }
 
     private static bool IsMailbox(string value)
     {
-        var at = value.IndexOf('@');
+        int at = value.IndexOf('@');
+
         return at > 0 && at < value.Length - 1 && value.IndexOf('@', at + 1) == -1;
     }
 
@@ -151,50 +152,48 @@ public sealed class AppSettings
     /// </summary>
     private static void ValidateDatabaseUrl(string value)
     {
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
-            || (uri.Scheme != "postgres" && uri.Scheme != "postgresql"))
+        if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) || (uri.Scheme != "postgres" && uri.Scheme != "postgresql"))
         {
-            throw new InvalidOperationException(
-                $"{Brand.EnvPrefix}DATABASE_URL must be a postgres:// URL");
+            throw new InvalidOperationException($"{Brand.EnvPrefix}DATABASE_URL must be a postgres:// URL");
         }
 
-        var host = uri.Host.ToLowerInvariant();
-        var isLocal = host is "localhost" or "127.0.0.1" or "::1" or "[::1]";
+        string host = uri.Host.ToLowerInvariant();
+        bool isLocal = host is "localhost" or "127.0.0.1" or "::1" or "[::1]";
         if (isLocal)
         {
             return;
         }
 
-        var userInfo = uri.UserInfo;
-        var hasPassword = userInfo.Contains(':') && userInfo[(userInfo.IndexOf(':') + 1)..].Length > 0;
+        string userInfo = uri.UserInfo;
+        bool hasPassword = userInfo.Contains(':') && userInfo[(userInfo.IndexOf(':') + 1)..].Length > 0;
         if (!hasPassword)
         {
-            throw new InvalidOperationException(
-                $"{Brand.EnvPrefix}DATABASE_URL must include a password for a non-local host");
+            throw new InvalidOperationException($"{Brand.EnvPrefix}DATABASE_URL must include a password for a non-local host");
         }
 
-        var sslmode = QueryValue(uri.Query, "sslmode");
+        string? sslmode = QueryValue(uri.Query, "sslmode");
         if (sslmode is not ("require" or "verify-full"))
         {
-            throw new InvalidOperationException(
-                $"{Brand.EnvPrefix}DATABASE_URL must set sslmode=require or sslmode=verify-full for a non-local host");
+            throw new InvalidOperationException($"{Brand.EnvPrefix}DATABASE_URL must set sslmode=require or sslmode=verify-full for a non-local host");
         }
     }
 
     private static string? QueryValue(string query, string name)
     {
-        foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        foreach (string pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
-            var separator = pair.IndexOf('=');
+            int separator = pair.IndexOf('=');
             if (separator <= 0)
             {
                 continue;
             }
+
             if (pair[..separator].Equals(name, StringComparison.OrdinalIgnoreCase))
             {
                 return Uri.UnescapeDataString(pair[(separator + 1)..]).ToLowerInvariant();
             }
         }
+
         return null;
     }
 }
@@ -213,22 +212,25 @@ internal static class EnvFile
         }
 
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var line in File.ReadAllLines(path))
+        foreach (string line in File.ReadAllLines(path))
         {
-            var trimmed = line.Trim();
+            string trimmed = line.Trim();
             if (trimmed.Length == 0 || trimmed.StartsWith('#'))
             {
                 continue;
             }
-            var separator = trimmed.IndexOf('=');
+
+            int separator = trimmed.IndexOf('=');
             if (separator <= 0)
             {
                 continue;
             }
-            var key = trimmed[..separator].Trim();
-            var value = trimmed[(separator + 1)..].Trim();
+
+            string key = trimmed[..separator].Trim();
+            string value = trimmed[(separator + 1)..].Trim();
             values[key] = value;
         }
+
         return values;
     }
 }

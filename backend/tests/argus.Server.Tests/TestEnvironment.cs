@@ -1,15 +1,14 @@
 using System.Net;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging;
 using argus.Server.Data;
 using argus.Server.Imports;
 using argus.Server.Mail;
 using argus.Server.Transactions;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 
 namespace argus.Server.Tests;
 
@@ -29,9 +28,9 @@ public static class TestEnvironment
         var url = Environment.GetEnvironmentVariable("ARGUS_TEST_DATABASE_URL");
         if (string.IsNullOrEmpty(url))
         {
-            throw new InvalidOperationException(
-                "ARGUS_TEST_DATABASE_URL is required for isolation tests; refusing to skip.");
+            throw new InvalidOperationException("ARGUS_TEST_DATABASE_URL is required for isolation tests; refusing to skip.");
         }
+
         return url;
     }
 
@@ -58,38 +57,37 @@ public sealed class CapturingMailer : IMailer
     private readonly object _gate = new();
     private readonly List<(string Kind, string Recipient, string Token)> _sent = [];
 
-    public Task SendVerificationAsync(
-        string recipient,
-        string rawToken,
-        string frontendUrl,
-        CancellationToken cancellationToken = default)
+    public Task SendVerificationAsync(string recipient,
+                                      string rawToken,
+                                      string frontendUrl,
+                                      CancellationToken cancellationToken = default)
     {
         Record("verification", recipient, rawToken);
+
         return Task.CompletedTask;
     }
 
-    public Task SendPasswordResetAsync(
-        string recipient,
-        string rawToken,
-        string frontendUrl,
-        CancellationToken cancellationToken = default)
+    public Task SendPasswordResetAsync(string recipient,
+                                       string rawToken,
+                                       string frontendUrl,
+                                       CancellationToken cancellationToken = default)
     {
         Record("reset", recipient, rawToken);
+
         return Task.CompletedTask;
     }
 
-    public Task SendAlreadyRegisteredAsync(
-        string recipient,
-        string frontendUrl,
-        CancellationToken cancellationToken = default)
+    public Task SendAlreadyRegisteredAsync(string recipient, string frontendUrl, CancellationToken cancellationToken = default)
     {
         Record("already-registered", recipient, string.Empty);
+
         return Task.CompletedTask;
     }
 
     public Task SendSuspiciousLoginAsync(string recipient, CancellationToken cancellationToken = default)
     {
         Record("suspicious-login", recipient, string.Empty);
+
         return Task.CompletedTask;
     }
 
@@ -172,13 +170,14 @@ public sealed class CapturingLoggerProvider : ILoggerProvider
         }
     }
 
-    internal void Record(string category, LogLevel level, string message, Exception? exception)
+    internal void Record(string category,
+                         LogLevel level,
+                         string message,
+                         Exception? exception)
     {
         lock (_gate)
         {
-            _entries.Add(exception is null
-                ? $"{level} {category}: {message}"
-                : $"{level} {category}: {message} [{exception.GetType().Name}]");
+            _entries.Add(exception is null ? $"{level} {category}: {message}" : $"{level} {category}: {message} [{exception}]");
         }
     }
 
@@ -188,12 +187,11 @@ public sealed class CapturingLoggerProvider : ILoggerProvider
 
         public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None;
 
-        public void Log<TState>(
-            LogLevel logLevel,
-            EventId eventId,
-            TState state,
-            Exception? exception,
-            Func<TState, Exception?, string> formatter) =>
+        public void Log<TState>(LogLevel logLevel,
+                                EventId eventId,
+                                TState state,
+                                Exception? exception,
+                                Func<TState, Exception?, string> formatter) =>
             provider.Record(category, logLevel, formatter(state, exception), exception);
     }
 }
@@ -212,8 +210,7 @@ public sealed class TestRemoteIpStartupFilter : IStartupFilter
             if (context.Request.Path.StartsWithSegments("/v1/finance"))
             {
                 var header = context.Request.Headers["X-Test-Remote-Ip"].ToString();
-                context.Connection.RemoteIpAddress =
-                    IPAddress.TryParse(header, out var address) ? address : IPAddress.Loopback;
+                context.Connection.RemoteIpAddress = IPAddress.TryParse(header, out var address) ? address : IPAddress.Loopback;
             }
             await nextMiddleware();
         });
@@ -235,9 +232,7 @@ public sealed class KitFactory : WebApplicationFactory<Program>
     {
     }
 
-    internal KitFactory(
-        IImportFaultInjector? faultInjector,
-        ITransactionFaultInjector? transactionFaultInjector)
+    internal KitFactory(IImportFaultInjector? faultInjector, ITransactionFaultInjector? transactionFaultInjector)
     {
         FaultInjector = faultInjector;
         TransactionFaultInjector = transactionFaultInjector;
@@ -256,11 +251,9 @@ public sealed class KitFactory : WebApplicationFactory<Program>
             services.AddSingleton<IMailer>(Mailer);
             services.AddSingleton<ILoggerProvider>(LogCapture);
             services.AddSingleton<IStartupFilter, TestRemoteIpStartupFilter>();
-            services.AddSingleton<IImportFaultInjector>(
-                FaultInjector ?? NoopImportFaultInjector.Instance);
+            services.AddSingleton<IImportFaultInjector>(FaultInjector ?? NoopImportFaultInjector.Instance);
             services.RemoveAll<ITransactionFaultInjector>();
-            services.AddSingleton<ITransactionFaultInjector>(
-                TransactionFaultInjector ?? NoopTransactionFaultInjector.Instance);
+            services.AddSingleton<ITransactionFaultInjector>(TransactionFaultInjector ?? NoopTransactionFaultInjector.Instance);
         });
     }
 

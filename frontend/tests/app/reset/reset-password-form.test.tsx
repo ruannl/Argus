@@ -33,7 +33,9 @@ describe("reset password form", () => {
     await user.type(screen.getByLabelText("New password"), password);
     await user.click(screen.getByRole("button", { name: "Reset password" }));
 
-    expect(await screen.findByText("Your password has been reset. You can sign in.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Your password has been reset. You can sign in."),
+    ).toBeInTheDocument();
     expect(resetPasswordAction).toHaveBeenCalledWith(token, password);
     expect(window.location.pathname).toBe("/reset");
     expect(window.location.search).toBe("");
@@ -59,7 +61,9 @@ describe("reset password form", () => {
     expect(screen.getByRole("button", { name: "Reset password" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Reset password" }));
-    expect(await screen.findByText("Your password has been reset. You can sign in.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Your password has been reset. You can sign in."),
+    ).toBeInTheDocument();
     expect(resetPasswordAction).toHaveBeenCalledTimes(2);
   });
 
@@ -97,7 +101,11 @@ describe("reset password form", () => {
 
     resolveFirst({ ok: true, message: "Your password has been reset. You can sign in." });
     await firstSubmit;
-    expect(await screen.findByText("Your password has been reset. You can sign in.")).toBeInTheDocument();
-    expect(screen.queryByText("This reset link is invalid or has expired.")).not.toBeInTheDocument();
+    expect(
+      await screen.findByText("Your password has been reset. You can sign in."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("This reset link is invalid or has expired."),
+    ).not.toBeInTheDocument();
   });
 });

@@ -2,11 +2,10 @@ using System.Text;
 
 namespace argus.Server.Imports;
 
-public sealed record CsvRecord(
-    int StartLine,
-    int EndLine,
-    IReadOnlyList<string> Fields,
-    bool Malformed);
+public sealed record CsvRecord(int StartLine,
+                               int EndLine,
+                               IReadOnlyList<string> Fields,
+                               bool Malformed);
 
 /// <summary>
 /// Strict RFC-4180-style reader used by both CSV presets. It tracks physical
@@ -15,29 +14,28 @@ public sealed record CsvRecord(
 /// </summary>
 public static class CsvRecordReader
 {
-    public static IReadOnlyList<CsvRecord> Read(
-        string text,
-        char delimiter,
-        int maxRecords = int.MaxValue,
-        CancellationToken cancellationToken = default)
+    public static IReadOnlyList<CsvRecord> Read(string text,
+                                                char delimiter,
+                                                int maxRecords = int.MaxValue,
+                                                CancellationToken cancellationToken = default)
     {
         var records = new List<CsvRecord>();
         var fields = new List<string>();
         var field = new StringBuilder();
-        var line = 1;
-        var recordStart = 1;
-        var inQuotes = false;
-        var recordHasContent = false;
-        var malformed = false;
+        int line = 1;
+        int recordStart = 1;
+        bool inQuotes = false;
+        bool recordHasContent = false;
+        bool malformed = false;
 
-        for (var index = 0; index < text.Length; index++)
+        for (int index = 0; index < text.Length; index++)
         {
             if ((index & 0x1FFF) == 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
             }
 
-            var character = text[index];
+            char character = text[index];
 
             if (inQuotes)
             {
@@ -51,10 +49,7 @@ public static class CsvRecordReader
                     else
                     {
                         inQuotes = false;
-                        if (index + 1 < text.Length &&
-                            text[index + 1] != delimiter &&
-                            text[index + 1] != '\r' &&
-                            text[index + 1] != '\n')
+                        if (index + 1 < text.Length && text[index + 1] != delimiter && text[index + 1] != '\r' && text[index + 1] != '\n')
                         {
                             malformed = true;
                         }

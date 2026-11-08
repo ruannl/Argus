@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint .",
+    "format": "prettier --write \"{src,tests}/**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"{src,tests}/**/*.{ts,tsx}\"",
+    "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test"
@@ -32,6 +34,7 @@
     "eslint-config-next": "16.4.3",
     "jsdom": "^29.1.1",
     "msw": "^2.15.0",
+    "prettier": "3.9.10",
     "tailwindcss": "^4.2.1",
     "typescript": "^5",
     "vitest": "^4.1.10"

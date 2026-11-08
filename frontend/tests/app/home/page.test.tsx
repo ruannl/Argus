@@ -69,10 +69,7 @@ describe("home page", () => {
       "href",
       "/transactions",
     );
-    expect(within(nav).getByRole("link", { name: "Imports" })).toHaveAttribute(
-      "href",
-      "/imports",
-    );
+    expect(within(nav).getByRole("link", { name: "Imports" })).toHaveAttribute("href", "/imports");
     expect(within(nav).getByRole("link", { name: "Settings" })).toHaveAttribute(
       "href",
       "/settings",
@@ -94,9 +91,7 @@ describe("home page", () => {
       "aria-current",
       "page",
     );
-    expect(within(nav).getByRole("link", { name: "Summary" })).not.toHaveAttribute(
-      "aria-current",
-    );
+    expect(within(nav).getByRole("link", { name: "Summary" })).not.toHaveAttribute("aria-current");
   });
 
   it("shows the expired-session child without account fields when /v1/me fails", async () => {

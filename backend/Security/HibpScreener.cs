@@ -14,30 +14,30 @@ public sealed class HibpScreener(ILogger<HibpScreener> logger) : IPwnedScreener
     private const string Endpoint = "https://api.pwnedpasswords.com/range/";
     private const int NetworkTimeoutMs = 2000;
 
-    private static readonly HttpClient Client = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private static readonly HttpClient _client = new() { Timeout = Timeout.InfiniteTimeSpan };
 
     public async Task<bool?> IsPwnedAsync(string password, CancellationToken cancellationToken = default)
     {
         try
         {
-            var hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(password)));
-            var prefix = hash[..5];
-            var suffix = hash[5..];
+            string hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(password)));
+            string prefix = hash[..5];
+            string suffix = hash[5..];
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(NetworkTimeoutMs);
 
-            using var response = await Client.GetAsync(Endpoint + prefix, timeout.Token);
+            using var response = await _client.GetAsync(Endpoint + prefix, timeout.Token);
             if (!response.IsSuccessStatusCode)
             {
                 logger.LogWarning("pwned.check_unavailable status={Status}", (int)response.StatusCode);
                 return null;
             }
 
-            var body = await response.Content.ReadAsStringAsync(timeout.Token);
-            foreach (var line in body.Split('\n'))
+            string body = await response.Content.ReadAsStringAsync(timeout.Token);
+            foreach (string line in body.Split('\n'))
             {
-                var separator = line.IndexOf(':');
+                int separator = line.IndexOf(':');
                 if (separator > 0 && line[..separator].Trim().Equals(suffix, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;

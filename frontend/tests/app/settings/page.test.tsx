@@ -207,7 +207,9 @@ describe("settings page", () => {
 
     render(await SettingsPage());
 
-    expect(screen.getByText("No financial accounts yet. Add your first ZAR account above.")).toBeInTheDocument();
+    expect(
+      screen.getByText("No financial accounts yet. Add your first ZAR account above."),
+    ).toBeInTheDocument();
     expect(screen.getByText("No categories yet.")).toBeInTheDocument();
     expect(screen.getByText("No merchant tags yet. Add your first tag above.")).toBeInTheDocument();
   });
@@ -269,9 +271,7 @@ describe("settings page", () => {
     await user.selectOptions(kindSelect, "Income");
 
     expect(screen.getByText("Changing the kind affects your totals")).toBeInTheDocument();
-    expect(
-      screen.getByLabelText("I understand and want to change the kind."),
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText("I understand and want to change the kind.")).toBeInTheDocument();
   });
 
   it("states the exact reassignment count in the category delete confirmation", async () => {
@@ -324,8 +324,6 @@ describe("settings page", () => {
     await user.type(screen.getByLabelText("Account name"), "Savings");
     await user.click(screen.getByRole("button", { name: "Add ZAR account" }));
 
-    await waitFor(() =>
-      expect(screen.getByText("Financial account created.")).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText("Financial account created.")).toBeInTheDocument());
   });
 });

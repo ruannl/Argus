@@ -191,7 +191,9 @@ describe("standalone transaction detail page", () => {
 
       render(await renderDetailPage());
 
-      expect(screen.getByRole("heading", { name: "Transaction detail unavailable" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Transaction detail unavailable" }),
+      ).toBeInTheDocument();
       expect(screen.getByRole("alert")).toHaveTextContent(
         kind === "rate_limited" ? /Wait a few minutes/ : /does not prove your session expired/,
       );
@@ -223,7 +225,9 @@ describe("standalone transaction detail page", () => {
 
     render(await renderDetailPage());
 
-    expect(screen.getByRole("heading", { name: "Transaction detail unavailable" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Transaction detail unavailable" }),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/PRIVATE-CANARY/)).not.toBeInTheDocument();
     expect(endSessionAction).not.toHaveBeenCalled();
     expect(getTransaction).not.toHaveBeenCalled();

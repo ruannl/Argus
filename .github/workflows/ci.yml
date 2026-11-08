@@ -49,16 +49,20 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Format check (server)
-        run: dotnet format argus.Server.csproj --verify-no-changes
+        run: |
+          dotnet format argus.Server.csproj --verify-no-changes
+          dotnet format style argus.Server.csproj --diagnostics IDE0005 --severity info --verify-no-changes
 
       - name: Format check (tests)
-        run: dotnet format tests/argus.Server.Tests/argus.Server.Tests.csproj --verify-no-changes
+        run: |
+          dotnet format tests/argus.Server.Tests/argus.Server.Tests.csproj --verify-no-changes
+          dotnet format style tests/argus.Server.Tests/argus.Server.Tests.csproj --diagnostics IDE0005 --severity info --verify-no-changes
 
       - name: Isolation tests (real PostgreSQL)
-        run: dotnet test tests/argus.Server.Tests
+        run: dotnet test tests/argus.Server.Tests -warnaserror
 
       - name: Release build
-        run: dotnet build -c Release
+        run: dotnet build -c Release -warnaserror
 
   security:
     name: Dependency vulnerability check
@@ -104,6 +108,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Format check
+        run: npm run format:check
 
       - name: Lint
         run: npm run lint

@@ -22,10 +22,7 @@ public sealed class TransactionMigrationTests(KitFactory factory) : IClassFixtur
             }
             await using (var use = connection.CreateCommand())
             {
-                use.CommandText =
-                    $"SET search_path TO {schema}; " +
-                    "CREATE TABLE schema_migrations (" +
-                    "name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());";
+                use.CommandText = $"SET search_path TO {schema}; " + "CREATE TABLE schema_migrations (" + "name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());";
                 await use.ExecuteNonQueryAsync();
             }
 
@@ -36,12 +33,12 @@ public sealed class TransactionMigrationTests(KitFactory factory) : IClassFixtur
                 await apply.ExecuteNonQueryAsync();
             }
 
-            var customerId = Guid.NewGuid();
-            var accountId = Guid.NewGuid();
-            var categoryId = Guid.NewGuid();
-            var systemCategoryId = Guid.NewGuid();
-            var statementId = Guid.NewGuid();
-            var transactionId = Guid.NewGuid();
+            Guid customerId = Guid.NewGuid();
+            Guid accountId = Guid.NewGuid();
+            Guid categoryId = Guid.NewGuid();
+            Guid systemCategoryId = Guid.NewGuid();
+            Guid statementId = Guid.NewGuid();
+            Guid transactionId = Guid.NewGuid();
             await using (var seed = connection.CreateCommand())
             {
                 seed.CommandText = $"""
@@ -80,29 +77,15 @@ public sealed class TransactionMigrationTests(KitFactory factory) : IClassFixtur
                 await apply.ExecuteNonQueryAsync();
             }
 
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(
-                connection, "SELECT COUNT(*) FROM transactions")));
-            Assert.Equal("migration-identity", (string)(await ScalarAsync(
-                connection, "SELECT identity_key FROM transactions"))!);
-            Assert.Equal("-12.34", (string)(await ScalarAsync(
-                connection, "SELECT amount::text FROM transactions"))!);
-            Assert.Equal("fingerprint", (string)(await ScalarAsync(
-                connection, "SELECT statement_fingerprint FROM statement_imports"))!);
-            Assert.Equal(2L, Convert.ToInt64(await ScalarAsync(
-                connection,
-                "SELECT COUNT(*) FROM information_schema.tables " +
-                $"WHERE table_schema = '{schema}' AND table_name IN " +
-                "('transaction_operations', 'transaction_operation_items')")));
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(
-                connection,
-                "SELECT COUNT(*) FROM pg_indexes " +
-                $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_date_idx'")));
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(
-                connection,
-                "SELECT COUNT(*) FROM pg_indexes " +
-                $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_amount_idx'")));
+            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM transactions")));
+            Assert.Equal("migration-identity", (string)(await ScalarAsync(connection, "SELECT identity_key FROM transactions"))!);
+            Assert.Equal("-12.34", (string)(await ScalarAsync(connection, "SELECT amount::text FROM transactions"))!);
+            Assert.Equal("fingerprint", (string)(await ScalarAsync(connection, "SELECT statement_fingerprint FROM statement_imports"))!);
+            Assert.Equal(2L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM information_schema.tables " + $"WHERE table_schema = '{schema}' AND table_name IN " + "('transaction_operations', 'transaction_operation_items')")));
+            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM pg_indexes " + $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_date_idx'")));
+            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM pg_indexes " + $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_amount_idx'")));
 
-            var operationId = Guid.NewGuid();
+            Guid operationId = Guid.NewGuid();
             var stamp = DateTime.UtcNow;
             await using (var header = connection.CreateCommand())
             {
@@ -145,12 +128,10 @@ public sealed class TransactionMigrationTests(KitFactory factory) : IClassFixtur
             // deleting a captured member must leave the frozen scope intact.
             await using (var deleteTransaction = connection.CreateCommand())
             {
-                deleteTransaction.CommandText =
-                    $"DELETE FROM transactions WHERE id = '{transactionId}'";
+                deleteTransaction.CommandText = $"DELETE FROM transactions WHERE id = '{transactionId}'";
                 await deleteTransaction.ExecuteNonQueryAsync();
             }
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(
-                connection, "SELECT COUNT(*) FROM transaction_operation_items")));
+            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM transaction_operation_items")));
 
             await using (var deleteHeader = connection.CreateCommand())
             {
@@ -160,8 +141,7 @@ public sealed class TransactionMigrationTests(KitFactory factory) : IClassFixtur
                     """;
                 await deleteHeader.ExecuteNonQueryAsync();
             }
-            Assert.Equal(0L, Convert.ToInt64(await ScalarAsync(
-                connection, "SELECT COUNT(*) FROM transaction_operation_items")));
+            Assert.Equal(0L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM transaction_operation_items")));
         }
         finally
         {
@@ -178,6 +158,7 @@ public sealed class TransactionMigrationTests(KitFactory factory) : IClassFixtur
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
+
         return await command.ExecuteScalarAsync();
     }
 }

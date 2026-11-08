@@ -36,12 +36,9 @@ const RESET_PASSWORD_INVALID_TOKEN_MESSAGE = "This reset link is invalid or has 
 const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 
 type AccountActionResult =
-  | { ok: true; message: string; email?: string }
-  | { ok: false; message: string; email?: string };
+  { ok: true; message: string; email?: string } | { ok: false; message: string; email?: string };
 
-type PasswordResetActionResult =
-  | { ok: true; message: string }
-  | { ok: false; message: string };
+type PasswordResetActionResult = { ok: true; message: string } | { ok: false; message: string };
 
 function formString(formData: FormData, name: string): string | null {
   const value = formData.get(name);
@@ -128,8 +125,7 @@ function requestPasswordResetMessage(result: AccountRequestResult<AcceptedRespon
 }
 
 type ResetPasswordMessageResult =
-  | AccountRequestResult<PasswordResetResponse>
-  | { ok: false; kind: "invalid_credentials" };
+  AccountRequestResult<PasswordResetResponse> | { ok: false; kind: "invalid_credentials" };
 
 function resetPasswordMessage(result: ResetPasswordMessageResult): string {
   if (result.ok) {
@@ -248,9 +244,7 @@ export async function confirmVerification(token: string): Promise<AccountActionR
   }
 }
 
-export async function requestPasswordResetAction(
-  formData: FormData,
-): Promise<AccountActionResult> {
+export async function requestPasswordResetAction(formData: FormData): Promise<AccountActionResult> {
   const email = formString(formData, "email");
 
   if (email === null || email.length === 0) {

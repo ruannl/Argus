@@ -22,7 +22,7 @@ public sealed class ConfigurationAndPolicyTests
     [Fact]
     public void PasswordPolicy_EnforcesLengthCommonListAndUnicodeCount()
     {
-        var policy = new Policy();
+        Policy policy = new Policy();
         Assert.True(policy.CommonPasswordCount >= 1000);
 
         Assert.False(policy.ValidatePassword(null));
@@ -36,7 +36,7 @@ public sealed class ConfigurationAndPolicyTests
     [Fact]
     public void EmailCanonicalization_TrimsLowercasesAndRequiresLocalAndDomain()
     {
-        var policy = new Policy();
+        Policy policy = new Policy();
         Assert.Equal("alice@example.test", policy.CanonicalizeEmail(" Alice@Example.TEST "));
         Assert.Null(policy.CanonicalizeEmail(null));
         Assert.Null(policy.CanonicalizeEmail(string.Empty));

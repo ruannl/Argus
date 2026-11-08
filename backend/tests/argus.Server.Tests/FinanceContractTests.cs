@@ -25,19 +25,16 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         var session = await RegisterVerifyLoginAsync(email);
         var me = await SendAsync(Get("/v1/me", session: session));
         Assert.Equal(HttpStatusCode.OK, me.StatusCode);
+
         return (session, (await BodyAsync(me)).GetProperty("id").GetGuid());
     }
 
-    private async Task<Guid> CreateAccountAsync(
-        string session,
-        string displayName,
-        string? institution = null)
+    private async Task<Guid> CreateAccountAsync(string session, string displayName, string? institution = null)
     {
-        var body = institution is null
-            ? Json(new { display_name = displayName })
-            : Json(new { display_name = displayName, institution });
+        var body = institution is null ? Json(new { display_name = displayName }) : Json(new { display_name = displayName, institution });
         var response = await SendAsync(Post(AccountsPath, body, session: session));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
         return (await BodyAsync(response)).GetProperty("id").GetGuid();
     }
 
@@ -45,6 +42,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
     {
         var response = await SendAsync(Get(AccountsPath, session: session));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
         return (await BodyAsync(response)).GetProperty("accounts");
     }
 
@@ -52,6 +50,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
     {
         var response = await SendAsync(Get(CategoriesPath, session: session));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
         return (await BodyAsync(response)).GetProperty("categories");
     }
 
@@ -59,6 +58,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
     {
         var response = await SendAsync(Get(TagsPath, session: session));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
         return (await BodyAsync(response)).GetProperty("merchant_tags");
     }
 
@@ -71,6 +71,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
                 return item;
             }
         }
+
         return null;
     }
 
@@ -79,6 +80,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         var categories = await ListCategoriesAsync(session);
         var found = FindByName(categories, name);
         Assert.NotNull(found);
+
         return found!.Value.GetProperty("id").GetGuid();
     }
 
@@ -89,17 +91,17 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT id FROM customers WHERE canonical_email = @email";
         command.Parameters.AddWithValue("email", email);
+
         return (Guid)(await command.ExecuteScalarAsync())!;
     }
 
-    private async Task<Guid> InsertTransactionAsync(
-        Guid customerId,
-        Guid accountId,
-        Guid categoryId,
-        decimal amount = -100.00m)
+    private async Task<Guid> InsertTransactionAsync(Guid customerId,
+                                                    Guid accountId,
+                                                    Guid categoryId,
+                                                    decimal amount = -100.00m)
     {
-        var statementId = Guid.NewGuid();
-        var transactionId = Guid.NewGuid();
+        Guid statementId = Guid.NewGuid();
+        Guid transactionId = Guid.NewGuid();
         var amountText = amount.ToString("0.00", CultureInfo.InvariantCulture);
         await ExecuteSqlAsync($"""
             INSERT INTO statement_imports (
@@ -122,12 +124,14 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
                 1, 'identity-{transactionId}', NOW(), NOW()
             );
             """);
+
         return transactionId;
     }
 
     private static HttpRequestMessage WithTestIp(HttpRequestMessage request, string ip)
     {
         request.Headers.Add("X-Test-Remote-Ip", ip);
+
         return request;
     }
 
@@ -150,9 +154,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
 
         // The contract names are frozen snake_case.
         var names = created.Value.EnumerateObject().Select(property => property.Name).OrderBy(name => name).ToArray();
-        Assert.Equal(
-            ["created_at", "currency", "display_name", "id", "institution", "is_archived", "transaction_count", "updated_at"],
-            names);
+        Assert.Equal(["created_at", "currency", "display_name", "id", "institution", "is_archived", "transaction_count", "updated_at"], names);
 
         // Rename only: institution is preserved when omitted.
         var renamed = await SendAsync(Patch(
@@ -178,10 +180,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
             Json(new { display_name = "Main cheque", institution = "Capitec" }),
             session: session));
         Assert.Equal(HttpStatusCode.OK, set.StatusCode);
-        var clearedEmpty = await SendAsync(Patch(
-            $"{AccountsPath}/{accountId}",
-            Json(new { display_name = "Main cheque", institution = "" }),
-            session: session));
+        var clearedEmpty = await SendAsync(Patch($"{AccountsPath}/{accountId}", Json(new { display_name = "Main cheque", institution = "" }), session: session));
         Assert.Equal(HttpStatusCode.OK, clearedEmpty.StatusCode);
         Assert.Equal(JsonValueKind.Null, (await BodyAsync(clearedEmpty)).GetProperty("institution").ValueKind);
 
@@ -210,18 +209,12 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
 
         foreach (var name in new[] { "", "   ", new string('a', 81), "bad\u0000name", "bad\nname" })
         {
-            var response = await SendAsync(Post(
-                AccountsPath,
-                Json(new { display_name = name }),
-                session: session));
+            var response = await SendAsync(Post(AccountsPath, Json(new { display_name = name }), session: session));
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
             Assert.Equal("invalid_request", await ErrorKindAsync(response));
         }
 
-        var unknownField = await SendAsync(Post(
-            AccountsPath,
-            Json(new { display_name = "Cheque", surprise = true }),
-            session: session));
+        var unknownField = await SendAsync(Post(AccountsPath, Json(new { display_name = "Cheque", surprise = true }), session: session));
         Assert.Equal(HttpStatusCode.BadRequest, unknownField.StatusCode);
 
         var malformed = await SendAsync(Post(AccountsPath, "{not-json", session: session));
@@ -248,7 +241,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         Assert.Equal("Uncategorised", system.Value.GetProperty("kind").GetString());
         Assert.False(system.Value.GetProperty("is_archived").GetBoolean());
 
-        var expected = new Dictionary<string, string>
+        Dictionary<string, string> expected = new Dictionary<string, string>
         {
             ["Groceries"] = "Expense",
             ["Dining and takeaways"] = "Expense",
@@ -293,17 +286,14 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         var groceriesId = await CategoryIdAsync(session, "Groceries");
         var travelId = await CategoryIdAsync(session, "Travel");
 
-        var rename = await SendAsync(Patch(
-            $"{CategoriesPath}/{groceriesId}",
-            Json(new { display_name = "Supermarket", kind = "Expense" }),
-            session: session));
+        var rename = await SendAsync(Patch($"{CategoriesPath}/{groceriesId}", Json(new { display_name = "Supermarket", kind = "Expense" }), session: session));
         Assert.Equal(HttpStatusCode.OK, rename.StatusCode);
 
         var delete = await SendAsync(Delete($"{CategoriesPath}/{travelId}", session: session));
         Assert.Equal(HttpStatusCode.OK, delete.StatusCode);
 
         // Re-invoking the seeder must not restore the renamed or deleted defaults.
-        var store = new FinanceStore(Factory.CreateDb());
+        FinanceStore store = new FinanceStore(Factory.CreateDb());
         await store.EnsureCategoriesSeededAsync(customerId);
 
         var categories = await ListCategoriesAsync(session);
@@ -319,10 +309,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         var (session, _) = await NewCustomerAsync();
         _ = await ListCategoriesAsync(session);
 
-        var create = await SendAsync(Post(
-            CategoriesPath,
-            Json(new { display_name = "Coffee", kind = "Expense" }),
-            session: session));
+        var create = await SendAsync(Post(CategoriesPath, Json(new { display_name = "Coffee", kind = "Expense" }), session: session));
         Assert.Equal(HttpStatusCode.Created, create.StatusCode);
         var created = await BodyAsync(create);
         var id = created.GetProperty("id").GetGuid();
@@ -354,13 +341,9 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
             session: session));
         Assert.Equal(HttpStatusCode.BadRequest, unconfirmed.StatusCode);
         Assert.Equal("kind_change_confirmation_required", await ErrorKindAsync(unconfirmed));
-        Assert.Equal("Expense", FindByName(await ListCategoriesAsync(session), "Coffee shops")!
-            .Value.GetProperty("kind").GetString());
+        Assert.Equal("Expense", FindByName(await ListCategoriesAsync(session), "Coffee shops")!.Value.GetProperty("kind").GetString());
 
-        var confirmed = await SendAsync(Patch(
-            $"{CategoriesPath}/{id}",
-            Json(new { display_name = "Coffee shops", kind = "Income", confirm_kind_change = true }),
-            session: session));
+        var confirmed = await SendAsync(Patch($"{CategoriesPath}/{id}", Json(new { display_name = "Coffee shops", kind = "Income", confirm_kind_change = true }), session: session));
         Assert.Equal(HttpStatusCode.OK, confirmed.StatusCode);
         Assert.Equal("Income", (await BodyAsync(confirmed)).GetProperty("kind").GetString());
 
@@ -416,17 +399,11 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         var (session, _) = await NewCustomerAsync();
         var uncategorisedId = await CategoryIdAsync(session, "Uncategorised");
 
-        var rename = await SendAsync(Patch(
-            $"{CategoriesPath}/{uncategorisedId}",
-            Json(new { display_name = "Everything", kind = "Expense" }),
-            session: session));
+        var rename = await SendAsync(Patch($"{CategoriesPath}/{uncategorisedId}", Json(new { display_name = "Everything", kind = "Expense" }), session: session));
         Assert.Equal(HttpStatusCode.BadRequest, rename.StatusCode);
         Assert.Equal("system_category_immutable", await ErrorKindAsync(rename));
 
-        var kindChange = await SendAsync(Patch(
-            $"{CategoriesPath}/{uncategorisedId}",
-            Json(new { display_name = "Uncategorised", kind = "Income", confirm_kind_change = true }),
-            session: session));
+        var kindChange = await SendAsync(Patch($"{CategoriesPath}/{uncategorisedId}", Json(new { display_name = "Uncategorised", kind = "Income", confirm_kind_change = true }), session: session));
         Assert.Equal(HttpStatusCode.BadRequest, kindChange.StatusCode);
         Assert.Equal("system_category_immutable", await ErrorKindAsync(kindChange));
 
@@ -443,10 +420,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
 
         foreach (var duplicateName in new[] { "  uncategorised  ", "Uncategorised" })
         {
-            var duplicate = await SendAsync(Post(
-                CategoriesPath,
-                Json(new { display_name = duplicateName, kind = "Expense" }),
-                session: session));
+            var duplicate = await SendAsync(Post(CategoriesPath, Json(new { display_name = duplicateName, kind = "Expense" }), session: session));
             Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
             Assert.Equal("duplicate_name", await ErrorKindAsync(duplicate));
         }
@@ -459,17 +433,11 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
     {
         var (session, _) = await NewCustomerAsync();
 
-        var badKind = await SendAsync(Post(
-            CategoriesPath,
-            Json(new { display_name = "Coffee", kind = "Bogus" }),
-            session: session));
+        var badKind = await SendAsync(Post(CategoriesPath, Json(new { display_name = "Coffee", kind = "Bogus" }), session: session));
         Assert.Equal(HttpStatusCode.BadRequest, badKind.StatusCode);
         Assert.Equal("invalid_request", await ErrorKindAsync(badKind));
 
-        var oversized = await SendAsync(Post(
-            CategoriesPath,
-            Json(new { display_name = new string('b', 81), kind = "Expense" }),
-            session: session));
+        var oversized = await SendAsync(Post(CategoriesPath, Json(new { display_name = new string('b', 81), kind = "Expense" }), session: session));
         Assert.Equal(HttpStatusCode.BadRequest, oversized.StatusCode);
     }
 
@@ -487,10 +455,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
             "ALTER TABLE categories ADD CONSTRAINT test_23514_create CHECK (kind <> 'Expense') NOT VALID");
         try
         {
-            var create = await SendAsync(Post(
-                CategoriesPath,
-                Json(new { display_name = "Violation", kind = "Expense" }),
-                session: session));
+            var create = await SendAsync(Post(CategoriesPath, Json(new { display_name = "Violation", kind = "Expense" }), session: session));
             Assert.Equal(HttpStatusCode.BadRequest, create.StatusCode);
             Assert.Equal("invalid_request", await ErrorKindAsync(create));
         }
@@ -499,14 +464,10 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
             await ExecuteSqlAsync("ALTER TABLE categories DROP CONSTRAINT IF EXISTS test_23514_create");
         }
 
-        await ExecuteSqlAsync(
-            $"ALTER TABLE categories ADD CONSTRAINT test_23514_archive CHECK (NOT is_archived OR id <> '{groceriesId}') NOT VALID");
+        await ExecuteSqlAsync($"ALTER TABLE categories ADD CONSTRAINT test_23514_archive CHECK (NOT is_archived OR id <> '{groceriesId}') NOT VALID");
         try
         {
-            var archive = await SendAsync(Post(
-                $"{CategoriesPath}/{groceriesId}/archive",
-                string.Empty,
-                session: session));
+            var archive = await SendAsync(Post($"{CategoriesPath}/{groceriesId}/archive", string.Empty, session: session));
             Assert.Equal(HttpStatusCode.BadRequest, archive.StatusCode);
             Assert.Equal("system_category_immutable", await ErrorKindAsync(archive));
         }
@@ -551,10 +512,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         Assert.Equal(HttpStatusCode.Created, other.StatusCode);
         var otherId = (await BodyAsync(other)).GetProperty("id").GetGuid();
 
-        var collidingRename = await SendAsync(Patch(
-            $"{TagsPath}/{otherId}",
-            Json(new { display_name = "woolworths" }),
-            session: session));
+        var collidingRename = await SendAsync(Patch($"{TagsPath}/{otherId}", Json(new { display_name = "woolworths" }), session: session));
         Assert.Equal(HttpStatusCode.Conflict, collidingRename.StatusCode);
         Assert.Equal("duplicate_name", await ErrorKindAsync(collidingRename));
 
@@ -577,10 +535,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
 
         // Another customer may use the same tag name independently.
         var (otherCustomerSession, _) = await NewCustomerAsync();
-        var independent = await SendAsync(Post(
-            TagsPath,
-            Json(new { display_name = "Woolworths" }),
-            session: otherCustomerSession));
+        var independent = await SendAsync(Post(TagsPath, Json(new { display_name = "Woolworths" }), session: otherCustomerSession));
         Assert.Equal(HttpStatusCode.Created, independent.StatusCode);
     }
 
@@ -625,18 +580,12 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
 
         var accountId = await CreateAccountAsync(ownerSession, "Owner cheque");
         _ = await ListCategoriesAsync(ownerSession);
-        var categoryCreate = await SendAsync(Post(
-            CategoriesPath,
-            Json(new { display_name = "Owner category", kind = "Expense" }),
-            session: ownerSession));
+        var categoryCreate = await SendAsync(Post(CategoriesPath, Json(new { display_name = "Owner category", kind = "Expense" }), session: ownerSession));
         var categoryId = (await BodyAsync(categoryCreate)).GetProperty("id").GetGuid();
-        var tagCreate = await SendAsync(Post(
-            TagsPath,
-            Json(new { display_name = "Owner tag" }),
-            session: ownerSession));
+        var tagCreate = await SendAsync(Post(TagsPath, Json(new { display_name = "Owner tag" }), session: ownerSession));
         var tagId = (await BodyAsync(tagCreate)).GetProperty("id").GetGuid();
 
-        var probes = new List<(HttpRequestMessage Foreign, HttpRequestMessage Random)>
+        List<(HttpRequestMessage Foreign, HttpRequestMessage Random)> probes = new List<(HttpRequestMessage Foreign, HttpRequestMessage Random)>
         {
             (
                 Patch($"{AccountsPath}/{accountId}", Json(new { display_name = "Hijacked" }), session: intruderSession),
@@ -699,22 +648,14 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         var evilGet = await SendAsync(Get(AccountsPath, session: session, origin: "http://evil.test"));
         Assert.Equal(HttpStatusCode.Forbidden, evilGet.StatusCode);
         Assert.Equal(string.Empty, await evilGet.Content.ReadAsStringAsync());
-        Assert.Equal(
-            HttpStatusCode.Forbidden,
-            (await SendAsync(Post(AccountsPath, Json(new { display_name = "X" }), session: session, origin: "http://evil.test"))).StatusCode);
-        Assert.Equal(
-            HttpStatusCode.Forbidden,
-            (await SendAsync(Patch($"{AccountsPath}/{Guid.NewGuid()}", Json(new { display_name = "X" }), session: session, origin: "http://evil.test"))).StatusCode);
-        Assert.Equal(
-            HttpStatusCode.Forbidden,
-            (await SendAsync(Delete($"{TagsPath}/{Guid.NewGuid()}", session: session, origin: "http://evil.test"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await SendAsync(Post(AccountsPath, Json(new { display_name = "X" }), session: session, origin: "http://evil.test"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await SendAsync(Patch($"{AccountsPath}/{Guid.NewGuid()}", Json(new { display_name = "X" }), session: session, origin: "http://evil.test"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await SendAsync(Delete($"{TagsPath}/{Guid.NewGuid()}", session: session, origin: "http://evil.test"))).StatusCode);
 
         // Missing or unknown session.
         Assert.Equal(HttpStatusCode.Unauthorized, (await SendAsync(Get(AccountsPath))).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await SendAsync(Get(AccountsPath, session: "not-a-session"))).StatusCode);
-        Assert.Equal(
-            HttpStatusCode.Unauthorized,
-            (await SendAsync(Delete($"{TagsPath}/{Guid.NewGuid()}", session: "not-a-session"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await SendAsync(Delete($"{TagsPath}/{Guid.NewGuid()}", session: "not-a-session"))).StatusCode);
 
         // A session for an unverified customer is rejected.
         var unverifiedEmail = UniqueEmail();
@@ -779,10 +720,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
     {
         var (session, customerId) = await NewCustomerAsync();
 
-        var responses = await Task.WhenAll(
-            SendAsync(Get(CategoriesPath, session: session)),
-            SendAsync(Get(CategoriesPath, session: session)),
-            SendAsync(Get(CategoriesPath, session: session)));
+        var responses = await Task.WhenAll(SendAsync(Get(CategoriesPath, session: session)), SendAsync(Get(CategoriesPath, session: session)), SendAsync(Get(CategoriesPath, session: session)));
 
         foreach (var response in responses)
         {
@@ -816,29 +754,17 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         Assert.Equal(HttpStatusCode.Created, accountCreate.StatusCode);
         var accountId = (await BodyAsync(accountCreate)).GetProperty("id").GetGuid();
 
-        Assert.Equal(HttpStatusCode.OK, (await SendAsync(Patch(
-            $"{AccountsPath}/{accountId}",
-            Json(new { display_name = "CanaryAccount_9921b", institution = "CanaryInst_9921b" }),
-            session: session))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(Patch($"{AccountsPath}/{accountId}", Json(new { display_name = "CanaryAccount_9921b", institution = "CanaryInst_9921b" }), session: session))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await SendAsync(Post($"{AccountsPath}/{accountId}/archive", string.Empty, session: session))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await SendAsync(Post($"{AccountsPath}/{accountId}/restore", string.Empty, session: session))).StatusCode);
 
-        var categoryCreate = await SendAsync(Post(
-            CategoriesPath,
-            Json(new { display_name = "CanaryCategory_9921", kind = "Expense" }),
-            session: session));
+        var categoryCreate = await SendAsync(Post(CategoriesPath, Json(new { display_name = "CanaryCategory_9921", kind = "Expense" }), session: session));
         Assert.Equal(HttpStatusCode.Created, categoryCreate.StatusCode);
         var categoryId = (await BodyAsync(categoryCreate)).GetProperty("id").GetGuid();
 
-        Assert.Equal(HttpStatusCode.OK, (await SendAsync(Patch(
-            $"{CategoriesPath}/{categoryId}",
-            Json(new { display_name = "CanaryCategory_9921b", kind = "Expense" }),
-            session: session))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(Patch($"{CategoriesPath}/{categoryId}", Json(new { display_name = "CanaryCategory_9921b", kind = "Expense" }), session: session))).StatusCode);
 
-        var tagCreate = await SendAsync(Post(
-            TagsPath,
-            Json(new { display_name = "CanaryTag_9921" }),
-            session: session));
+        var tagCreate = await SendAsync(Post(TagsPath, Json(new { display_name = "CanaryTag_9921" }), session: session));
         Assert.Equal(HttpStatusCode.Created, tagCreate.StatusCode);
         var tagId = (await BodyAsync(tagCreate)).GetProperty("id").GetGuid();
 
@@ -849,23 +775,14 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
             session: session));
         Assert.Equal(HttpStatusCode.Conflict, duplicateCategory.StatusCode);
 
-        var duplicateTag = await SendAsync(Post(
-            TagsPath,
-            Json(new { display_name = "  CANARYTAG_9921 " }),
-            session: session));
+        var duplicateTag = await SendAsync(Post(TagsPath, Json(new { display_name = "  CANARYTAG_9921 " }), session: session));
         Assert.Equal(HttpStatusCode.Conflict, duplicateTag.StatusCode);
 
-        var invalidName = await SendAsync(Post(
-            CategoriesPath,
-            Json(new { display_name = "CanaryCategory\u0000_9921", kind = "Expense" }),
-            session: session));
+        var invalidName = await SendAsync(Post(CategoriesPath, Json(new { display_name = "CanaryCategory\u0000_9921", kind = "Expense" }), session: session));
         Assert.Equal(HttpStatusCode.BadRequest, invalidName.StatusCode);
 
         var uncategorisedId = await CategoryIdAsync(session, "Uncategorised");
-        var systemMutation = await SendAsync(Patch(
-            $"{CategoriesPath}/{uncategorisedId}",
-            Json(new { display_name = "CanarySystem_9921", kind = "Expense" }),
-            session: session));
+        var systemMutation = await SendAsync(Patch($"{CategoriesPath}/{uncategorisedId}", Json(new { display_name = "CanarySystem_9921", kind = "Expense" }), session: session));
         Assert.Equal(HttpStatusCode.BadRequest, systemMutation.StatusCode);
 
         // Clean-up paths also must stay quiet.
@@ -876,8 +793,6 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         Assert.True(
             Factory.LogCapture.Contains("audit.finance_account_created"),
             "log capture is not receiving finance audit events");
-        Assert.False(
-            Factory.LogCapture.Contains("Canary"),
-            string.Join("\n", Factory.LogCapture.Snapshot()));
+        Assert.False(Factory.LogCapture.Contains("Canary"), string.Join("\n", Factory.LogCapture.Snapshot()));
     }
 }

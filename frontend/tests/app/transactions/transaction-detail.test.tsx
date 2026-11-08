@@ -8,10 +8,7 @@ vi.mock("@/lib/server/transaction-actions", () => ({
 }));
 
 import TransactionDetailView from "@/app/transactions/transaction-detail";
-import {
-  loadTransactionAction,
-  saveTransactionAction,
-} from "@/lib/server/transaction-actions";
+import { loadTransactionAction, saveTransactionAction } from "@/lib/server/transaction-actions";
 import type { Category, MerchantTag, TransactionDetail } from "@/lib/server/backend-client";
 
 const categories: Category[] = [
@@ -76,9 +73,7 @@ function makeDetail(overrides: Partial<TransactionDetail["transaction"]> = {}): 
         is_system: false,
         is_archived: false,
       },
-      merchant_tags: [
-        { id: "tag-assigned", display_name: "Assigned", is_archived: false },
-      ],
+      merchant_tags: [{ id: "tag-assigned", display_name: "Assigned", is_archived: false }],
       statement_import: {
         id: "stmt-1",
         statement_label: "Statement",
@@ -90,9 +85,7 @@ function makeDetail(overrides: Partial<TransactionDetail["transaction"]> = {}): 
       hidden_reason: "none",
       ...overrides,
     },
-    suggested_tags: [
-      { id: "tag-suggested", display_name: "Suggested Cafe", is_archived: false },
-    ],
+    suggested_tags: [{ id: "tag-suggested", display_name: "Suggested Cafe", is_archived: false }],
     has_more_suggestions: false,
     source_page: 2,
     source_row_number: 7,
@@ -185,9 +178,7 @@ describe("transaction detail", () => {
 
     expect(screen.getByText(/Categories or tags did not load/i)).toBeInTheDocument();
     expect(screen.getByLabelText("Category")).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: /Suggested: Suggested Cafe — add/ }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Suggested: Suggested Cafe — add/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Save classification" })).toBeDisabled();
   });
 
@@ -202,9 +193,7 @@ describe("transaction detail", () => {
       screen.getByRole("button", { name: "Remove pending tag Suggested Cafe" }),
     ).toBeInTheDocument();
 
-    await user.click(
-      screen.getByRole("button", { name: "Remove pending tag Suggested Cafe" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Remove pending tag Suggested Cafe" }));
     expect(
       screen.queryByRole("button", { name: "Remove pending tag Suggested Cafe" }),
     ).not.toBeInTheDocument();
@@ -341,9 +330,9 @@ describe("transaction detail", () => {
 
     expect(screen.getByText(/This statement is hidden/)).toBeInTheDocument();
     expect(
-      screen.getAllByRole("link", { name: "Statement" }).some(
-        (link) => link.getAttribute("href") === "/imports/stmt-1",
-      ),
+      screen
+        .getAllByRole("link", { name: "Statement" })
+        .some((link) => link.getAttribute("href") === "/imports/stmt-1"),
     ).toBe(true);
     expect(screen.getByRole("button", { name: "Restore transaction…" })).toBeDisabled();
   });
@@ -359,7 +348,11 @@ describe("transaction detail", () => {
     render(
       <TransactionDetailView
         categories={categories}
-        initialDetail={makeDetail({ is_hidden_by_user: true, effective_hidden: true, hidden_reason: "individual" })}
+        initialDetail={makeDetail({
+          is_hidden_by_user: true,
+          effective_hidden: true,
+          hidden_reason: "individual",
+        })}
         tags={tags}
       />,
     );

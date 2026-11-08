@@ -71,10 +71,7 @@ export default function Home() {
             </div>
           </section>
 
-          <section
-            aria-labelledby="features-title"
-            className="border-t border-line py-16 sm:py-20"
-          >
+          <section aria-labelledby="features-title" className="border-t border-line py-16 sm:py-20">
             <div className="max-w-2xl">
               <p className="text-sm font-semibold tracking-[0.14em] text-accent-text uppercase">
                 What you get
@@ -100,9 +97,7 @@ export default function Home() {
                   <h3 className="mt-8 text-xl leading-snug font-semibold tracking-[-0.025em] text-ink">
                     {feature.heading}
                   </h3>
-                  <p className="mt-4 text-base leading-7 text-muted">
-                    {feature.description}
-                  </p>
+                  <p className="mt-4 text-base leading-7 text-muted">{feature.description}</p>
                 </article>
               ))}
             </div>
@@ -126,10 +121,7 @@ export default function Home() {
               </div>
               <ol className="divide-y divide-line rounded-3xl border border-line bg-surface">
                 {HOW_IT_WORKS_STEPS.map((step, index) => (
-                  <li
-                    className="flex items-start gap-5 px-5 py-5 sm:px-7 sm:py-6"
-                    key={step}
-                  >
+                  <li className="flex items-start gap-5 px-5 py-5 sm:px-7 sm:py-6" key={step}>
                     <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-sm font-semibold text-page">
                       {index + 1}
                     </span>
@@ -140,10 +132,7 @@ export default function Home() {
             </div>
           </section>
 
-          <section
-            aria-labelledby="status-title"
-            className="border-t border-line py-16 sm:py-20"
-          >
+          <section aria-labelledby="status-title" className="border-t border-line py-16 sm:py-20">
             <div className="mx-auto max-w-4xl rounded-[2rem] border border-accent-soft-line bg-accent-soft p-6 sm:p-8 lg:flex lg:items-center lg:justify-between lg:gap-12 lg:p-10">
               <div>
                 <p className="text-xs font-semibold tracking-[0.14em] text-accent-soft-ink uppercase">
@@ -156,8 +145,8 @@ export default function Home() {
                   Reconciled to every transaction
                 </h2>
                 <p className="mt-3 max-w-xl text-base leading-7 text-muted">
-                  Your overview totals are built from the same transactions you can inspect
-                  and classify, so the numbers always agree.
+                  Your overview totals are built from the same transactions you can inspect and
+                  classify, so the numbers always agree.
                 </p>
               </div>
               <p className="mt-7 shrink-0 rounded-2xl border border-accent-soft-line bg-surface px-5 py-4 text-base font-semibold text-ink shadow-sm lg:mt-0">

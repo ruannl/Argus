@@ -53,22 +53,21 @@ const ERROR_MESSAGES: Record<ImportErrorKind, string> = {
   import_deleted: "That import was deleted. Its old operation cannot be replayed.",
   review_stale: "The account changed while you reviewed. Refresh the review before committing.",
   version_conflict: "The review changed in another tab. Refresh before saving.",
-  statement_repeat: "This statement was already imported. Explicitly confirm the repeat to continue.",
+  statement_repeat:
+    "This statement was already imported. Explicitly confirm the repeat to continue.",
   idempotency_conflict: "That operation was already used for different content.",
   account_archived: "That financial account is archived. Restore it in Settings before importing.",
   identity_conflict: "An identity check failed. No records were changed.",
   tag_unavailable: "A selected merchant tag was deleted or archived. Choose it again or remove it.",
-  no_included_rows: "Nothing is included. Skip invalid rows only after including at least one valid row.",
+  no_included_rows:
+    "Nothing is included. Skip invalid rows only after including at least one valid row.",
   invalid_rows: "Invalid rows must be marked as skipped before committing.",
   duplicate_decision_required: "Resolve every repeated-row group before committing.",
   rate_limited: "Too many import requests. Try again in a few minutes.",
   unavailable: "Something went wrong. Please try again later.",
 };
 
-function failure(
-  kind: ImportErrorKind,
-  existingImportIds?: string[],
-): ImportActionResult {
+function failure(kind: ImportErrorKind, existingImportIds?: string[]): ImportActionResult {
   return {
     ok: false,
     message: ERROR_MESSAGES[kind],

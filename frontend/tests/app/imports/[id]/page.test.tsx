@@ -23,10 +23,7 @@ import { redirect } from "next/navigation";
 
 import StatementPage from "@/app/imports/[id]/page";
 import { auth } from "@/auth";
-import {
-  getCurrentAccount,
-  getImportStatement,
-} from "@/lib/server/backend-client";
+import { getCurrentAccount, getImportStatement } from "@/lib/server/backend-client";
 
 const account = {
   id: "account-id",
@@ -95,10 +92,12 @@ describe("statement detail page", () => {
   it("renders the committed summary, read-only rows, and lifecycle controls", async () => {
     vi.mocked(getImportStatement).mockResolvedValue({ ok: true, value: detail });
 
-    render(await StatementPage({
-      params: Promise.resolve({ id: "statement-id" }),
-      searchParams: Promise.resolve({}),
-    }));
+    render(
+      await StatementPage({
+        params: Promise.resolve({ id: "statement-id" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
 
     expect(screen.getByRole("heading", { level: 1, name: "Statement detail" })).toBeInTheDocument();
     expect(screen.getByText("Statement 2024-01-01 to 2024-01-31")).toBeInTheDocument();
@@ -118,10 +117,12 @@ describe("statement detail page", () => {
   it("shows a plain missing-statement state", async () => {
     vi.mocked(getImportStatement).mockResolvedValue({ ok: false, kind: "not_found" });
 
-    render(await StatementPage({
-      params: Promise.resolve({ id: "missing" }),
-      searchParams: Promise.resolve({}),
-    }));
+    render(
+      await StatementPage({
+        params: Promise.resolve({ id: "missing" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
 
     expect(screen.getByRole("heading", { name: "Statement unavailable" })).toBeInTheDocument();
     expect(screen.getByText("That statement no longer exists.")).toBeInTheDocument();

@@ -1,7 +1,4 @@
-using argus.Server.Configuration;
 using argus.Server.Data;
-using argus.Server.Security;
-using Npgsql;
 
 namespace argus.Server.Http;
 
@@ -11,10 +8,7 @@ namespace argus.Server.Http;
 /// then scopes every store call by that customer id. User-defined names never
 /// reach a log line, an audit event, or a URL segment.
 /// </summary>
-public sealed class FinanceApi(
-    FinanceGuard guard,
-    FinanceStore financeStore,
-    ILoggerFactory loggerFactory)
+public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, ILoggerFactory loggerFactory)
 {
     private readonly ILogger _audit = loggerFactory.CreateLogger("audit");
     private readonly ILogger _logger = loggerFactory.CreateLogger("finance");
@@ -44,13 +38,11 @@ public sealed class FinanceApi(
 
     // --- Guard -------------------------------------------------------------
 
-    private Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(
-        HttpContext context,
-        CancellationToken cancellationToken) =>
+    private Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(HttpContext context, CancellationToken cancellationToken) =>
         guard.AuthenticateAsync(context, cancellationToken);
 
     private Task<IResult> GuardedAsync(Func<Task<IResult>> action, string operation) =>
-        guard.GuardedAsync(action, operation, _logger);
+        FinanceGuard.GuardedAsync(action, operation, _logger);
 
     // --- Financial accounts ------------------------------------------------
 
@@ -64,10 +56,7 @@ public sealed class FinanceApi(
             }
 
             var accounts = await financeStore.ListAccountsAsync(customerId!.Value, cancellationToken);
-            return Results.Json(new
-            {
-                accounts = accounts.Select(FinanceAccountResponse.From).ToArray(),
-            });
+            return Results.Json(new { accounts = accounts.Select(FinanceAccountResponse.From).ToArray(), });
         }, "accounts_list");
 
     private Task<IResult> CreateAccountAsync(HttpContext context, CancellationToken cancellationToken) =>
@@ -85,19 +74,12 @@ public sealed class FinanceApi(
                 return Errors.InvalidRequest();
             }
 
-            var outcome = await financeStore.CreateAccountAsync(
-                customerId!.Value,
-                parsed.Value!.DisplayName,
-                parsed.Value.Institution,
-                cancellationToken);
+            var outcome = await financeStore.CreateAccountAsync(customerId!.Value, parsed.Value!.DisplayName, parsed.Value.Institution, cancellationToken);
 
             switch (outcome)
             {
                 case AccountOutcome.Success success:
-                    _audit.LogInformation(
-                        "audit.finance_account_created customer_id={CustomerId} account_id={AccountId}",
-                        customerId.Value,
-                        success.Account.Id);
+                    _audit.LogInformation("audit.finance_account_created customer_id={CustomerId} account_id={AccountId}", customerId.Value, success.Account.Id);
                     return Results.Json(FinanceAccountResponse.From(success.Account), statusCode: 201);
                 case AccountOutcome.InvalidName:
                     return Errors.InvalidRequest();
@@ -129,21 +111,12 @@ public sealed class FinanceApi(
                 return Errors.InvalidRequest();
             }
 
-            var outcome = await financeStore.UpdateAccountAsync(
-                customerId!.Value,
-                id.Value,
-                parsed.DisplayName,
-                parsed.InstitutionProvided,
-                parsed.Institution,
-                cancellationToken);
+            var outcome = await financeStore.UpdateAccountAsync(customerId!.Value, id.Value, parsed.DisplayName, parsed.InstitutionProvided, parsed.Institution, cancellationToken);
 
             switch (outcome)
             {
                 case AccountOutcome.Success success:
-                    _audit.LogInformation(
-                        "audit.finance_account_updated customer_id={CustomerId} account_id={AccountId}",
-                        customerId.Value,
-                        success.Account.Id);
+                    _audit.LogInformation("audit.finance_account_updated customer_id={CustomerId} account_id={AccountId}", customerId.Value, success.Account.Id);
                     return Results.Json(FinanceAccountResponse.From(success.Account));
                 case AccountOutcome.InvalidName:
                     return Errors.InvalidRequest();
@@ -160,10 +133,7 @@ public sealed class FinanceApi(
     private Task<IResult> RestoreAccountAsync(HttpContext context, CancellationToken cancellationToken) =>
         SetAccountArchivedAsync(context, cancellationToken, archived: false);
 
-    private Task<IResult> SetAccountArchivedAsync(
-        HttpContext context,
-        CancellationToken cancellationToken,
-        bool archived) =>
+    private Task<IResult> SetAccountArchivedAsync(HttpContext context, CancellationToken cancellationToken, bool archived) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -178,20 +148,12 @@ public sealed class FinanceApi(
                 return Errors.NotFound();
             }
 
-            var outcome = await financeStore.SetAccountArchivedAsync(
-                customerId!.Value,
-                id.Value,
-                archived,
-                cancellationToken);
+            var outcome = await financeStore.SetAccountArchivedAsync(customerId!.Value, id.Value, archived, cancellationToken);
 
             switch (outcome)
             {
                 case AccountOutcome.Success success:
-                    _audit.LogInformation(
-                        "audit.finance_account_archived customer_id={CustomerId} account_id={AccountId} archived={Archived}",
-                        customerId.Value,
-                        success.Account.Id,
-                        archived);
+                    _audit.LogInformation("audit.finance_account_archived customer_id={CustomerId} account_id={AccountId} archived={Archived}", customerId.Value, success.Account.Id, archived);
                     return Results.Json(FinanceAccountResponse.From(success.Account));
                 case AccountOutcome.NotFound:
                     return Errors.NotFound();
@@ -214,10 +176,7 @@ public sealed class FinanceApi(
             }
 
             var categories = await financeStore.ListCategoriesAsync(customerId!.Value, cancellationToken);
-            return Results.Json(new
-            {
-                categories = categories.Select(FinanceCategoryResponse.From).ToArray(),
-            });
+            return Results.Json(new { categories = categories.Select(FinanceCategoryResponse.From).ToArray(), });
         }, "categories_list");
 
     private Task<IResult> CreateCategoryAsync(HttpContext context, CancellationToken cancellationToken) =>
@@ -235,11 +194,7 @@ public sealed class FinanceApi(
                 return Errors.InvalidRequest();
             }
 
-            var outcome = await financeStore.CreateCategoryAsync(
-                customerId!.Value,
-                parsed.Value!.DisplayName,
-                parsed.Value.Kind,
-                cancellationToken);
+            var outcome = await financeStore.CreateCategoryAsync(customerId!.Value, parsed.Value!.DisplayName, parsed.Value.Kind, cancellationToken);
 
             return CategoryResult(outcome, customerId.Value, "audit.finance_category_created", created: true);
         }, "categories_create");
@@ -265,13 +220,7 @@ public sealed class FinanceApi(
                 return Errors.InvalidRequest();
             }
 
-            var outcome = await financeStore.UpdateCategoryAsync(
-                customerId!.Value,
-                id.Value,
-                parsed.Value!.DisplayName,
-                parsed.Value.Kind,
-                parsed.Value.ConfirmKindChange ?? false,
-                cancellationToken);
+            var outcome = await financeStore.UpdateCategoryAsync(customerId!.Value, id.Value, parsed.Value!.DisplayName, parsed.Value.Kind, parsed.Value.ConfirmKindChange ?? false, cancellationToken);
 
             return CategoryResult(outcome, customerId.Value, "audit.finance_category_updated", created: false);
         }, "categories_update");
@@ -282,10 +231,7 @@ public sealed class FinanceApi(
     private Task<IResult> RestoreCategoryAsync(HttpContext context, CancellationToken cancellationToken) =>
         SetCategoryArchivedAsync(context, cancellationToken, archived: false);
 
-    private Task<IResult> SetCategoryArchivedAsync(
-        HttpContext context,
-        CancellationToken cancellationToken,
-        bool archived) =>
+    private Task<IResult> SetCategoryArchivedAsync(HttpContext context, CancellationToken cancellationToken, bool archived) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -300,17 +246,9 @@ public sealed class FinanceApi(
                 return Errors.NotFound();
             }
 
-            var outcome = await financeStore.SetCategoryArchivedAsync(
-                customerId!.Value,
-                id.Value,
-                archived,
-                cancellationToken);
+            var outcome = await financeStore.SetCategoryArchivedAsync(customerId!.Value, id.Value, archived, cancellationToken);
 
-            return CategoryResult(
-                outcome,
-                customerId.Value,
-                archived ? "audit.finance_category_archived" : "audit.finance_category_restored",
-                created: false);
+            return CategoryResult(outcome, customerId.Value, archived ? "audit.finance_category_archived" : "audit.finance_category_restored", created: false);
         }, archived ? "categories_archive" : "categories_restore");
 
     private Task<IResult> DeleteCategoryAsync(HttpContext context, CancellationToken cancellationToken) =>
@@ -333,17 +271,8 @@ public sealed class FinanceApi(
             switch (outcome)
             {
                 case CategoryDeleteOutcome.Success success:
-                    _audit.LogInformation(
-                        "audit.finance_category_deleted customer_id={CustomerId} category_id={CategoryId} reassigned_count={ReassignedCount}",
-                        customerId.Value,
-                        id.Value,
-                        success.ReassignedTransactionCount);
-                    return Results.Json(new
-                    {
-                        deleted = true,
-                        reassigned_transaction_count = success.ReassignedTransactionCount,
-                        uncategorised_category_id = success.UncategorisedCategoryId,
-                    });
+                    _audit.LogInformation("audit.finance_category_deleted customer_id={CustomerId} category_id={CategoryId} reassigned_count={ReassignedCount}", customerId.Value, id.Value, success.ReassignedTransactionCount);
+                    return Results.Json(new { deleted = true, reassigned_transaction_count = success.ReassignedTransactionCount, uncategorised_category_id = success.UncategorisedCategoryId, });
                 case CategoryDeleteOutcome.SystemCategoryImmutable:
                     return Errors.SystemCategoryImmutable();
                 case CategoryDeleteOutcome.NotFound:
@@ -353,24 +282,16 @@ public sealed class FinanceApi(
             }
         }, "categories_delete");
 
-    private IResult CategoryResult(
-        CategoryOutcome outcome,
-        Guid customerId,
-        string auditEvent,
-        bool created)
+    private IResult CategoryResult(CategoryOutcome outcome,
+                                   Guid customerId,
+                                   string auditEvent,
+                                   bool created)
     {
         switch (outcome)
         {
             case CategoryOutcome.Success success:
-                _audit.LogInformation(
-                    "{AuditEvent} customer_id={CustomerId} category_id={CategoryId} kind={Kind}",
-                    auditEvent,
-                    customerId,
-                    success.Category.Id,
-                    success.Category.Kind);
-                return Results.Json(
-                    FinanceCategoryResponse.From(success.Category),
-                    statusCode: created ? 201 : 200);
+                _audit.LogInformation("{AuditEvent} customer_id={CustomerId} category_id={CategoryId} kind={Kind}", auditEvent, customerId, success.Category.Id, success.Category.Kind);
+                return Results.Json(FinanceCategoryResponse.From(success.Category), statusCode: created ? 201 : 200);
             case CategoryOutcome.InvalidName:
             case CategoryOutcome.InvalidKind:
                 return Errors.InvalidRequest();
@@ -399,10 +320,7 @@ public sealed class FinanceApi(
             }
 
             var tags = await financeStore.ListMerchantTagsAsync(customerId!.Value, cancellationToken);
-            return Results.Json(new
-            {
-                merchant_tags = tags.Select(FinanceMerchantTagResponse.From).ToArray(),
-            });
+            return Results.Json(new { merchant_tags = tags.Select(FinanceMerchantTagResponse.From).ToArray(), });
         }, "merchant_tags_list");
 
     private Task<IResult> CreateMerchantTagAsync(HttpContext context, CancellationToken cancellationToken) =>
@@ -420,10 +338,7 @@ public sealed class FinanceApi(
                 return Errors.InvalidRequest();
             }
 
-            var outcome = await financeStore.CreateMerchantTagAsync(
-                customerId!.Value,
-                parsed.Value!.DisplayName,
-                cancellationToken);
+            var outcome = await financeStore.CreateMerchantTagAsync(customerId!.Value, parsed.Value!.DisplayName, cancellationToken);
 
             return MerchantTagResult(outcome, customerId.Value, "audit.finance_merchant_tag_created", created: true);
         }, "merchant_tags_create");
@@ -449,11 +364,7 @@ public sealed class FinanceApi(
                 return Errors.InvalidRequest();
             }
 
-            var outcome = await financeStore.UpdateMerchantTagAsync(
-                customerId!.Value,
-                id.Value,
-                parsed.Value!.DisplayName,
-                cancellationToken);
+            var outcome = await financeStore.UpdateMerchantTagAsync(customerId!.Value, id.Value, parsed.Value!.DisplayName, cancellationToken);
 
             return MerchantTagResult(outcome, customerId.Value, "audit.finance_merchant_tag_updated", created: false);
         }, "merchant_tags_update");
@@ -464,10 +375,7 @@ public sealed class FinanceApi(
     private Task<IResult> RestoreMerchantTagAsync(HttpContext context, CancellationToken cancellationToken) =>
         SetMerchantTagArchivedAsync(context, cancellationToken, archived: false);
 
-    private Task<IResult> SetMerchantTagArchivedAsync(
-        HttpContext context,
-        CancellationToken cancellationToken,
-        bool archived) =>
+    private Task<IResult> SetMerchantTagArchivedAsync(HttpContext context, CancellationToken cancellationToken, bool archived) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -482,17 +390,9 @@ public sealed class FinanceApi(
                 return Errors.NotFound();
             }
 
-            var outcome = await financeStore.SetMerchantTagArchivedAsync(
-                customerId!.Value,
-                id.Value,
-                archived,
-                cancellationToken);
+            var outcome = await financeStore.SetMerchantTagArchivedAsync(customerId!.Value, id.Value, archived, cancellationToken);
 
-            return MerchantTagResult(
-                outcome,
-                customerId.Value,
-                archived ? "audit.finance_merchant_tag_archived" : "audit.finance_merchant_tag_restored",
-                created: false);
+            return MerchantTagResult(outcome, customerId.Value, archived ? "audit.finance_merchant_tag_archived" : "audit.finance_merchant_tag_restored", created: false);
         }, archived ? "merchant_tags_archive" : "merchant_tags_restore");
 
     private Task<IResult> DeleteMerchantTagAsync(HttpContext context, CancellationToken cancellationToken) =>
@@ -515,16 +415,8 @@ public sealed class FinanceApi(
             switch (outcome)
             {
                 case MerchantTagDeleteOutcome.Success success:
-                    _audit.LogInformation(
-                        "audit.finance_merchant_tag_deleted customer_id={CustomerId} merchant_tag_id={MerchantTagId} unassigned_count={UnassignedCount}",
-                        customerId.Value,
-                        id.Value,
-                        success.UnassignedTransactionCount);
-                    return Results.Json(new
-                    {
-                        deleted = true,
-                        unassigned_transaction_count = success.UnassignedTransactionCount,
-                    });
+                    _audit.LogInformation("audit.finance_merchant_tag_deleted customer_id={CustomerId} merchant_tag_id={MerchantTagId} unassigned_count={UnassignedCount}", customerId.Value, id.Value, success.UnassignedTransactionCount);
+                    return Results.Json(new { deleted = true, unassigned_transaction_count = success.UnassignedTransactionCount, });
                 case MerchantTagDeleteOutcome.NotFound:
                     return Errors.NotFound();
                 default:
@@ -532,23 +424,16 @@ public sealed class FinanceApi(
             }
         }, "merchant_tags_delete");
 
-    private IResult MerchantTagResult(
-        MerchantTagOutcome outcome,
-        Guid customerId,
-        string auditEvent,
-        bool created)
+    private IResult MerchantTagResult(MerchantTagOutcome outcome,
+                                      Guid customerId,
+                                      string auditEvent,
+                                      bool created)
     {
         switch (outcome)
         {
             case MerchantTagOutcome.Success success:
-                _audit.LogInformation(
-                    "{AuditEvent} customer_id={CustomerId} merchant_tag_id={MerchantTagId}",
-                    auditEvent,
-                    customerId,
-                    success.Tag.Id);
-                return Results.Json(
-                    FinanceMerchantTagResponse.From(success.Tag),
-                    statusCode: created ? 201 : 200);
+                _audit.LogInformation("{AuditEvent} customer_id={CustomerId} merchant_tag_id={MerchantTagId}", auditEvent, customerId, success.Tag.Id);
+                return Results.Json(FinanceMerchantTagResponse.From(success.Tag), statusCode: created ? 201 : 200);
             case MerchantTagOutcome.InvalidName:
                 return Errors.InvalidRequest();
             case MerchantTagOutcome.DuplicateName:
@@ -563,21 +448,20 @@ public sealed class FinanceApi(
     // --- Helpers -----------------------------------------------------------
 
     private static Guid? RouteGuid(HttpContext context) =>
-        context.Request.RouteValues.TryGetValue("id", out var value) &&
+        context.Request.RouteValues.TryGetValue("id", out object? value) &&
         Guid.TryParse(value?.ToString(), out var id)
             ? id
             : null;
 }
 
-public sealed record FinanceAccountResponse(
-    Guid Id,
-    string DisplayName,
-    string? Institution,
-    string Currency,
-    bool IsArchived,
-    long TransactionCount,
-    string CreatedAt,
-    string UpdatedAt)
+public sealed record FinanceAccountResponse(Guid Id,
+                                            string DisplayName,
+                                            string? Institution,
+                                            string Currency,
+                                            bool IsArchived,
+                                            long TransactionCount,
+                                            string CreatedAt,
+                                            string UpdatedAt)
 {
     public static FinanceAccountResponse From(FinancialAccountRecord account) => new(
         account.Id,
@@ -590,16 +474,15 @@ public sealed record FinanceAccountResponse(
         Timestamps.Format(account.UpdatedAt));
 }
 
-public sealed record FinanceCategoryResponse(
-    Guid Id,
-    string DisplayName,
-    string Kind,
-    bool IsSystem,
-    bool IsDefault,
-    bool IsArchived,
-    long TransactionCount,
-    string CreatedAt,
-    string UpdatedAt)
+public sealed record FinanceCategoryResponse(Guid Id,
+                                             string DisplayName,
+                                             string Kind,
+                                             bool IsSystem,
+                                             bool IsDefault,
+                                             bool IsArchived,
+                                             long TransactionCount,
+                                             string CreatedAt,
+                                             string UpdatedAt)
 {
     public static FinanceCategoryResponse From(CategoryRecord category) => new(
         category.Id,
@@ -613,13 +496,12 @@ public sealed record FinanceCategoryResponse(
         Timestamps.Format(category.UpdatedAt));
 }
 
-public sealed record FinanceMerchantTagResponse(
-    Guid Id,
-    string DisplayName,
-    bool IsArchived,
-    long TransactionCount,
-    string CreatedAt,
-    string UpdatedAt)
+public sealed record FinanceMerchantTagResponse(Guid Id,
+                                                string DisplayName,
+                                                bool IsArchived,
+                                                long TransactionCount,
+                                                string CreatedAt,
+                                                string UpdatedAt)
 {
     public static FinanceMerchantTagResponse From(MerchantTagRecord tag) => new(
         tag.Id,

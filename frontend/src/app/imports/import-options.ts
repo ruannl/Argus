@@ -1,7 +1,4 @@
-import type {
-  ImportParseOptions,
-  ImportParserConfig,
-} from "@/lib/server/backend-client";
+import type { ImportParseOptions, ImportParserConfig } from "@/lib/server/backend-client";
 
 export type SourceKind = "fnb" | "standard_bank_pdf" | "generic_csv";
 

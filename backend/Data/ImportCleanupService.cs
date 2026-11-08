@@ -1,12 +1,12 @@
+using Npgsql;
+
 namespace argus.Server.Data;
 
 /// <summary>
 /// Purges expired review payloads at startup and every fifteen minutes. It
 /// retains only minimal terminal headers and never logs source content.
 /// </summary>
-public sealed class ImportCleanupService(
-    StatementImportStore store,
-    ILogger<ImportCleanupService> logger) : BackgroundService
+public sealed class ImportCleanupService(StatementImportStore store, ILogger<ImportCleanupService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -20,11 +20,13 @@ public sealed class ImportCleanupService(
             {
                 break;
             }
+            catch (PostgresException exception)
+            {
+                logger.LogError("import_cleanup_failed error_class={ErrorClass} sql_state={SqlState}", "postgres", exception.SqlState);
+            }
             catch (Exception exception)
             {
-                logger.LogError(
-                    "import_cleanup_failed error_class={ErrorClass}",
-                    exception.GetType().Name);
+                logger.LogError(exception, "import_cleanup_failed error_class={ErrorClass}", exception.GetType().Name);
             }
 
             try

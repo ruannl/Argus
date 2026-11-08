@@ -19,17 +19,13 @@ public static class TransactionSql
           ON s.customer_id = t.customer_id AND s.id = t.statement_import_id
         """;
 
-    public static string BuildWhere(
-        TransactionFilter filter,
-        NpgsqlCommand command,
-        bool includeVisibility)
+    public static string BuildWhere(TransactionFilter filter, NpgsqlCommand command, bool includeVisibility)
     {
         var clauses = new List<string> { "t.customer_id = @customer_id" };
 
         if (filter.Search is not null)
         {
-            command.Parameters.AddWithValue(
-                "search", "%" + EscapeLike(filter.Search) + "%");
+            command.Parameters.AddWithValue("search", "%" + EscapeLike(filter.Search) + "%");
             clauses.Add("""
                 (t.description ILIKE @search ESCAPE '\'
                  OR EXISTS (
@@ -131,13 +127,14 @@ public static class TransactionSql
 
     public static string OrderClause(string sortBy, string sortDirection)
     {
-        var direction = sortDirection == "asc" ? "ASC" : "DESC";
-        var column = sortBy switch
+        string direction = sortDirection == "asc" ? "ASC" : "DESC";
+        string column = sortBy switch
         {
             "amount" => "t.amount",
             "description" => "t.description",
             _ => "t.transaction_date",
         };
+
         return $"{column} {direction}, t.id {direction}";
     }
 
@@ -145,7 +142,7 @@ public static class TransactionSql
     public static string EscapeLike(string value)
     {
         var builder = new StringBuilder(value.Length + 8);
-        foreach (var character in value)
+        foreach (char character in value)
         {
             switch (character)
             {
@@ -163,6 +160,7 @@ public static class TransactionSql
                     break;
             }
         }
+
         return builder.ToString();
     }
 }

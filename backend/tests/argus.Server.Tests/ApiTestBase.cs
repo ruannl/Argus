@@ -1,7 +1,7 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using System.Diagnostics;
 using Npgsql;
 
 namespace argus.Server.Tests;
@@ -17,6 +17,7 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
     public Task DisposeAsync()
     {
         Client.Dispose();
+
         return Task.CompletedTask;
     }
 
@@ -38,95 +39,94 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
 
     protected static string Json(object value) => JsonSerializer.Serialize(value);
 
-    protected static HttpRequestMessage Get(
-        string path,
-        string? secret = TestEnvironment.ApiSecret,
-        string? session = null,
-        string? origin = null)
+    protected static HttpRequestMessage Get(string path,
+                                            string? secret = TestEnvironment.ApiSecret,
+                                            string? session = null,
+                                            string? origin = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, path);
         AddHeaders(request, secret, session, origin);
+
         return request;
     }
 
-    protected static HttpRequestMessage Post(
-        string path,
-        string json,
-        string? secret = TestEnvironment.ApiSecret,
-        string? session = null,
-        string? origin = null)
+    protected static HttpRequestMessage Post(string path,
+                                             string json,
+                                             string? secret = TestEnvironment.ApiSecret,
+                                             string? session = null,
+                                             string? origin = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
         };
         AddHeaders(request, secret, session, origin);
+
         return request;
     }
 
-    protected static HttpRequestMessage Patch(
-        string path,
-        string json,
-        string? secret = TestEnvironment.ApiSecret,
-        string? session = null,
-        string? origin = null)
+    protected static HttpRequestMessage Patch(string path,
+                                              string json,
+                                              string? secret = TestEnvironment.ApiSecret,
+                                              string? session = null,
+                                              string? origin = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Patch, path)
+        HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Patch, path)
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
         };
         AddHeaders(request, secret, session, origin);
+
         return request;
     }
 
-    protected static HttpRequestMessage Delete(
-        string path,
-        string? secret = TestEnvironment.ApiSecret,
-        string? session = null,
-        string? origin = null)
+    protected static HttpRequestMessage Delete(string path,
+                                               string? secret = TestEnvironment.ApiSecret,
+                                               string? session = null,
+                                               string? origin = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Delete, path);
+        HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Delete, path);
         AddHeaders(request, secret, session, origin);
+
         return request;
     }
 
-    protected static HttpRequestMessage DeleteJson(
-        string path,
-        string json,
-        string? secret = TestEnvironment.ApiSecret,
-        string? session = null,
-        string? origin = null)
+    protected static HttpRequestMessage DeleteJson(string path,
+                                                   string json,
+                                                   string? secret = TestEnvironment.ApiSecret,
+                                                   string? session = null,
+                                                   string? origin = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Delete, path)
+        HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Delete, path)
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
         };
         AddHeaders(request, secret, session, origin);
+
         return request;
     }
 
-    protected static HttpRequestMessage MultipartPost(
-        string path,
-        byte[] file,
-        string optionsJson,
-        string? secret = TestEnvironment.ApiSecret,
-        string? session = null,
-        string? origin = null,
-        string filename = "statement.bin")
+    protected static HttpRequestMessage MultipartPost(string path,
+                                                      byte[] file,
+                                                      string optionsJson,
+                                                      string? secret = TestEnvironment.ApiSecret,
+                                                      string? session = null,
+                                                      string? origin = null,
+                                                      string filename = "statement.bin")
     {
-        var content = new MultipartFormDataContent();
+        MultipartFormDataContent content = new MultipartFormDataContent();
         content.Add(new StringContent(optionsJson, Encoding.UTF8, "application/json"), "options");
         content.Add(new ByteArrayContent(file), "file", filename);
-        var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
+        HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
         AddHeaders(request, secret, session, origin);
+
         return request;
     }
 
-    private static void AddHeaders(
-        HttpRequestMessage request,
-        string? secret,
-        string? session,
-        string? origin)
+    private static void AddHeaders(HttpRequestMessage request,
+                                   string? secret,
+                                   string? session,
+                                   string? origin)
     {
         if (secret is not null)
         {
@@ -148,6 +148,7 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
     protected static async Task<JsonElement> BodyAsync(HttpResponseMessage response)
     {
         var text = await response.Content.ReadAsStringAsync();
+
         return JsonDocument.Parse(text).RootElement.Clone();
     }
 
@@ -163,6 +164,7 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         var token = Factory.Mailer.LastToken("verification", email);
         Assert.False(string.IsNullOrEmpty(token), "verification token was not captured");
+
         return token!;
     }
 
@@ -180,6 +182,7 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
 
         var login = await SendAsync(Post("/v1/login", Json(new { email, password })));
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+
         return (await BodyAsync(login)).GetProperty("token").GetString()!;
     }
 
@@ -189,6 +192,7 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         await using var connection = await db.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = $"SELECT COUNT(*) FROM {table} WHERE {predicate}";
+
         return (long)(await command.ExecuteScalarAsync())!;
     }
 
@@ -198,6 +202,7 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         await using var connection = await db.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = $"SELECT COUNT(*) FROM {table}";
+
         return (long)(await command.ExecuteScalarAsync())!;
     }
 
@@ -207,6 +212,7 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         await using var connection = await db.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
+
         return Convert.ToInt64(await command.ExecuteScalarAsync());
     }
 
@@ -216,6 +222,7 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         await using var connection = await db.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
+
         return await command.ExecuteScalarAsync() as string;
     }
 
@@ -242,12 +249,13 @@ internal static class ImportExpiryTestHelpers
             """;
         command.Parameters.AddWithValue("seconds", seconds);
         command.Parameters.AddWithValue("id", reviewId);
+
         return (DateTime)(await command.ExecuteScalarAsync())!;
     }
 
     internal static async Task WaitForTagWaitAsync(NpgsqlConnection observer, int blockerPid)
     {
-        var watch = Stopwatch.StartNew();
+        Stopwatch watch = Stopwatch.StartNew();
         while (watch.Elapsed < TimeSpan.FromSeconds(5))
         {
             await using var command = observer.CreateCommand();
@@ -260,6 +268,7 @@ internal static class ImportExpiryTestHelpers
                 """;
             command.Parameters.AddWithValue("blocker", blockerPid);
             if ((bool)(await command.ExecuteScalarAsync())!) return;
+
             await Task.Delay(25);
         }
         Assert.Fail("The import commit did not reach the selected tag lock wait.");
@@ -267,13 +276,14 @@ internal static class ImportExpiryTestHelpers
 
     internal static async Task WaitForDeadlineAsync(NpgsqlConnection observer, DateTime deadline)
     {
-        var watch = Stopwatch.StartNew();
+        Stopwatch watch = Stopwatch.StartNew();
         while (watch.Elapsed < TimeSpan.FromSeconds(15))
         {
             await using var command = observer.CreateCommand();
             command.CommandText = "SELECT clock_timestamp() >= @deadline";
             command.Parameters.AddWithValue("deadline", deadline);
             if ((bool)(await command.ExecuteScalarAsync())!) return;
+
             await Task.Delay(25);
         }
         Assert.Fail("The persisted review deadline did not pass during the bounded wait.");

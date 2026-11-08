@@ -8,7 +8,7 @@ public static class StatementText
     public static string CollapseWhitespace(string value)
     {
         var builder = new StringBuilder(value.Length);
-        var pendingSpace = false;
+        bool pendingSpace = false;
         foreach (var rune in value.EnumerateRunes())
         {
             if (Rune.IsWhiteSpace(rune))
@@ -27,16 +27,18 @@ public static class StatementText
             }
             builder.Append(rune.ToString());
         }
+
         return builder.ToString();
     }
 
     public static int CountScalars(string value)
     {
-        var count = 0;
+        int count = 0;
         foreach (var _ in value.EnumerateRunes())
         {
             count++;
         }
+
         return count;
     }
 
@@ -48,16 +50,12 @@ public static class StatementText
     /// while still trimming the documented outer padding; PDF continuation
     /// fragments continue to collapse their display whitespace.
     /// </summary>
-    public static (string Display, string Normalized, bool Empty, bool TooLong) NormalizeDescription(
-        string? raw,
-        bool collapseDisplay = true)
+    public static (string Display, string Normalized, bool Empty, bool TooLong) NormalizeDescription(string? raw, bool collapseDisplay = true)
     {
-        var source = (raw ?? string.Empty).Trim();
-        var empty = source.Length == 0;
-        var display = empty
-            ? "No description"
-            : collapseDisplay ? CollapseWhitespace(source) : source;
-        var tooLong = CountScalars(display) > ImportLimits.MaxDescriptionScalars;
+        string source = (raw ?? string.Empty).Trim();
+        bool empty = source.Length == 0;
+        string display = empty ? "No description" : collapseDisplay ? CollapseWhitespace(source) : source;
+        bool tooLong = CountScalars(display) > ImportLimits.MaxDescriptionScalars;
         if (tooLong)
         {
             display = TruncateScalars(display, ImportLimits.MaxDescriptionScalars);
@@ -65,7 +63,8 @@ public static class StatementText
 
         // Emptiness comes from the source, never from the display fallback. A
         // literal "No description" is a real description with its own identity.
-        var normalized = empty ? string.Empty : CollapseWhitespace(display).ToLowerInvariant();
+        string normalized = empty ? string.Empty : CollapseWhitespace(display).ToLowerInvariant();
+
         return (display, normalized, empty, tooLong);
     }
 
@@ -77,7 +76,7 @@ public static class StatementText
         }
 
         var builder = new StringBuilder(value.Length);
-        var count = 0;
+        int count = 0;
         foreach (var rune in value.EnumerateRunes())
         {
             if (count++ == max)
@@ -86,12 +85,14 @@ public static class StatementText
             }
             builder.Append(rune.ToString());
         }
+
         return builder.ToString();
     }
 
     public static string FormatCents(long cents)
     {
-        var value = cents / 100m;
+        decimal value = cents / 100m;
+
         return value.ToString("0.00", CultureInfo.InvariantCulture);
     }
 
@@ -106,7 +107,7 @@ public static class StatementText
 
 public static class StatementDates
 {
-    private static readonly string[] FullYearFormats =
+    private static readonly string[] _fullYearFormats =
     [
         "yyyy-MM-dd",
         "yyyy/MM/dd",
@@ -118,7 +119,7 @@ public static class StatementDates
         "d MMM yyyy",
     ];
 
-    private static readonly string[] ShortYearFormats =
+    private static readonly string[] _shortYearFormats =
     [
         "dd/MM/yy",
         "MM/dd/yy",
@@ -131,56 +132,55 @@ public static class StatementDates
     ];
 
     public static bool TryParseFullYear(string value, out DateOnly date) =>
-        DateOnly.TryParseExact(value.Trim(), FullYearFormats, CultureInfo.InvariantCulture,
+        DateOnly.TryParseExact(value.Trim(), _fullYearFormats, CultureInfo.InvariantCulture,
             DateTimeStyles.None, out date);
 
     public static bool TryParseFullYearWithFormat(string value, string format, out DateOnly date)
     {
         date = default;
-        if (!DateTime.TryParseExact(value.Trim(), format, CultureInfo.InvariantCulture,
-                DateTimeStyles.None, out var parsed))
+        if (!DateTime.TryParseExact(value.Trim(), format, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
         {
             return false;
         }
+
         date = DateOnly.FromDateTime(parsed);
+
         return true;
     }
 
-    public static bool TryParseTwoDigitYearWithFormat(
-        string value,
-        string format,
-        out int day,
-        out int month,
-        out int year2)
+    public static bool TryParseTwoDigitYearWithFormat(string value,
+                                                      string format,
+                                                      out int day,
+                                                      out int month,
+                                                      out int year2)
     {
         day = 0;
         month = 0;
         year2 = 0;
-        if (!DateTime.TryParseExact(value.Trim(), format, CultureInfo.InvariantCulture,
-                DateTimeStyles.None, out var parsed))
+        if (!DateTime.TryParseExact(value.Trim(), format, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
         {
             return false;
         }
+
         day = parsed.Day;
         month = parsed.Month;
         year2 = parsed.Year % 100;
+
         return true;
     }
 
-    public static bool TryParseTwoDigitYear(
-        string value,
-        out int day,
-        out int month,
-        out int year2)
+    public static bool TryParseTwoDigitYear(string value,
+                                            out int day,
+                                            out int month,
+                                            out int year2)
     {
         day = 0;
         month = 0;
         year2 = 0;
-        var trimmed = value.Trim();
-        foreach (var format in ShortYearFormats)
+        string trimmed = value.Trim();
+        foreach (string format in _shortYearFormats)
         {
-            if (!DateTime.TryParseExact(trimmed, format, CultureInfo.InvariantCulture,
-                    DateTimeStyles.None, out var parsed))
+            if (!DateTime.TryParseExact(trimmed, format, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
             {
                 continue;
             }
@@ -206,6 +206,7 @@ public static class StatementDates
             year2 = parsed.Year % 100;
             return true;
         }
+
         return false;
     }
 
@@ -213,13 +214,12 @@ public static class StatementDates
     /// Resolves a two-digit year only when exactly one century fits the confirmed
     /// statement period, or when the customer supplied an explicit century.
     /// </summary>
-    public static (DateOnly? Date, bool CenturyRequired) Resolve(
-        int day,
-        int month,
-        int year2,
-        DateOnly? start,
-        DateOnly? end,
-        int? century)
+    public static (DateOnly? Date, bool CenturyRequired) Resolve(int day,
+                                                                 int month,
+                                                                 int year2,
+                                                                 DateOnly? start,
+                                                                 DateOnly? end,
+                                                                 int? century)
     {
         if (start is null || end is null)
         {
@@ -228,19 +228,18 @@ public static class StatementDates
 
         if (century is not null)
         {
-            var year = century.Value + year2;
-            return TryCreate(year, month, day) is { } date && InPeriod(date, start.Value, end.Value)
-                ? (date, false)
-                : (null, false);
+            int year = century.Value + year2;
+            return TryCreate(year, month, day) is { } date && InPeriod(date, start.Value, end.Value) ? (date, false) : (null, false);
         }
 
         var matches = new List<DateOnly>();
-        for (var year = 1900; year <= 2099; year++)
+        for (int year = 1900; year <= 2099; year++)
         {
             if (year % 100 != year2)
             {
                 continue;
             }
+
             if (TryCreate(year, month, day) is { } date && InPeriod(date, start.Value, end.Value))
             {
                 matches.Add(date);
@@ -251,10 +250,12 @@ public static class StatementDates
         {
             return (matches[0], false);
         }
+
         if (matches.Count > 1)
         {
             return (null, true);
         }
+
         return (null, false);
     }
 
@@ -269,10 +270,12 @@ public static class StatementDates
         {
             return null;
         }
+
         if (day > DateTime.DaysInMonth(year, month))
         {
             return null;
         }
+
         return new DateOnly(year, month, day);
     }
 }
@@ -289,8 +292,8 @@ public static class StatementAmounts
             return false;
         }
 
-        var value = raw.Trim();
-        var negative = false;
+        string value = raw.Trim();
+        bool negative = false;
         if (value.StartsWith('+'))
         {
             value = value[1..];
@@ -301,7 +304,7 @@ public static class StatementAmounts
             value = value[1..];
         }
 
-        if (!TryParseDecimalDigits(value, '.', out var magnitude))
+        if (!TryParseDecimalDigits(value, '.', out long magnitude))
         {
             return false;
         }
@@ -311,16 +314,16 @@ public static class StatementAmounts
         {
             cents = 0;
         }
+
         return true;
     }
 
-    public static bool TryParseMagnitude(
-        string? raw,
-        string decimalSeparator,
-        string thousandsSeparator,
-        out long cents,
-        out bool hasPositiveSign,
-        out bool hasNegativeSign)
+    public static bool TryParseMagnitude(string? raw,
+                                         string decimalSeparator,
+                                         string thousandsSeparator,
+                                         out long cents,
+                                         out bool hasPositiveSign,
+                                         out bool hasNegativeSign)
     {
         cents = 0;
         hasPositiveSign = false;
@@ -330,7 +333,7 @@ public static class StatementAmounts
             return false;
         }
 
-        var value = raw.Trim();
+        string value = raw.Trim();
         if (value.StartsWith('(') && value.EndsWith(')'))
         {
             hasNegativeSign = true;
@@ -380,36 +383,29 @@ public static class StatementAmounts
             return false;
         }
 
-        var normalized = NormalizeGrouping(value, decimalSeparator, thousandsSeparator);
+        string? normalized = NormalizeGrouping(value, decimalSeparator, thousandsSeparator);
         if (normalized is null)
         {
             return false;
         }
 
-        if (!TryParseDecimalDigits(normalized, '.', out var magnitude))
+        if (!TryParseDecimalDigits(normalized, '.', out long magnitude))
         {
             return false;
         }
 
         cents = magnitude;
+
         return true;
     }
 
-    private static string? NormalizeGrouping(
-        string value,
-        string decimalSeparator,
-        string thousandsSeparator)
+    private static string? NormalizeGrouping(string value, string decimalSeparator, string thousandsSeparator)
     {
-        var decimalIndex = decimalSeparator.Length == 0
-            ? -1
-            : value.LastIndexOf(decimalSeparator, StringComparison.Ordinal);
-        var integerPart = decimalIndex < 0 ? value : value[..decimalIndex];
-        var fractionPart = decimalIndex < 0 ? string.Empty : value[(decimalIndex + decimalSeparator.Length)..];
+        int decimalIndex = decimalSeparator.Length == 0 ? -1 : value.LastIndexOf(decimalSeparator, StringComparison.Ordinal);
+        string integerPart = decimalIndex < 0 ? value : value[..decimalIndex];
+        string fractionPart = decimalIndex < 0 ? string.Empty : value[(decimalIndex + decimalSeparator.Length)..];
 
-        if ((thousandsSeparator.Length > 0 &&
-             fractionPart.Contains(thousandsSeparator, StringComparison.Ordinal)) ||
-            (decimalSeparator.Length > 0 &&
-             fractionPart.Contains(decimalSeparator, StringComparison.Ordinal)))
+        if ((thousandsSeparator.Length > 0 && fractionPart.Contains(thousandsSeparator, StringComparison.Ordinal)) || (decimalSeparator.Length > 0 && fractionPart.Contains(decimalSeparator, StringComparison.Ordinal)))
         {
             return null;
         }
@@ -425,11 +421,10 @@ public static class StatementAmounts
             {
                 return null;
             }
+
             integerPart = integerPart.Replace(thousandsSeparator, string.Empty, StringComparison.Ordinal);
         }
-        else if (integerPart.Contains(',') ||
-                 integerPart.Contains('.') ||
-                 integerPart.Contains(' '))
+        else if (integerPart.Contains(',') || integerPart.Contains('.') || integerPart.Contains(' '))
         {
             return null;
         }
@@ -449,7 +444,7 @@ public static class StatementAmounts
             return false;
         }
 
-        var groups = integerPart.Split(separator, StringSplitOptions.None);
+        string[] groups = integerPart.Split(separator, StringSplitOptions.None);
         if (groups.Length == 1)
         {
             return groups[0].Length > 0 && groups[0].All(char.IsAsciiDigit);
@@ -460,31 +455,33 @@ public static class StatementAmounts
             return false;
         }
 
-        for (var index = 1; index < groups.Length; index++)
+        for (int index = 1; index < groups.Length; index++)
         {
             if (groups[index].Length != 3 || !groups[index].All(char.IsAsciiDigit))
             {
                 return false;
             }
         }
+
         return true;
     }
 
     private static bool TryParseDecimalDigits(string value, char separator, out long cents)
     {
         cents = 0;
-        var parts = value.Split(separator);
+        string[] parts = value.Split(separator);
         if (parts.Length > 2)
         {
             return false;
         }
 
-        var integerPart = parts[0];
-        var fractionPart = parts.Length == 2 ? parts[1] : string.Empty;
+        string integerPart = parts[0];
+        string fractionPart = parts.Length == 2 ? parts[1] : string.Empty;
         if (integerPart.Length == 0 || !integerPart.All(char.IsAsciiDigit))
         {
             return false;
         }
+
         if (fractionPart.Length > 2 || !fractionPart.All(char.IsAsciiDigit))
         {
             return false;
@@ -495,13 +492,12 @@ public static class StatementAmounts
             return false;
         }
 
-        if (!long.TryParse(integerPart, NumberStyles.None, CultureInfo.InvariantCulture,
-                out var whole))
+        if (!long.TryParse(integerPart, NumberStyles.None, CultureInfo.InvariantCulture, out long whole))
         {
             return false;
         }
 
-        var fraction = fractionPart.Length switch
+        int fraction = fractionPart.Length switch
         {
             0 => 0,
             1 => (fractionPart[0] - '0') * 10,
@@ -514,6 +510,7 @@ public static class StatementAmounts
         }
 
         cents = checked(whole * 100 + fraction);
+
         return Math.Abs(cents) <= MaxAbsoluteCents;
     }
 }

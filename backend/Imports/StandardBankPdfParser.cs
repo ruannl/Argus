@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using UglyToad.PdfPig;
-using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Exceptions;
 
 namespace argus.Server.Imports;
@@ -13,45 +12,45 @@ namespace argus.Server.Imports;
 /// </summary>
 public static class StandardBankPdfParser
 {
-    private static readonly Regex DateAnchor = new(
+    private static readonly Regex _dateAnchor = new(
         @"^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{2}|\d{4})$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly Regex PeriodLine = new(
+    private static readonly Regex _periodLine = new(
         @"^(?:statement\s+period\s*:?\s*|period\s+from\s+)?(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\s*" +
         @"(?:to|until|through|[-–])\s*(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    private static readonly Regex CoverPhrase = new(
+    private static readonly Regex _coverPhrase = new(
         @"^synthetic\s+(?:bank|statement)$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    private static readonly Regex SummaryHeading = new(
+    private static readonly Regex _summaryHeading = new(
         @"^(?:statement\s+summary|account\s+summary|summary)$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    private static readonly Regex FooterPage = new(
+    private static readonly Regex _footerPage = new(
         @"^page\s+(\d+)(?:\s+of\s+(\d+))?$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly Regex FooterContinued = new(
+    private static readonly Regex _footerContinued = new(
         @"^continued\s+on\s+page\s+(\d+)$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly Regex NumericToken = new(
+    private static readonly Regex _numericToken = new(
         @"^\(?-?\d{1,3}(,\d{3})*(\.\d{2})?\)?$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly string[] FlowColumns = ["Payments", "Deposits", "Bank fees"];
+    private static readonly string[] _flowColumns = ["Payments", "Deposits", "Bank fees"];
 
-    private static readonly (string Label, int FlowIndex)[] TotalLabels =
+    private static readonly (string Label, int FlowIndex)[] _totalLabels =
     [
         ("total payments", 0),
         ("total deposits", 1),
         ("total bank fees", 2),
     ];
 
-    private static readonly string[] OpeningBalanceLabels =
+    private static readonly string[] _openingBalanceLabels =
     [
         "opening balance",
         "closing balance brought forward",
@@ -59,7 +58,7 @@ public static class StandardBankPdfParser
         "brought forward",
     ];
 
-    private static readonly string[] ClosingBalanceLabels =
+    private static readonly string[] _closingBalanceLabels =
     [
         "closing balance",
         "closing balance carried forward",
@@ -67,7 +66,7 @@ public static class StandardBankPdfParser
         "carried forward",
     ];
 
-    private static readonly string[] MetadataLabels =
+    private static readonly string[] _metadataLabels =
     [
         "account", "account:", "customer", "customer:", "branch", "branch:",
     ];
@@ -92,7 +91,10 @@ public static class StandardBankPdfParser
     // 842-point page. Y=400 is not a top-of-page role.
     private const double TopRegionBelowPageTop = 120.0;
 
-    public static ParsedStatement Parse(byte[] bytes, DateOnly? start, DateOnly? end, int? century)
+    public static ParsedStatement Parse(byte[] bytes,
+                                        DateOnly? start,
+                                        DateOnly? end,
+                                        int? century)
     {
         if (bytes.Length > ImportLimits.MaxFileBytes)
         {
@@ -109,11 +111,7 @@ public static class StandardBankPdfParser
         PdfDocument document;
         try
         {
-            document = PdfDocument.Open(bytes, new ParsingOptions
-            {
-                UseLenientParsing = false,
-                SkipMissingFonts = false,
-            });
+            document = PdfDocument.Open(bytes, new ParsingOptions { UseLenientParsing = false, SkipMissingFonts = false, });
         }
         catch (PdfDocumentEncryptedException)
         {
@@ -141,11 +139,10 @@ public static class StandardBankPdfParser
         }
     }
 
-    private static ParsedStatement ParseDocument(
-        PdfDocument document,
-        DateOnly? start,
-        DateOnly? end,
-        int? century)
+    private static ParsedStatement ParseDocument(PdfDocument document,
+                                                 DateOnly? start,
+                                                 DateOnly? end,
+                                                 int? century)
     {
         if (document.IsEncrypted)
         {
@@ -156,17 +153,17 @@ public static class StandardBankPdfParser
             throw new StatementRejectedException(ParserReasons.ProcessingLimit);
         }
 
-        var pageCount = document.NumberOfPages;
+        int pageCount = document.NumberOfPages;
         var events = new List<BodyEvent>();
         var candidateDrafts = new List<PdfRowDraft>();
-        var totalCharacters = 0;
-        var sawAnyText = false;
-        var sawTable = false;
+        int totalCharacters = 0;
+        bool sawAnyText = false;
+        bool sawTable = false;
         DateOnly? printedStart = null;
         DateOnly? printedEnd = null;
-        var periodConflict = false;
-        var documentLine = 0;
-        var eventIndex = 0;
+        bool periodConflict = false;
+        int documentLine = 0;
+        int eventIndex = 0;
         PdfHeader? previousHeader = null;
         PdfRowDraft? current = null;
 
@@ -179,15 +176,7 @@ public static class StandardBankPdfParser
                 throw new StatementRejectedException(ParserReasons.TextPdfRequired);
             }
 
-            var words = page.GetWords()
-                .Where(word => !string.IsNullOrWhiteSpace(word.Text))
-                .Select(word => new PdfWord(
-                    word.Text,
-                    word.BoundingBox.Left,
-                    word.BoundingBox.Right,
-                    word.BoundingBox.Bottom,
-                    word.BoundingBox.Top))
-                .ToList();
+            var words = page.GetWords().Where(word => !string.IsNullOrWhiteSpace(word.Text)).Select(word => new PdfWord(word.Text, word.BoundingBox.Left, word.BoundingBox.Right, word.BoundingBox.Bottom, word.BoundingBox.Top)).ToList();
             totalCharacters += words.Sum(word => word.Text.Length);
             if (totalCharacters > ImportLimits.MaxExtractedCharacters)
             {
@@ -198,10 +187,7 @@ public static class StandardBankPdfParser
             // Every extracted word must belong to a mapped cell. The six bands
             // cover [0, infinity); an off-page or non-finite coordinate is not
             // silently dropped.
-            if (words.Any(word =>
-                    !double.IsFinite(word.CenterX) ||
-                    !double.IsFinite(word.CenterY) ||
-                    word.CenterX < 0))
+            if (words.Any(word => !double.IsFinite(word.CenterX) || !double.IsFinite(word.CenterY) || word.CenterX < 0))
             {
                 throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
             }
@@ -228,10 +214,8 @@ public static class StandardBankPdfParser
                         continue;
                     }
 
-                    var text = StatementText.CollapseWhitespace(line.Text);
-                    if (CoverPhrase.IsMatch(text) || SummaryHeading.IsMatch(text) ||
-                        TryConsumePeriodLine(
-                            text, ref printedStart, ref printedEnd, ref periodConflict))
+                    string text = StatementText.CollapseWhitespace(line.Text);
+                    if (_coverPhrase.IsMatch(text) || _summaryHeading.IsMatch(text) || TryConsumePeriodLine(text, ref printedStart, ref printedEnd, ref periodConflict))
                     {
                         if (!IsTopOfPage(line, page.Height))
                         {
@@ -248,9 +232,7 @@ public static class StandardBankPdfParser
 
             var primary = headerMatches[0];
             var header = primary.Header;
-            var headerLineIndices = headerMatches
-                .Select(match => match.LineIndex)
-                .ToHashSet();
+            var headerLineIndices = headerMatches.Select(match => match.LineIndex).ToHashSet();
             foreach (var other in headerMatches.Skip(1))
             {
                 if (!HeadersAreCompatible(primary.Header, other.Header, lines, headerLineIndices))
@@ -259,24 +241,22 @@ public static class StandardBankPdfParser
                 }
             }
 
-            var headerWithinTolerance =
-                previousHeader is not null && header.IsCompatibleWith(previousHeader);
-            if (headerWithinTolerance && current is not null &&
-                !HeadersAreCompatible(previousHeader!, header, lines, headerLineIndices))
+            bool headerWithinTolerance = previousHeader is not null && header.IsCompatibleWith(previousHeader);
+            if (headerWithinTolerance && current is not null && !HeadersAreCompatible(previousHeader!, header, lines, headerLineIndices))
             {
                 throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
             }
-            var continuing = headerWithinTolerance && current is not null;
+            bool continuing = headerWithinTolerance && current is not null;
             if (!continuing)
             {
                 current = null;
             }
-            var crossPageContinuation = continuing;
+            bool crossPageContinuation = continuing;
             previousHeader = header;
             sawTable = true;
-            var samePageContinuationClosed = false;
+            bool samePageContinuationClosed = false;
 
-            for (var lineIndex = 0; lineIndex < lines.Count; lineIndex++)
+            for (int lineIndex = 0; lineIndex < lines.Count; lineIndex++)
             {
                 var line = lines[lineIndex];
                 if (headerLineIndices.Contains(lineIndex))
@@ -294,8 +274,8 @@ public static class StandardBankPdfParser
 
                 if (lineIndex < primary.LineIndex)
                 {
-                    var preambleText = StatementText.CollapseWhitespace(line.Text);
-                    if (SummaryHeading.IsMatch(preambleText))
+                    string preambleText = StatementText.CollapseWhitespace(line.Text);
+                    if (_summaryHeading.IsMatch(preambleText))
                     {
                         if (!IsTopOfPage(line, page.Height))
                         {
@@ -306,9 +286,7 @@ public static class StandardBankPdfParser
                         crossPageContinuation = false;
                         continue;
                     }
-                    if (CoverPhrase.IsMatch(preambleText) ||
-                        TryConsumePeriodLine(
-                            preambleText, ref printedStart, ref printedEnd, ref periodConflict))
+                    if (_coverPhrase.IsMatch(preambleText) || TryConsumePeriodLine(preambleText, ref printedStart, ref printedEnd, ref periodConflict))
                     {
                         if (!IsTopOfPage(line, page.Height))
                         {
@@ -324,11 +302,11 @@ public static class StandardBankPdfParser
                         throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
                     }
 
-                    var preambleDate = line.TextIn(header, 0);
-                    var preambleDescription = line.TextIn(header, 1);
-                    var preambleFlows = FlowTexts(line, header);
-                    var preambleBalance = line.TextIn(header, 5);
-                    var hasFlow = preambleFlows.Any(value => value.Length > 0);
+                    string preambleDate = line.TextIn(header, 0);
+                    string preambleDescription = line.TextIn(header, 1);
+                    string[] preambleFlows = FlowTexts(line, header);
+                    string preambleBalance = line.TextIn(header, 5);
+                    bool hasFlow = preambleFlows.Any(value => value.Length > 0);
                     if (preambleDate.Length > 0 && hasFlow)
                     {
                         // A pre-header row is retained only when both a date
@@ -344,8 +322,7 @@ public static class StandardBankPdfParser
                     }
                     if (preambleDescription.Length > 0 && preambleBalance.Length == 0)
                     {
-                        if (!crossPageContinuation || current is null ||
-                            !IsSupportedContinuation(line, header, current, crossPage: true))
+                        if (!crossPageContinuation || current is null || !IsSupportedContinuation(line, header, current, crossPage: true))
                         {
                             throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
                         }
@@ -357,16 +334,14 @@ public static class StandardBankPdfParser
                     throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
                 }
 
-                var dateText = line.TextIn(header, 0);
-                var descriptionText = line.TextIn(header, 1);
-                var flowTexts = FlowTexts(line, header);
-                var balanceText = line.TextIn(header, 5);
+                string dateText = line.TextIn(header, 0);
+                string descriptionText = line.TextIn(header, 1);
+                string[] flowTexts = FlowTexts(line, header);
+                string balanceText = line.TextIn(header, 5);
 
                 if (IsTerminalTotal(dateText, descriptionText, flowTexts, balanceText))
                 {
-                    var total = NewDraft(
-                        line.SourceLine, page.Number, dateText, null, descriptionText,
-                        flowTexts, line.CenterY, start, end, century);
+                    var total = NewDraft(line.SourceLine, page.Number, dateText, null, descriptionText, flowTexts, line.CenterY, start, end, century);
                     events.Add(new BodyEvent(eventIndex++, BodyEventKind.Total, total));
                     current = null;
                     crossPageContinuation = false;
@@ -376,9 +351,7 @@ public static class StandardBankPdfParser
 
                 if (dateText.Length > 0 || flowTexts.Any(value => value.Length > 0))
                 {
-                    var draft = AddCandidate(
-                        line, page.Number, dateText, descriptionText, flowTexts,
-                        start, end, century, ref eventIndex, events, candidateDrafts);
+                    var draft = AddCandidate(line, page.Number, dateText, descriptionText, flowTexts, start, end, century, ref eventIndex, events, candidateDrafts);
                     current = draft;
                     crossPageContinuation = false;
                     samePageContinuationClosed = false;
@@ -389,14 +362,9 @@ public static class StandardBankPdfParser
                 {
                     if (balanceText.Length > 0)
                     {
-                        if (TryClassifyBalance(descriptionText, balanceText, out var isOpening))
+                        if (TryClassifyBalance(descriptionText, balanceText, out bool isOpening))
                         {
-                            events.Add(new BodyEvent(
-                                eventIndex++,
-                                isOpening
-                                    ? BodyEventKind.BalanceOpening
-                                    : BodyEventKind.BalanceClosing,
-                                null));
+                            events.Add(new BodyEvent(eventIndex++, isOpening ? BodyEventKind.BalanceOpening : BodyEventKind.BalanceClosing, null));
                             current = null;
                             crossPageContinuation = false;
                             samePageContinuationClosed = false;
@@ -408,8 +376,7 @@ public static class StandardBankPdfParser
                         throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
                     }
 
-                    if (current is null || samePageContinuationClosed ||
-                        !IsSupportedContinuation(line, header, current, crossPageContinuation))
+                    if (current is null || samePageContinuationClosed || !IsSupportedContinuation(line, header, current, crossPageContinuation))
                     {
                         throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
                     }
@@ -429,9 +396,7 @@ public static class StandardBankPdfParser
             throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
         }
 
-        var candidateEvents = events
-            .Where(item => item.Kind == BodyEventKind.Candidate)
-            .ToList();
+        var candidateEvents = events.Where(item => item.Kind == BodyEventKind.Candidate).ToList();
         if (candidateEvents.Count == 0)
         {
             throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
@@ -441,7 +406,7 @@ public static class StandardBankPdfParser
         // is a permitted total, allowed closing balance or consistent footer.
         // A later structural role (cover/summary/period/header/restart),
         // candidate or opening balance disqualifies it.
-        var lastDisqualifyingIndex = events
+        int lastDisqualifyingIndex = events
             .Where(item => item.Kind is
                 BodyEventKind.Candidate or
                 BodyEventKind.BalanceOpening or
@@ -450,12 +415,7 @@ public static class StandardBankPdfParser
             .DefaultIfEmpty(-1)
             .Max();
 
-        var finalEvents = events
-            .Where(item =>
-                item.Kind == BodyEventKind.Candidate ||
-                (item.Kind == BodyEventKind.Total && item.Index < lastDisqualifyingIndex))
-            .OrderBy(item => item.Index)
-            .ToList();
+        var finalEvents = events.Where(item => item.Kind == BodyEventKind.Candidate || (item.Kind == BodyEventKind.Total && item.Index < lastDisqualifyingIndex)).OrderBy(item => item.Index).ToList();
         if (finalEvents.Count == 0)
         {
             throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
@@ -465,25 +425,23 @@ public static class StandardBankPdfParser
             throw new StatementRejectedException(ParserReasons.ProcessingLimit);
         }
 
-        var firstFinalCandidate = finalEvents[0].Index;
-        var lastFinalCandidate = finalEvents[^1].Index;
+        int firstFinalCandidate = finalEvents[0].Index;
+        int lastFinalCandidate = finalEvents[^1].Index;
         foreach (var balance in events.Where(item =>
                      item.Kind is BodyEventKind.BalanceOpening or BodyEventKind.BalanceClosing))
         {
-            if (balance.Kind == BodyEventKind.BalanceOpening &&
-                balance.Index > firstFinalCandidate)
+            if (balance.Kind == BodyEventKind.BalanceOpening && balance.Index > firstFinalCandidate)
             {
                 throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
             }
-            if (balance.Kind == BodyEventKind.BalanceClosing &&
-                balance.Index < lastFinalCandidate)
+            if (balance.Kind == BodyEventKind.BalanceClosing && balance.Index < lastFinalCandidate)
             {
                 throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
             }
         }
 
         var parsedRows = new List<ParsedStatementRow>(finalEvents.Count);
-        for (var index = 0; index < finalEvents.Count; index++)
+        for (int index = 0; index < finalEvents.Count; index++)
         {
             var draft = finalEvents[index].Draft!;
             draft.SourceRowNumber = index + 1;
@@ -513,67 +471,55 @@ public static class StandardBankPdfParser
             ["balance_ignored"]);
     }
 
-    private static PdfRowDraft AddCandidate(
-        PdfLine line,
-        int pageNumber,
-        string dateText,
-        string descriptionText,
-        string[] flowTexts,
-        DateOnly? start,
-        DateOnly? end,
-        int? century,
-        ref int eventIndex,
-        List<BodyEvent> events,
-        List<PdfRowDraft> candidateDrafts)
+    private static PdfRowDraft AddCandidate(PdfLine line,
+                                            int pageNumber,
+                                            string dateText,
+                                            string descriptionText,
+                                            string[] flowTexts,
+                                            DateOnly? start,
+                                            DateOnly? end,
+                                            int? century,
+                                            ref int eventIndex,
+                                            List<BodyEvent> events,
+                                            List<PdfRowDraft> candidateDrafts)
     {
-        var dateMatch = DateAnchor.Match(dateText);
-        var draft = NewDraft(
-            line.SourceLine,
-            pageNumber,
-            dateText,
-            dateMatch.Success ? dateMatch : null,
-            descriptionText,
-            flowTexts,
-            line.CenterY,
-            start,
-            end,
-            century);
+        var dateMatch = _dateAnchor.Match(dateText);
+        var draft = NewDraft(line.SourceLine, pageNumber, dateText, dateMatch.Success ? dateMatch : null, descriptionText, flowTexts, line.CenterY, start, end, century);
         candidateDrafts.Add(draft);
         if (candidateDrafts.Count > ImportLimits.MaxDataRows)
         {
             throw new StatementRejectedException(ParserReasons.ProcessingLimit);
         }
         events.Add(new BodyEvent(eventIndex++, BodyEventKind.Candidate, draft));
+
         return draft;
     }
 
-    private static PdfRowDraft NewDraft(
-        int sourceLine,
-        int sourcePage,
-        string rawDate,
-        Match? dateMatch,
-        string description,
-        string[] flows,
-        double lineCenterY,
-        DateOnly? start,
-        DateOnly? end,
-        int? century) =>
+    private static PdfRowDraft NewDraft(int sourceLine,
+                                        int sourcePage,
+                                        string rawDate,
+                                        Match? dateMatch,
+                                        string description,
+                                        string[] flows,
+                                        double lineCenterY,
+                                        DateOnly? start,
+                                        DateOnly? end,
+                                        int? century) =>
         new(sourceLine, sourcePage, rawDate, dateMatch, description, flows, lineCenterY, start, end, century);
 
-    private static bool IsTerminalTotal(
-        string dateText,
-        string descriptionText,
-        string[] flowTexts,
-        string balanceText)
+    private static bool IsTerminalTotal(string dateText,
+                                        string descriptionText,
+                                        string[] flowTexts,
+                                        string balanceText)
     {
         if (dateText.Length > 0 || balanceText.Length > 0)
         {
             return false;
         }
 
-        var normalized = StatementText.CollapseWhitespace(descriptionText).ToLowerInvariant();
-        var expected = -1;
-        foreach (var label in TotalLabels)
+        string normalized = StatementText.CollapseWhitespace(descriptionText).ToLowerInvariant();
+        int expected = -1;
+        foreach (var label in _totalLabels)
         {
             if (normalized == label.Label)
             {
@@ -586,74 +532,64 @@ public static class StandardBankPdfParser
             return false;
         }
 
-        var populated = flowTexts
-            .Select((value, index) => (value, index))
-            .Where(entry => entry.value.Length > 0)
-            .ToList();
+        var populated = flowTexts.Select((value, index) => (value, index)).Where(entry => entry.value.Length > 0).ToList();
         if (populated.Count != 1 || populated[0].index != expected)
         {
             return false;
         }
 
-        var tokens = populated[0].value.Split(
-            ' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return tokens.Length == 1 &&
-               StatementAmounts.TryParseMagnitude(tokens[0], ".", ",", out _, out _, out _);
+        string[] tokens = populated[0].value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        return tokens.Length == 1 && StatementAmounts.TryParseMagnitude(tokens[0], ".", ",", out _, out _, out _);
     }
 
-    private static bool TryClassifyBalance(
-        string descriptionText,
-        string balanceText,
-        out bool isOpening)
+    private static bool TryClassifyBalance(string descriptionText, string balanceText, out bool isOpening)
     {
         isOpening = false;
-        var normalized = StatementText.CollapseWhitespace(descriptionText).ToLowerInvariant();
-        var opening = OpeningBalanceLabels.Contains(normalized, StringComparer.Ordinal);
-        var closing = ClosingBalanceLabels.Contains(normalized, StringComparer.Ordinal);
+        string normalized = StatementText.CollapseWhitespace(descriptionText).ToLowerInvariant();
+        bool opening = _openingBalanceLabels.Contains(normalized, StringComparer.Ordinal);
+        bool closing = _closingBalanceLabels.Contains(normalized, StringComparer.Ordinal);
         if (!opening && !closing)
         {
             return false;
         }
 
-        var tokens = balanceText.Split(
-            ' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (tokens.Length != 1 || !NumericToken.IsMatch(tokens[0]))
+        string[] tokens = balanceText.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (tokens.Length != 1 || !_numericToken.IsMatch(tokens[0]))
         {
             return false;
         }
 
         isOpening = opening;
+
         return true;
     }
 
-    private static bool TryConsumePeriodLine(
-        string text,
-        ref DateOnly? printedStart,
-        ref DateOnly? printedEnd,
-        ref bool periodConflict)
+    private static bool TryConsumePeriodLine(string text,
+                                             ref DateOnly? printedStart,
+                                             ref DateOnly? printedEnd,
+                                             ref bool periodConflict)
     {
-        var match = PeriodLine.Match(text);
+        var match = _periodLine.Match(text);
         if (!match.Success)
         {
             return false;
         }
 
-        if (!TryParsePeriodDate(match.Groups[1].Value, out var start) ||
-            !TryParsePeriodDate(match.Groups[2].Value, out var end) ||
-            end < start)
+        if (!TryParsePeriodDate(match.Groups[1].Value, out var start) || !TryParsePeriodDate(match.Groups[2].Value, out var end) || end < start)
         {
             // The complete period structure is consumed, but an invalid printed
             // period does not prefill anything.
             return true;
         }
 
-        if (printedStart is not null &&
-            (printedStart != start || printedEnd != end))
+        if (printedStart is not null && (printedStart != start || printedEnd != end))
         {
             periodConflict = true;
         }
         printedStart = start;
         printedEnd = end;
+
         return true;
     }
 
@@ -664,18 +600,18 @@ public static class StandardBankPdfParser
             return false;
         }
 
-        var text = StatementText.CollapseWhitespace(line.Text).ToLowerInvariant();
-        var pageMatch = FooterPage.Match(text);
+        string text = StatementText.CollapseWhitespace(line.Text).ToLowerInvariant();
+        var pageMatch = _footerPage.Match(text);
         if (pageMatch.Success)
         {
-            var number = int.Parse(pageMatch.Groups[1].Value, CultureInfo.InvariantCulture);
+            int number = int.Parse(pageMatch.Groups[1].Value, CultureInfo.InvariantCulture);
             if (number != pageNumber)
             {
                 throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
             }
             if (pageMatch.Groups[2].Success)
             {
-                var total = int.Parse(pageMatch.Groups[2].Value, CultureInfo.InvariantCulture);
+                int total = int.Parse(pageMatch.Groups[2].Value, CultureInfo.InvariantCulture);
                 if (total != pageCount)
                 {
                     throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
@@ -684,10 +620,10 @@ public static class StandardBankPdfParser
             return true;
         }
 
-        var continued = FooterContinued.Match(text);
+        var continued = _footerContinued.Match(text);
         if (continued.Success)
         {
-            var number = int.Parse(continued.Groups[1].Value, CultureInfo.InvariantCulture);
+            int number = int.Parse(continued.Groups[1].Value, CultureInfo.InvariantCulture);
             if (number != pageNumber + 1 || number > pageCount)
             {
                 throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
@@ -708,23 +644,23 @@ public static class StandardBankPdfParser
         {
             return false;
         }
-        var label = StatementText.CollapseWhitespace(first.Text).ToLowerInvariant();
-        return MetadataLabels.Contains(label, StringComparer.Ordinal);
+
+        string label = StatementText.CollapseWhitespace(first.Text).ToLowerInvariant();
+
+        return _metadataLabels.Contains(label, StringComparer.Ordinal);
     }
 
-    private static bool IsSupportedContinuation(
-        PdfLine line,
-        PdfHeader header,
-        PdfRowDraft current,
-        bool crossPage)
+    private static bool IsSupportedContinuation(PdfLine line,
+                                                PdfHeader header,
+                                                PdfRowDraft current,
+                                                bool crossPage)
     {
-        if (line.Words.Count == 0 ||
-            !line.Words.All(word => header.InColumn(word, 1)))
+        if (line.Words.Count == 0 || !line.Words.All(word => header.InColumn(word, 1)))
         {
             return false;
         }
 
-        var left = line.Words.Min(word => word.Left);
+        double left = line.Words.Min(word => word.Left);
         if (Math.Abs(left - header.DescriptionLeft) > ContinuationLeftTolerance)
         {
             return false;
@@ -734,11 +670,12 @@ public static class StandardBankPdfParser
         {
             // The bridge is only the approved leading slot immediately below
             // the header, not a page-wide spacing waiver.
-            var leadingGap = header.CenterY - line.CenterY;
+            double leadingGap = header.CenterY - line.CenterY;
             return leadingGap > 0 && leadingGap <= LeadingContinuationMaxGap;
         }
 
-        var gap = current.LastLineCenterY - line.CenterY;
+        double gap = current.LastLineCenterY - line.CenterY;
+
         return gap > 0 && gap <= ContinuationVerticalTolerance;
     }
 
@@ -769,20 +706,19 @@ public static class StandardBankPdfParser
         {
             line.Sort();
         }
+
         return lines.OrderByDescending(line => line.CenterY).ToList();
     }
 
     private static List<HeaderMatch> FindHeaders(IReadOnlyList<PdfLine> lines)
     {
         var matches = new List<HeaderMatch>();
-        for (var lineIndex = 0; lineIndex < lines.Count; lineIndex++)
+        for (int lineIndex = 0; lineIndex < lines.Count; lineIndex++)
         {
             var line = lines[lineIndex];
             var words = line.Words.OrderBy(word => word.Left).ToList();
             var normalized = words.Select(word => NormalizeLabel(word.Text)).ToList();
-            if (!TryGetHeaderIndices(normalized, out var dateIndex, out var descriptionIndex,
-                    out var paymentsIndex, out var depositsIndex, out var bankIndex,
-                    out var feesIndex, out var balanceIndex))
+            if (!TryGetHeaderIndices(normalized, out int dateIndex, out int descriptionIndex, out int paymentsIndex, out int depositsIndex, out int bankIndex, out int feesIndex, out int balanceIndex))
             {
                 continue;
             }
@@ -804,11 +740,10 @@ public static class StandardBankPdfParser
             }
             ordered.Add(balance);
 
-            var nonOverlapping = true;
-            for (var index = 1; index < ordered.Count; index++)
+            bool nonOverlapping = true;
+            for (int index = 1; index < ordered.Count; index++)
             {
-                if (ordered[index - 1].Left >= ordered[index].Left ||
-                    ordered[index - 1].Right > ordered[index].Left)
+                if (ordered[index - 1].Left >= ordered[index].Left || ordered[index - 1].Right > ordered[index].Left)
                 {
                     nonOverlapping = false;
                     break;
@@ -819,34 +754,29 @@ public static class StandardBankPdfParser
                 continue;
             }
 
-            var boundaries = new double[5];
+            double[] boundaries = new double[5];
             boundaries[0] = Midpoint(date.Right, description.Left);
             boundaries[1] = Midpoint(description.Right, payments.Left);
             boundaries[2] = Midpoint(payments.Right, deposits.Left);
             boundaries[3] = Midpoint(deposits.Right, bank.Left);
             boundaries[4] = Midpoint(Math.Max(bank.Right, fees.Right), balance.Left);
-            matches.Add(new HeaderMatch(
-                lineIndex,
-                new PdfHeader(boundaries, description.Left, line.CenterY)));
+            matches.Add(new HeaderMatch(lineIndex, new PdfHeader(boundaries, description.Left, line.CenterY)));
         }
+
         return matches;
     }
 
-    private static bool HeadersAreCompatible(
-        PdfHeader primary,
-        PdfHeader other,
-        IReadOnlyList<PdfLine> lines,
-        HashSet<int> headerLineIndices)
+    private static bool HeadersAreCompatible(PdfHeader primary,
+                                             PdfHeader other,
+                                             IReadOnlyList<PdfLine> lines,
+                                             HashSet<int> headerLineIndices)
     {
         if (!primary.IsCompatibleWith(other))
         {
             return false;
         }
 
-        var exact = primary.Boundaries
-            .Zip(other.Boundaries, (left, right) => Math.Abs(left - right) <= HeaderExactTolerance)
-            .All(value => value) &&
-            Math.Abs(primary.DescriptionLeft - other.DescriptionLeft) <= HeaderExactTolerance;
+        bool exact = primary.Boundaries.Zip(other.Boundaries, (left, right) => Math.Abs(left - right) <= HeaderExactTolerance).All(value => value) && Math.Abs(primary.DescriptionLeft - other.DescriptionLeft) <= HeaderExactTolerance;
         if (exact)
         {
             return true;
@@ -855,12 +785,13 @@ public static class StandardBankPdfParser
         // A tolerated shift is safe only when no word would change semantic
         // columns. Tolerance cannot change a flow direction or turn Balance
         // into a flow.
-        for (var lineIndex = 0; lineIndex < lines.Count; lineIndex++)
+        for (int lineIndex = 0; lineIndex < lines.Count; lineIndex++)
         {
             if (headerLineIndices.Contains(lineIndex))
             {
                 continue;
             }
+
             foreach (var word in lines[lineIndex].Words)
             {
                 if (ColumnOf(primary, word) != ColumnOf(other, word))
@@ -869,48 +800,44 @@ public static class StandardBankPdfParser
                 }
             }
         }
+
         return true;
     }
 
     private static int ColumnOf(PdfHeader header, PdfWord word)
     {
-        for (var column = 0; column < 6; column++)
+        for (int column = 0; column < 6; column++)
         {
-            var left = column == 0 ? 0 : header.Boundaries[column - 1];
-            var right = column == 5 ? double.PositiveInfinity : header.Boundaries[column];
+            double left = column == 0 ? 0 : header.Boundaries[column - 1];
+            double right = column == 5 ? double.PositiveInfinity : header.Boundaries[column];
             if (word.CenterX >= left && word.CenterX < right)
             {
                 return column;
             }
         }
+
         return -1;
     }
 
-    private static bool TryGetHeaderIndices(
-        IReadOnlyList<string> normalized,
-        out int dateIndex,
-        out int descriptionIndex,
-        out int paymentsIndex,
-        out int depositsIndex,
-        out int bankIndex,
-        out int feesIndex,
-        out int balanceIndex)
+    private static bool TryGetHeaderIndices(IReadOnlyList<string> normalized,
+                                            out int dateIndex,
+                                            out int descriptionIndex,
+                                            out int paymentsIndex,
+                                            out int depositsIndex,
+                                            out int bankIndex,
+                                            out int feesIndex,
+                                            out int balanceIndex)
     {
         dateIndex = descriptionIndex = paymentsIndex = depositsIndex = -1;
         bankIndex = feesIndex = balanceIndex = -1;
 
         if (normalized.Count == 7)
         {
-            if (normalized[0] != "date" ||
-                normalized[1] != "description" ||
-                normalized[2] != "payments" ||
-                normalized[3] != "deposits" ||
-                normalized[4] != "bank" ||
-                normalized[5] != "fees" ||
-                normalized[6] != "balance")
+            if (normalized[0] != "date" || normalized[1] != "description" || normalized[2] != "payments" || normalized[3] != "deposits" || normalized[4] != "bank" || normalized[5] != "fees" || normalized[6] != "balance")
             {
                 return false;
             }
+
             dateIndex = 0;
             descriptionIndex = 1;
             paymentsIndex = 2;
@@ -923,15 +850,11 @@ public static class StandardBankPdfParser
 
         if (normalized.Count == 6)
         {
-            if (normalized[0] != "date" ||
-                normalized[1] != "description" ||
-                normalized[2] != "payments" ||
-                normalized[3] != "deposits" ||
-                normalized[4] != "bankfees" ||
-                normalized[5] != "balance")
+            if (normalized[0] != "date" || normalized[1] != "description" || normalized[2] != "payments" || normalized[3] != "deposits" || normalized[4] != "bankfees" || normalized[5] != "balance")
             {
                 return false;
             }
+
             dateIndex = 0;
             descriptionIndex = 1;
             paymentsIndex = 2;
@@ -958,7 +881,11 @@ public static class StandardBankPdfParser
             CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
     }
 
-    private sealed record PdfWord(string Text, double Left, double Right, double Bottom, double Top)
+    private sealed record PdfWord(string Text,
+                                  double Left,
+                                  double Right,
+                                  double Bottom,
+                                  double Top)
     {
         public double CenterY => (Bottom + Top) / 2.0;
 
@@ -987,12 +914,11 @@ public static class StandardBankPdfParser
             {
                 return Text;
             }
-            var left = column == 0 ? 0 : header.Boundaries[column - 1];
-            var right = column == 5 ? double.MaxValue : header.Boundaries[column];
-            return string.Join(" ", _words
-                .Where(word => word.CenterX >= left && word.CenterX < right)
-                .OrderBy(word => word.Left)
-                .Select(word => word.Text));
+
+            double left = column == 0 ? 0 : header.Boundaries[column - 1];
+            double right = column == 5 ? double.MaxValue : header.Boundaries[column];
+
+            return string.Join(" ", _words.Where(word => word.CenterX >= left && word.CenterX < right).OrderBy(word => word.Left).Select(word => word.Text));
         }
     }
 
@@ -1000,8 +926,9 @@ public static class StandardBankPdfParser
     {
         public bool InColumn(PdfWord word, int column)
         {
-            var left = column == 0 ? 0 : Boundaries[column - 1];
-            var right = column == 5 ? double.MaxValue : Boundaries[column];
+            double left = column == 0 ? 0 : Boundaries[column - 1];
+            double right = column == 5 ? double.MaxValue : Boundaries[column];
+
             return word.CenterX >= left && word.CenterX < right;
         }
 
@@ -1038,17 +965,16 @@ public static class StandardBankPdfParser
         private readonly string _description;
         private readonly string[] _flows;
 
-        public PdfRowDraft(
-            int sourceLine,
-            int sourcePage,
-            string rawDate,
-            Match? dateMatch,
-            string description,
-            string[] flows,
-            double lineCenterY,
-            DateOnly? start,
-            DateOnly? end,
-            int? century)
+        public PdfRowDraft(int sourceLine,
+                           int sourcePage,
+                           string rawDate,
+                           Match? dateMatch,
+                           string description,
+                           string[] flows,
+                           double lineCenterY,
+                           DateOnly? start,
+                           DateOnly? end,
+                           int? century)
         {
             _sourceLine = sourceLine;
             _sourcePage = sourcePage;
@@ -1076,8 +1002,7 @@ public static class StandardBankPdfParser
         {
             var validation = new List<string>();
             var warnings = new List<string>();
-            var description = string.Join(" ", new[] { _description }.Concat(_continuations)
-                .Where(value => !string.IsNullOrWhiteSpace(value)));
+            string description = string.Join(" ", new[] { _description }.Concat(_continuations).Where(value => !string.IsNullOrWhiteSpace(value)));
             var (display, normalized, empty, tooLong) = StatementText.NormalizeDescription(description);
             if (empty)
             {
@@ -1095,17 +1020,16 @@ public static class StandardBankPdfParser
             }
             else
             {
-                var day = int.Parse(_dateMatch.Groups[1].Value, CultureInfo.InvariantCulture);
-                var month = ParseMonth(_dateMatch.Groups[2].Value);
-                var yearText = _dateMatch.Groups[3].Value;
+                int day = int.Parse(_dateMatch.Groups[1].Value, CultureInfo.InvariantCulture);
+                int? month = ParseMonth(_dateMatch.Groups[2].Value);
+                string yearText = _dateMatch.Groups[3].Value;
                 if (month is null)
                 {
                     validation.Add(ValidationCodes.InvalidDate);
                 }
                 else if (yearText.Length == 4)
                 {
-                    if (int.TryParse(yearText, out var year) && year is >= 1900 and <= 2099 &&
-                        day >= 1 && day <= DateTime.DaysInMonth(year, month.Value))
+                    if (int.TryParse(yearText, out int year) && year is >= 1900 and <= 2099 && day >= 1 && day <= DateTime.DaysInMonth(year, month.Value))
                     {
                         date = new DateOnly(year, month.Value, day);
                     }
@@ -1116,14 +1040,13 @@ public static class StandardBankPdfParser
                 }
                 else
                 {
-                    if (!int.TryParse(yearText, out var year2))
+                    if (!int.TryParse(yearText, out int year2))
                     {
                         validation.Add(ValidationCodes.InvalidDate);
                     }
                     else
                     {
-                        var (resolved, multiple) = StatementDates.Resolve(
-                            day, month.Value, year2, _start, _end, _century);
+                        var (resolved, multiple) = StatementDates.Resolve(day, month.Value, year2, _start, _end, _century);
                         date = resolved;
                         if (resolved is null)
                         {
@@ -1133,9 +1056,7 @@ public static class StandardBankPdfParser
                             }
                             else
                             {
-                                validation.Add(multiple
-                                    ? ValidationCodes.CenturyRequired
-                                    : ValidationCodes.InvalidDate);
+                                validation.Add(multiple ? ValidationCodes.CenturyRequired : ValidationCodes.InvalidDate);
                             }
                         }
                     }
@@ -1144,8 +1065,7 @@ public static class StandardBankPdfParser
 
             if (date is not null)
             {
-                if (_start is not null && _end is not null &&
-                    !StatementDates.InPeriod(date.Value, _start.Value, _end.Value))
+                if (_start is not null && _end is not null && !StatementDates.InPeriod(date.Value, _start.Value, _end.Value))
                 {
                     validation.Add(ValidationCodes.DateOutsidePeriod);
                 }
@@ -1155,9 +1075,7 @@ public static class StandardBankPdfParser
                 }
             }
 
-            var populated = _flows.Select((value, index) => (value, index))
-                .Where(entry => !string.IsNullOrWhiteSpace(entry.value))
-                .ToList();
+            var populated = _flows.Select((value, index) => (value, index)).Where(entry => !string.IsNullOrWhiteSpace(entry.value)).ToList();
             long? cents = null;
             string? rawAmount = null;
             if (populated.Count == 0)
@@ -1173,15 +1091,14 @@ public static class StandardBankPdfParser
             {
                 var (value, index) = populated[0];
                 rawAmount = value;
-                if (!StatementAmounts.TryParseMagnitude(value, ".", ",", out var magnitude,
-                        out var positive, out var negative))
+                if (!StatementAmounts.TryParseMagnitude(value, ".", ",", out long magnitude, out bool positive, out bool negative))
                 {
                     validation.Add(ValidationCodes.InvalidAmount);
                 }
                 else
                 {
-                    var isOutflow = index is 0 or 2;
-                    var expectedNegative = isOutflow;
+                    bool isOutflow = index is 0 or 2;
+                    bool expectedNegative = isOutflow;
                     if (magnitude == 0)
                     {
                         cents = 0;
@@ -1203,9 +1120,10 @@ public static class StandardBankPdfParser
                 ["description"] = display,
                 ["amount"] = rawAmount,
                 ["flow_column"] = populated.Count == 1
-                    ? FlowColumns[populated[0].index]
+                    ? _flowColumns[populated[0].index]
                     : null,
             };
+
             return new ParsedStatementRow(
                 Guid.NewGuid(),
                 _sourceLine,

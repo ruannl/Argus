@@ -25,8 +25,7 @@ import AccountReadUnavailable from "./account-read-unavailable";
 
 export const dynamic = "force-dynamic";
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 const ALLOWED_PARAMS = new Set([
@@ -117,11 +116,7 @@ function parseState(params: SearchParams): ParsedState {
     return invalid();
   }
 
-  for (const key of [
-    "financial_account_id",
-    "statement_import_id",
-    "category_id",
-  ] as const) {
+  for (const key of ["financial_account_id", "statement_import_id", "category_id"] as const) {
     const item = value(key);
     if (item !== undefined) {
       if (!isUuid(item)) {
@@ -237,9 +232,11 @@ export default async function TransactionsPage({
     }
     return (
       <AccountReadUnavailable
-        kind={error instanceof AccountReadError && error.kind === "rate_limited"
-          ? "rate_limited"
-          : "unavailable"}
+        kind={
+          error instanceof AccountReadError && error.kind === "rate_limited"
+            ? "rate_limited"
+            : "unavailable"
+        }
         view="list"
       />
     );

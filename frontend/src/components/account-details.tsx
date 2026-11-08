@@ -30,9 +30,7 @@ export default function AccountDetails({ account }: { account: CurrentAccount })
       </div>
       <div>
         <dt className="text-sm font-semibold text-muted">Lifetime access</dt>
-        <dd className="mt-1 text-base font-semibold text-ink">
-          {account.lifetime ? "Yes" : "No"}
-        </dd>
+        <dd className="mt-1 text-base font-semibold text-ink">{account.lifetime ? "Yes" : "No"}</dd>
       </div>
       <div>
         <dt className="text-sm font-semibold text-muted">Subscription started</dt>
@@ -48,9 +46,7 @@ export default function AccountDetails({ account }: { account: CurrentAccount })
       </div>
       <div>
         <dt className="text-sm font-semibold text-muted">Admin account</dt>
-        <dd className="mt-1 text-base font-semibold text-ink">
-          {account.admin ? "Yes" : "No"}
-        </dd>
+        <dd className="mt-1 text-base font-semibold text-ink">{account.admin ? "Yes" : "No"}</dd>
       </div>
     </dl>
   );

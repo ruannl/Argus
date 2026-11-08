@@ -35,7 +35,7 @@ public sealed class TransactionFaultTests
 
             // This deliberately produces a real PostgreSQL error whose
             // primary message contains a synthetic private-value canary.
-            using var connection = new NpgsqlConnection(
+            using NpgsqlConnection connection = new NpgsqlConnection(
                 Db.BuildConnectionString(TestEnvironment.RequireTestDatabaseUrl()));
             connection.Open();
             using var command = connection.CreateCommand();
@@ -47,7 +47,7 @@ public sealed class TransactionFaultTests
 
     private static HttpRequestMessage Post(string path, string json, string? session = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
         };
@@ -56,6 +56,7 @@ public sealed class TransactionFaultTests
         {
             request.Headers.Add(Brand.SessionHeader, session);
         }
+
         return request;
     }
 
@@ -81,84 +82,55 @@ public sealed class TransactionFaultTests
         factory.Mailer.Clear();
     }
 
-    private static async Task<string> NewSessionAsync(
-        KitFactory factory,
-        HttpClient client,
-        string email)
+    private static async Task<string> NewSessionAsync(KitFactory factory, HttpClient client, string email)
     {
-        var register = await client.SendAsync(Post(
-            "/v1/register", JsonSerializer.Serialize(new
-            {
-                email,
-                password = TestEnvironment.GoodPassword,
-            })));
+        var register = await client.SendAsync(Post("/v1/register", JsonSerializer.Serialize(new { email, password = TestEnvironment.GoodPassword, })));
         Assert.Equal(HttpStatusCode.Accepted, register.StatusCode);
         var verification = factory.Mailer.LastToken("verification", email);
         Assert.False(string.IsNullOrEmpty(verification));
-        var verify = await client.SendAsync(Post(
-            "/v1/verify", JsonSerializer.Serialize(new { token = verification })));
+        var verify = await client.SendAsync(Post("/v1/verify", JsonSerializer.Serialize(new { token = verification })));
         Assert.Equal(HttpStatusCode.OK, verify.StatusCode);
-        var login = await client.SendAsync(Post(
-            "/v1/login", JsonSerializer.Serialize(new
-            {
-                email,
-                password = TestEnvironment.GoodPassword,
-            })));
+        var login = await client.SendAsync(Post("/v1/login", JsonSerializer.Serialize(new { email, password = TestEnvironment.GoodPassword, })));
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+
         return (await BodyAsync(login)).GetProperty("token").GetString()!;
     }
 
-    private sealed record Workspace(
-        Guid CustomerId,
-        Guid AccountId,
-        Guid SourceCategoryId,
-        Guid TargetCategoryId,
-        Guid TagId,
-        Guid StatementId,
-        Guid RowId);
+    private sealed record Workspace(Guid CustomerId,
+                                    Guid AccountId,
+                                    Guid SourceCategoryId,
+                                    Guid TargetCategoryId,
+                                    Guid TagId,
+                                    Guid StatementId,
+                                    Guid RowId);
 
-    private static async Task<Workspace> SeedWorkspaceAsync(
-        KitFactory factory,
-        HttpClient client,
-        string session)
+    private static async Task<Workspace> SeedWorkspaceAsync(KitFactory factory, HttpClient client, string session)
     {
         var me = await client.SendAsync(Get("/v1/me", session));
         Assert.Equal(HttpStatusCode.OK, me.StatusCode);
         var customerId = (await BodyAsync(me)).GetProperty("id").GetGuid();
 
-        var accountResponse = await client.SendAsync(Post(
-            "/v1/finance/accounts",
-            JsonSerializer.Serialize(new { display_name = "Fault cheque" }),
-            session));
+        var accountResponse = await client.SendAsync(Post("/v1/finance/accounts", JsonSerializer.Serialize(new { display_name = "Fault cheque" }), session));
         Assert.Equal(HttpStatusCode.Created, accountResponse.StatusCode);
         var accountId = (await BodyAsync(accountResponse)).GetProperty("id").GetGuid();
 
         var categoriesResponse = await client.SendAsync(Get("/v1/finance/categories", session));
         Assert.Equal(HttpStatusCode.OK, categoriesResponse.StatusCode);
-        var categories = (await BodyAsync(categoriesResponse))
-            .GetProperty("categories").EnumerateArray().ToArray();
-        var sourceCategory = categories
-            .First(category => category.GetProperty("kind").GetString() == "Expense")
-            .GetProperty("id").GetGuid();
+        var categories = (await BodyAsync(categoriesResponse)).GetProperty("categories").EnumerateArray().ToArray();
+        var sourceCategory = categories.First(category => category.GetProperty("kind").GetString() == "Expense").GetProperty("id").GetGuid();
 
-        var targetResponse = await client.SendAsync(Post(
-            "/v1/finance/categories",
-            JsonSerializer.Serialize(new { display_name = "Fault target", kind = "Expense" }),
-            session));
+        var targetResponse = await client.SendAsync(Post("/v1/finance/categories", JsonSerializer.Serialize(new { display_name = "Fault target", kind = "Expense" }), session));
         Assert.Equal(HttpStatusCode.Created, targetResponse.StatusCode);
         var targetCategory = (await BodyAsync(targetResponse)).GetProperty("id").GetGuid();
 
-        var tagResponse = await client.SendAsync(Post(
-            "/v1/finance/merchant-tags",
-            JsonSerializer.Serialize(new { display_name = "Fault tag" }),
-            session));
+        var tagResponse = await client.SendAsync(Post("/v1/finance/merchant-tags", JsonSerializer.Serialize(new { display_name = "Fault tag" }), session));
         Assert.Equal(HttpStatusCode.Created, tagResponse.StatusCode);
         var tagId = (await BodyAsync(tagResponse)).GetProperty("id").GetGuid();
 
         var db = factory.CreateDb();
         await using var connection = await db.OpenAsync();
-        var statementId = Guid.NewGuid();
-        var rowId = Guid.NewGuid();
+        Guid statementId = Guid.NewGuid();
+        Guid rowId = Guid.NewGuid();
         await using (var statement = connection.CreateCommand())
         {
             statement.CommandText = """
@@ -198,23 +170,22 @@ public sealed class TransactionFaultTests
             await transaction.ExecuteNonQueryAsync();
         }
 
-        return new Workspace(
-            customerId, accountId, sourceCategory, targetCategory, tagId, statementId, rowId);
+        return new Workspace(customerId, accountId, sourceCategory, targetCategory, tagId, statementId, rowId);
     }
 
     private static HttpRequestMessage Get(string path, string session)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, path);
         request.Headers.Add(Brand.ApplicationSecretHeader, TestEnvironment.ApiSecret);
         request.Headers.Add(Brand.SessionHeader, session);
+
         return request;
     }
 
-    private static async Task<JsonElement> PrepareAsync(
-        HttpClient client,
-        string session,
-        Workspace workspace,
-        Guid operationId)
+    private static async Task<JsonElement> PrepareAsync(HttpClient client,
+                                                        string session,
+                                                        Workspace workspace,
+                                                        Guid operationId)
     {
         var response = await client.SendAsync(Post(
             "/v1/finance/transactions/operations/prepare",
@@ -237,13 +208,11 @@ public sealed class TransactionFaultTests
             }),
             session));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
         return await BodyAsync(response);
     }
 
-    private static HttpRequestMessage ApplyRequest(
-        Guid operationId,
-        JsonElement prepared,
-        string session) =>
+    private static HttpRequestMessage ApplyRequest(Guid operationId, JsonElement prepared, string session) =>
         Post(
             $"/v1/finance/transactions/operations/{operationId}/apply",
             JsonSerializer.Serialize(new
@@ -261,44 +230,34 @@ public sealed class TransactionFaultTests
     [InlineData(TransactionFaultPoints.BeforeReceiptWrite)]
     public async Task ApplyFaultLeavesNoDurableEffect(string faultPoint)
     {
-        using var factory = new KitFactory(null, new StepFaultInjector(faultPoint));
+        using KitFactory factory = new KitFactory(null, new StepFaultInjector(faultPoint));
         using var client = factory.CreateClient();
         await ResetAsync(factory);
         var session = await NewSessionAsync(factory, client, $"fault-{Guid.NewGuid():N}@example.test");
         var workspace = await SeedWorkspaceAsync(factory, client, session);
-        var operationId = Guid.NewGuid();
+        Guid operationId = Guid.NewGuid();
         var prepared = await PrepareAsync(client, session, workspace, operationId);
 
         var response = await client.SendAsync(ApplyRequest(operationId, prepared, session));
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
 
-        Assert.Equal(1, await ScalarAsync(
-            factory, $"SELECT version FROM transactions WHERE id = '{workspace.RowId}'"));
-        Assert.Equal(
-            workspace.SourceCategoryId,
-            await ScalarGuidAsync(
-                factory, $"SELECT category_id FROM transactions WHERE id = '{workspace.RowId}'"));
-        Assert.Equal(1L, await ScalarAsync(
-            factory, $"SELECT COUNT(*) FROM transaction_operation_items WHERE operation_id = '{operationId}'"));
-        Assert.Equal(0L, await ScalarAsync(
-            factory,
-            $"SELECT COUNT(*) FROM transaction_merchant_tags WHERE transaction_id = '{workspace.RowId}'"));
-        Assert.Equal("Prepared", await ScalarStringAsync(
-            factory, $"SELECT status FROM transaction_operations WHERE operation_id = '{operationId}'"));
-        Assert.Equal("Prepared", await ScalarStringAsync(
-            factory,
-            $"SELECT CASE WHEN applied_at IS NULL THEN 'Prepared' ELSE 'Applied' END FROM transaction_operations WHERE operation_id = '{operationId}'"));
+        Assert.Equal(1, await ScalarAsync(factory, $"SELECT version FROM transactions WHERE id = '{workspace.RowId}'"));
+        Assert.Equal(workspace.SourceCategoryId, await ScalarGuidAsync(factory, $"SELECT category_id FROM transactions WHERE id = '{workspace.RowId}'"));
+        Assert.Equal(1L, await ScalarAsync(factory, $"SELECT COUNT(*) FROM transaction_operation_items WHERE operation_id = '{operationId}'"));
+        Assert.Equal(0L, await ScalarAsync(factory, $"SELECT COUNT(*) FROM transaction_merchant_tags WHERE transaction_id = '{workspace.RowId}'"));
+        Assert.Equal("Prepared", await ScalarStringAsync(factory, $"SELECT status FROM transaction_operations WHERE operation_id = '{operationId}'"));
+        Assert.Equal("Prepared", await ScalarStringAsync(factory, $"SELECT CASE WHEN applied_at IS NULL THEN 'Prepared' ELSE 'Applied' END FROM transaction_operations WHERE operation_id = '{operationId}'"));
     }
 
     [Fact]
     public async Task FaultAfterReceiptWriteRollsBackAllMembersAndTheReceipt()
     {
-        using var factory = new KitFactory(null, new StepFaultInjector(TransactionFaultPoints.AfterReceiptWrite));
+        using KitFactory factory = new KitFactory(null, new StepFaultInjector(TransactionFaultPoints.AfterReceiptWrite));
         using var client = factory.CreateClient();
         await ResetAsync(factory);
         var session = await NewSessionAsync(factory, client, $"receipt-fault-{Guid.NewGuid():N}@example.test");
         var workspace = await SeedWorkspaceAsync(factory, client, session);
-        var secondRowId = Guid.NewGuid();
+        Guid secondRowId = Guid.NewGuid();
         var db = factory.CreateDb();
         await using (var connection = await db.OpenAsync())
         await using (var insert = connection.CreateCommand())
@@ -322,7 +281,7 @@ public sealed class TransactionFaultTests
             await insert.ExecuteNonQueryAsync();
         }
 
-        var operationId = Guid.NewGuid();
+        Guid operationId = Guid.NewGuid();
         var prepare = await client.SendAsync(Post(
             "/v1/finance/transactions/operations/prepare",
             JsonSerializer.Serialize(new
@@ -381,12 +340,12 @@ public sealed class TransactionFaultTests
     public async Task DatabaseExceptionDoesNotLeakSyntheticPrivateValueToResponseOrLogs()
     {
         const string canary = "synthetic-db-private-913712";
-        using var factory = new KitFactory(null, new DatabaseErrorInjector(canary));
+        using KitFactory factory = new KitFactory(null, new DatabaseErrorInjector(canary));
         using var client = factory.CreateClient();
         await ResetAsync(factory);
         var session = await NewSessionAsync(factory, client, $"db-error-{Guid.NewGuid():N}@example.test");
         var workspace = await SeedWorkspaceAsync(factory, client, session);
-        var operationId = Guid.NewGuid();
+        Guid operationId = Guid.NewGuid();
         var prepared = await PrepareAsync(client, session, workspace, operationId);
         factory.LogCapture.Clear();
 
@@ -398,22 +357,20 @@ public sealed class TransactionFaultTests
         Assert.True(factory.LogCapture.Contains("finance_operation_failed"));
         Assert.True(factory.LogCapture.Contains("22P02"));
         Assert.False(factory.LogCapture.Contains(canary));
-        Assert.Equal(1L, await ScalarAsync(factory,
-            $"SELECT version FROM transactions WHERE id = '{workspace.RowId}'"));
-        Assert.Equal("Prepared", await ScalarStringAsync(factory,
-            $"SELECT status FROM transaction_operations WHERE operation_id = '{operationId}'"));
+        Assert.Equal(1L, await ScalarAsync(factory, $"SELECT version FROM transactions WHERE id = '{workspace.RowId}'"));
+        Assert.Equal("Prepared", await ScalarStringAsync(factory, $"SELECT status FROM transaction_operations WHERE operation_id = '{operationId}'"));
     }
 
     [Fact]
     public async Task LostResponseAfterCommitReplaysAcrossANewHostWithoutRepeatEffects()
     {
-        var operationId = Guid.NewGuid();
+        Guid operationId = Guid.NewGuid();
         JsonElement prepared;
         Workspace workspace;
         string session;
         string email = $"lost-{Guid.NewGuid():N}@example.test";
 
-        using (var firstFactory = new KitFactory(
+        using (KitFactory firstFactory = new KitFactory(
                    null,
                    new StepFaultInjector(TransactionFaultPoints.AfterCommit)))
         {
@@ -426,20 +383,13 @@ public sealed class TransactionFaultTests
             var lost = await firstClient.SendAsync(ApplyRequest(operationId, prepared, session));
             Assert.Equal(HttpStatusCode.InternalServerError, lost.StatusCode);
 
-            Assert.Equal(2, await ScalarAsync(
-                firstFactory, $"SELECT version FROM transactions WHERE id = '{workspace.RowId}'"));
-            Assert.Equal(workspace.TargetCategoryId, await ScalarGuidAsync(
-                firstFactory,
-                $"SELECT category_id FROM transactions WHERE id = '{workspace.RowId}'"));
-            Assert.Equal("Applied", await ScalarStringAsync(
-                firstFactory,
-                $"SELECT status FROM transaction_operations WHERE operation_id = '{operationId}'"));
-            Assert.Equal(1L, await ScalarAsync(
-                firstFactory,
-                $"SELECT COUNT(*) FROM transaction_merchant_tags WHERE transaction_id = '{workspace.RowId}'"));
+            Assert.Equal(2, await ScalarAsync(firstFactory, $"SELECT version FROM transactions WHERE id = '{workspace.RowId}'"));
+            Assert.Equal(workspace.TargetCategoryId, await ScalarGuidAsync(firstFactory, $"SELECT category_id FROM transactions WHERE id = '{workspace.RowId}'"));
+            Assert.Equal("Applied", await ScalarStringAsync(firstFactory, $"SELECT status FROM transaction_operations WHERE operation_id = '{operationId}'"));
+            Assert.Equal(1L, await ScalarAsync(firstFactory, $"SELECT COUNT(*) FROM transaction_merchant_tags WHERE transaction_id = '{workspace.RowId}'"));
         }
 
-        using var secondFactory = new KitFactory();
+        using KitFactory secondFactory = new KitFactory();
         using var secondClient = secondFactory.CreateClient();
         var replay = await secondClient.SendAsync(ApplyRequest(operationId, prepared, session));
         Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
@@ -447,16 +397,11 @@ public sealed class TransactionFaultTests
         Assert.True(replayBody.GetProperty("replayed").GetBoolean());
         Assert.Equal("Applied", replayBody.GetProperty("status").GetString());
 
-        Assert.Equal(2, await ScalarAsync(
-            secondFactory, $"SELECT version FROM transactions WHERE id = '{workspace.RowId}'"));
-        Assert.Equal(1L, await ScalarAsync(
-            secondFactory,
-            $"SELECT COUNT(*) FROM transactions WHERE customer_id = '{workspace.CustomerId}' AND version = 2"));
-        Assert.Equal(0L, await ScalarAsync(
-            secondFactory,
-            $"SELECT COUNT(*) FROM transaction_operation_items WHERE operation_id = '{operationId}'"));
+        Assert.Equal(2, await ScalarAsync(secondFactory, $"SELECT version FROM transactions WHERE id = '{workspace.RowId}'"));
+        Assert.Equal(1L, await ScalarAsync(secondFactory, $"SELECT COUNT(*) FROM transactions WHERE customer_id = '{workspace.CustomerId}' AND version = 2"));
+        Assert.Equal(0L, await ScalarAsync(secondFactory, $"SELECT COUNT(*) FROM transaction_operation_items WHERE operation_id = '{operationId}'"));
 
-        using var delete = new HttpRequestMessage(
+        using HttpRequestMessage delete = new HttpRequestMessage(
             HttpMethod.Delete, $"/v1/finance/imports/{workspace.StatementId}")
         {
             Content = new StringContent(
@@ -496,8 +441,7 @@ public sealed class TransactionFaultTests
         var receiptAfterDelete = await BodyAsync(replayAfterDelete);
         Assert.True(receiptAfterDelete.GetProperty("replayed").GetBoolean());
         Assert.Equal(1, receiptAfterDelete.GetProperty("changed_count").GetInt32());
-        Assert.Equal(0L, await ScalarAsync(
-            secondFactory, $"SELECT COUNT(*) FROM transactions WHERE id = '{workspace.RowId}'"));
+        Assert.Equal(0L, await ScalarAsync(secondFactory, $"SELECT COUNT(*) FROM transactions WHERE id = '{workspace.RowId}'"));
     }
 
     private static async Task<long> ScalarAsync(KitFactory factory, string sql)
@@ -506,6 +450,7 @@ public sealed class TransactionFaultTests
         await using var connection = await db.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
+
         return Convert.ToInt64(await command.ExecuteScalarAsync());
     }
 
@@ -515,6 +460,7 @@ public sealed class TransactionFaultTests
         await using var connection = await db.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
+
         return (Guid)(await command.ExecuteScalarAsync())!;
     }
 
@@ -524,6 +470,7 @@ public sealed class TransactionFaultTests
         await using var connection = await db.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
+
         return await command.ExecuteScalarAsync() as string;
     }
 }

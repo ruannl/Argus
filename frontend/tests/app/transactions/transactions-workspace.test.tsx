@@ -261,9 +261,7 @@ describe("transactions workspace", () => {
     });
     await user.click(screen.getByRole("button", { name: "Next" }));
 
-    await waitFor(() =>
-      expect(screen.getByText(/1 transaction selected\./)).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText(/1 transaction selected\./)).toBeInTheDocument());
   });
 
   it("prepares and applies an explicit classification change with exact scope", async () => {
@@ -308,7 +306,9 @@ describe("transactions workspace", () => {
     await user.click(screen.getByRole("button", { name: "Apply change" }));
     expect(await screen.findByRole("heading", { name: "Applied receipt" })).toBeInTheDocument();
     expect(applyOperationAction).toHaveBeenCalledWith(prepared.operation_id, "hash", 1);
-    expect(screen.getByText(/1 changed, 0 already matched, 1 in the saved scope/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/1 changed, 0 already matched, 1 in the saved scope/),
+    ).toBeInTheDocument();
   });
 
   it("retains a late preparation for safe abandonment and releases busy state", async () => {
@@ -336,10 +336,14 @@ describe("transactions workspace", () => {
       resolvePrepare!({ ok: true, value: { operation: prepared, created: true } });
     });
 
-    expect(await screen.findByRole("heading", { name: "Recovered confirmation" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Recovered confirmation" }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Confirm this change" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Abandon and prepare again" })).toBeEnabled();
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(prepared.operation_id);
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      prepared.operation_id,
+    );
     await user.click(screen.getByRole("button", { name: "Abandon and prepare again" }));
     expect(abandonOperationAction).toHaveBeenCalledWith(prepared.operation_id);
     await screen.findByRole("heading", { name: "Operation abandoned" });
@@ -352,7 +356,9 @@ describe("transactions workspace", () => {
     const user = userEvent.setup();
     let resolvePrepare!: (value: Awaited<ReturnType<typeof prepareTransactionsAction>>) => void;
     vi.mocked(prepareTransactionsAction).mockReturnValueOnce(
-      new Promise((resolve) => { resolvePrepare = resolve; }),
+      new Promise((resolve) => {
+        resolvePrepare = resolve;
+      }),
     );
     renderWorkspace();
 
@@ -360,20 +366,26 @@ describe("transactions workspace", () => {
     await user.selectOptions(screen.getByLabelText("Set category"), "cat-2");
     await user.click(screen.getByRole("button", { name: "Review change" }));
     const originalInput = vi.mocked(prepareTransactionsAction).mock.calls[0][0];
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(originalInput.operation_id);
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      originalInput.operation_id,
+    );
 
     await user.click(screen.getByRole("button", { name: "Hidden" }));
     await act(async () => {
       resolvePrepare({ ok: false, kind: "unavailable", message: "Unavailable" });
     });
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(originalInput.operation_id);
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      originalInput.operation_id,
+    );
     vi.mocked(prepareTransactionsAction).mockResolvedValueOnce({
       ok: true,
       value: { operation: prepared, created: false },
     });
     await user.click(await screen.findByRole("button", { name: "Retry same preparation" }));
     expect(prepareTransactionsAction).toHaveBeenLastCalledWith(originalInput);
-    expect(await screen.findByRole("heading", { name: "Recovered confirmation" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Recovered confirmation" }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Apply change" })).not.toBeInTheDocument();
   });
 
@@ -395,8 +407,12 @@ describe("transactions workspace", () => {
     await user.click(screen.getByRole("button", { name: "Cancel and abandon" }));
 
     expect(await screen.findByRole("heading", { name: "Applied receipt" })).toBeInTheDocument();
-    expect(screen.queryByText(/Confirmation cancelled\. No transaction data changed/)).not.toBeInTheDocument();
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(prepared.operation_id);
+    expect(
+      screen.queryByText(/Confirmation cancelled\. No transaction data changed/),
+    ).not.toBeInTheDocument();
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      prepared.operation_id,
+    );
     await user.click(screen.getByRole("button", { name: "Dismiss receipt" }));
     expect(new URL(window.location.href).searchParams.has("operation_id")).toBe(false);
   });
@@ -404,12 +420,16 @@ describe("transactions workspace", () => {
   it("keeps the recovery id when reload status is unavailable", async () => {
     window.history.replaceState(null, "", `/transactions?operation_id=${prepared.operation_id}`);
     vi.mocked(loadOperationAction).mockResolvedValue({
-      ok: false, kind: "unavailable", message: "Status is unavailable.",
+      ok: false,
+      kind: "unavailable",
+      message: "Status is unavailable.",
     });
     renderWorkspace({ initialOperationId: prepared.operation_id });
 
     expect(await screen.findByText("Status is unavailable.")).toBeInTheDocument();
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(prepared.operation_id);
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      prepared.operation_id,
+    );
     expect(screen.getByRole("button", { name: "Check operation status" })).toBeInTheDocument();
   });
 
@@ -417,11 +437,18 @@ describe("transactions workspace", () => {
     const user = userEvent.setup();
     let resolveApply!: (value: Awaited<ReturnType<typeof applyOperationAction>>) => void;
     vi.mocked(prepareTransactionsAction).mockResolvedValue({
-      ok: true, value: { operation: prepared, created: true },
+      ok: true,
+      value: { operation: prepared, created: true },
     });
-    vi.mocked(applyOperationAction).mockReturnValue(new Promise((resolve) => { resolveApply = resolve; }));
+    vi.mocked(applyOperationAction).mockReturnValue(
+      new Promise((resolve) => {
+        resolveApply = resolve;
+      }),
+    );
     vi.mocked(loadOperationAction).mockResolvedValue({
-      ok: false, kind: "unavailable", message: "Status is unavailable.",
+      ok: false,
+      kind: "unavailable",
+      message: "Status is unavailable.",
     });
     const view = renderWorkspace();
     await user.click(screen.getByRole("checkbox", { name: /Select transaction Row one/ }));
@@ -430,30 +457,43 @@ describe("transactions workspace", () => {
     await screen.findByRole("heading", { name: "Confirm this change" });
     await user.click(screen.getByRole("button", { name: "Apply change" }));
     await user.click(screen.getByRole("button", { name: "Hidden" }));
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(prepared.operation_id);
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      prepared.operation_id,
+    );
     expect(new URL(window.location.href).searchParams.get("visibility")).toBe("hidden");
 
     await act(async () => {
       resolveApply({ ok: false, kind: "unavailable", message: "Apply unavailable." });
     });
     expect(await screen.findByText(/apply outcome is uncertain/i)).toBeInTheDocument();
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(prepared.operation_id);
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      prepared.operation_id,
+    );
     expect(new URL(window.location.href).searchParams.get("visibility")).toBe("hidden");
-    expect(vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility).toBe("hidden");
+    expect(vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility).toBe(
+      "hidden",
+    );
 
     view.unmount();
     renderWorkspace({ initialOperationId: prepared.operation_id });
     expect(await screen.findByText("Status is unavailable.")).toBeInTheDocument();
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(prepared.operation_id);
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      prepared.operation_id,
+    );
   });
 
   it("keeps the current filters when an older apply succeeds late", async () => {
     const user = userEvent.setup();
     let resolveApply!: (value: Awaited<ReturnType<typeof applyOperationAction>>) => void;
     vi.mocked(prepareTransactionsAction).mockResolvedValue({
-      ok: true, value: { operation: prepared, created: true },
+      ok: true,
+      value: { operation: prepared, created: true },
     });
-    vi.mocked(applyOperationAction).mockReturnValue(new Promise((resolve) => { resolveApply = resolve; }));
+    vi.mocked(applyOperationAction).mockReturnValue(
+      new Promise((resolve) => {
+        resolveApply = resolve;
+      }),
+    );
     renderWorkspace();
     await user.click(screen.getByRole("checkbox", { name: /Select transaction Row one/ }));
     await user.selectOptions(screen.getByLabelText("Set category"), "cat-2");
@@ -470,19 +510,27 @@ describe("transactions workspace", () => {
     });
     expect(await screen.findByRole("heading", { name: "Applied receipt" })).toBeInTheDocument();
     expect(new URL(window.location.href).searchParams.get("visibility")).toBe("hidden");
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(prepared.operation_id);
-    expect(vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility).toBe("hidden");
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      prepared.operation_id,
+    );
+    expect(vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility).toBe(
+      "hidden",
+    );
   });
 
   it("does not treat a missing recovery status as proof of cancellation", async () => {
     window.history.replaceState(null, "", `/transactions?operation_id=${prepared.operation_id}`);
     vi.mocked(loadOperationAction).mockResolvedValue({
-      ok: false, kind: "not_found", message: "Not found.",
+      ok: false,
+      kind: "not_found",
+      message: "Not found.",
     });
     renderWorkspace({ initialOperationId: prepared.operation_id });
 
     expect(await screen.findByText(/not found yet.*unresolved/i)).toBeInTheDocument();
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(prepared.operation_id);
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      prepared.operation_id,
+    );
     expect(abandonOperationAction).not.toHaveBeenCalled();
   });
 
@@ -491,7 +539,13 @@ describe("transactions workspace", () => {
     vi.mocked(prepareTransactionsAction).mockResolvedValue({
       ok: true,
       value: {
-        operation: { ...prepared, selection_mode: "all_matching", selected_count: 3, changed_count: 2, unchanged_count: 1 },
+        operation: {
+          ...prepared,
+          selection_mode: "all_matching",
+          selected_count: 3,
+          changed_count: 2,
+          unchanged_count: 1,
+        },
         created: true,
       },
     });
@@ -500,8 +554,12 @@ describe("transactions workspace", () => {
     await user.selectOptions(screen.getByLabelText("Set category"), "cat-2");
     await user.click(screen.getByRole("button", { name: "Review change" }));
 
-    expect(await screen.findByText(/3 transactions captured for this confirmation/)).toBeInTheDocument();
-    expect(screen.getByText(/earlier list showed 1.*saved scope now contains 3/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/3 transactions captured for this confirmation/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/earlier list showed 1.*saved scope now contains 3/i),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Captured filters: visibility: visible/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Apply change" })).toBeInTheDocument();
   });
@@ -509,10 +567,13 @@ describe("transactions workspace", () => {
   it("does not claim cancellation or discard recovery when abandon is unavailable", async () => {
     const user = userEvent.setup();
     vi.mocked(prepareTransactionsAction).mockResolvedValue({
-      ok: true, value: { operation: prepared, created: true },
+      ok: true,
+      value: { operation: prepared, created: true },
     });
     vi.mocked(abandonOperationAction).mockResolvedValue({
-      ok: false, kind: "unavailable", message: "Abandon unavailable.",
+      ok: false,
+      kind: "unavailable",
+      message: "Abandon unavailable.",
     });
     renderWorkspace();
     await user.click(screen.getByRole("checkbox", { name: /Select transaction Row one/ }));
@@ -523,8 +584,12 @@ describe("transactions workspace", () => {
 
     expect(await screen.findByText("Abandon unavailable.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Confirm this change" })).toBeInTheDocument();
-    expect(screen.queryByText(/Confirmation cancelled\. No transaction data changed/)).not.toBeInTheDocument();
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(prepared.operation_id);
+    expect(
+      screen.queryByText(/Confirmation cancelled\. No transaction data changed/),
+    ).not.toBeInTheDocument();
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      prepared.operation_id,
+    );
   });
 
   it.each(["Abandoned", "Expired"] as const)(
@@ -532,10 +597,12 @@ describe("transactions workspace", () => {
     async (status) => {
       const user = userEvent.setup();
       vi.mocked(prepareTransactionsAction).mockResolvedValue({
-        ok: true, value: { operation: prepared, created: true },
+        ok: true,
+        value: { operation: prepared, created: true },
       });
       vi.mocked(abandonOperationAction).mockResolvedValue({
-        ok: true, value: { ...abandoned, status },
+        ok: true,
+        value: { ...abandoned, status },
       });
       renderWorkspace();
       await user.click(screen.getByRole("checkbox", { name: /Select transaction Row one/ }));
@@ -544,8 +611,12 @@ describe("transactions workspace", () => {
       await screen.findByRole("heading", { name: "Confirm this change" });
       await user.click(screen.getByRole("button", { name: "Cancel and abandon" }));
 
-      expect(await screen.findByRole("heading", { name: `Operation ${status.toLowerCase()}` })).toBeInTheDocument();
-      expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(prepared.operation_id);
+      expect(
+        await screen.findByRole("heading", { name: `Operation ${status.toLowerCase()}` }),
+      ).toBeInTheDocument();
+      expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+        prepared.operation_id,
+      );
       await user.click(screen.getByRole("button", { name: "Acknowledge outcome" }));
       expect(new URL(window.location.href).searchParams.has("operation_id")).toBe(false);
     },
@@ -581,10 +652,7 @@ describe("transactions workspace", () => {
     expect(screen.getByText(/1 transaction selected\./)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Edit inline" }));
-    await user.selectOptions(
-      screen.getByLabelText("Inline category for Row one"),
-      "cat-2",
-    );
+    await user.selectOptions(screen.getByLabelText("Inline category for Row one"), "cat-2");
     await user.click(screen.getByRole("button", { name: "Save inline changes" }));
 
     expect(saveTransactionAction).toHaveBeenCalledWith({
@@ -615,15 +683,14 @@ describe("transactions workspace", () => {
     expect(coffeeOption.selected).toBe(true);
     expect(coffeeOption.isConnected).toBe(true);
 
-    await user.selectOptions(
-      screen.getByLabelText("Inline category for Row one"),
-      "cat-2",
-    );
+    await user.selectOptions(screen.getByLabelText("Inline category for Row one"), "cat-2");
     await user.click(screen.getByRole("button", { name: "Hidden" }));
     await screen.findByText(/version 2/);
 
     expect(screen.getByRole("button", { name: "Save inline changes" })).toBeDisabled();
-    expect(screen.getByRole("alert")).toHaveTextContent(/changed elsewhere while you were editing/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /changed elsewhere while you were editing/i,
+    );
     expect(saveTransactionAction).not.toHaveBeenCalled();
   });
 
@@ -680,14 +747,18 @@ describe("transactions workspace", () => {
 
     // The still-mounted inline draft is bound to version 1 and must not send
     // its old category with the refreshed row.
-    expect(screen.getByRole("alert")).toHaveTextContent(/changed elsewhere while you were editing/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /changed elsewhere while you were editing/i,
+    );
     const callsAfterDrawerSave = vi.mocked(saveTransactionAction).mock.calls.length;
 
     await user.click(within(dialog).getByRole("button", { name: "Close detail" }));
     await user.click(screen.getByRole("button", { name: "Close inline editor" }));
     await user.click(screen.getByRole("button", { name: "Edit inline" }));
 
-    const reopenedCategory = screen.getByLabelText("Inline category for Row one") as HTMLSelectElement;
+    const reopenedCategory = screen.getByLabelText(
+      "Inline category for Row one",
+    ) as HTMLSelectElement;
     expect(reopenedCategory.value).toBe("cat-2");
     await user.selectOptions(screen.getByLabelText("Add tags inline for Row one"), merchantTag.id);
     await user.click(screen.getByRole("button", { name: "Save inline changes" }));
@@ -720,7 +791,9 @@ describe("transactions workspace", () => {
     await user.click(screen.getByRole("button", { name: "Save inline changes" }));
 
     expect(
-      await screen.findByText(/changed while you were editing.*reopen it after the list refreshes/i),
+      await screen.findByText(
+        /changed while you were editing.*reopen it after the list refreshes/i,
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("Inline category for Row one")).not.toBeInTheDocument();
     await waitFor(() => expect(queryTransactionsAction).toHaveBeenCalled());
@@ -783,9 +856,7 @@ describe("transactions workspace", () => {
     await user.click(screen.getByRole("button", { name: /Row two/ }));
 
     const dialog = await screen.findByRole("dialog");
-    expect(
-      await within(dialog).findByRole("heading", { name: "Row two" }),
-    ).toBeInTheDocument();
+    expect(await within(dialog).findByRole("heading", { name: "Row two" })).toBeInTheDocument();
 
     await act(async () => {
       resolveFirst({ ok: true, value: detailFor(row) });
@@ -902,12 +973,14 @@ describe("transactions workspace", () => {
     await user.click(screen.getByRole("button", { name: "Hidden" }));
 
     expect(await screen.findByText(/0 transactions selected\./)).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: "Recovered confirmation" })).toBeInTheDocument();
-    expect(abandonOperationAction).not.toHaveBeenCalled();
     expect(
-      screen.queryByRole("heading", { name: "Confirm this change" }),
-    ).not.toBeInTheDocument();
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(prepared.operation_id);
+      await screen.findByRole("heading", { name: "Recovered confirmation" }),
+    ).toBeInTheDocument();
+    expect(abandonOperationAction).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "Confirm this change" })).not.toBeInTheDocument();
+    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
+      prepared.operation_id,
+    );
     await user.click(screen.getByRole("button", { name: "Abandon and prepare again" }));
     expect(abandonOperationAction).toHaveBeenCalledWith(prepared.operation_id);
   });
@@ -931,7 +1004,9 @@ describe("transactions workspace", () => {
     await user.click(screen.getByRole("button", { name: "Save inline changes" }));
 
     expect(
-      await screen.findByText(/changed while you were editing.*reopen it after the list refreshes/i),
+      await screen.findByText(
+        /changed while you were editing.*reopen it after the list refreshes/i,
+      ),
     ).toBeInTheDocument();
     expect(await screen.findByText("Query unavailable.")).toBeInTheDocument();
     expect(screen.queryByText(/has been refreshed/i)).not.toBeInTheDocument();
@@ -944,9 +1019,7 @@ describe("transactions workspace", () => {
 
     view.rerender(workspaceElement({ inventoryFailed: true, tags: [merchantTag] }));
 
-    expect(
-      screen.getByText(/did not load, so this editor is disabled/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/did not load, so this editor is disabled/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Inline category for/)).toBeDisabled();
     expect(screen.getByRole("button", { name: "Save inline changes" })).toBeDisabled();
   });
@@ -978,9 +1051,9 @@ describe("transactions workspace", () => {
     await user.click(screen.getByRole("button", { name: "Hidden" }));
 
     await waitFor(() =>
-      expect(
-        vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility,
-      ).toBe("hidden"),
+      expect(vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility).toBe(
+        "hidden",
+      ),
     );
 
     await act(async () => {
@@ -996,9 +1069,9 @@ describe("transactions workspace", () => {
     });
 
     await waitFor(() =>
-      expect(
-        vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility,
-      ).toBe("hidden"),
+      expect(vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility).toBe(
+        "hidden",
+      ),
     );
   });
 
@@ -1035,9 +1108,9 @@ describe("transactions workspace", () => {
     await user.click(screen.getByRole("button", { name: "Hidden" }));
 
     await waitFor(() =>
-      expect(
-        vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility,
-      ).toBe("hidden"),
+      expect(vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility).toBe(
+        "hidden",
+      ),
     );
 
     await act(async () => {
@@ -1053,9 +1126,9 @@ describe("transactions workspace", () => {
     });
 
     await waitFor(() =>
-      expect(
-        vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility,
-      ).toBe("hidden"),
+      expect(vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility).toBe(
+        "hidden",
+      ),
     );
   });
 
@@ -1136,7 +1209,9 @@ describe("transactions workspace", () => {
       resolveStatusA({ ok: true, value: operationA });
     });
 
-    expect(screen.queryByRole("heading", { name: "Recovered confirmation" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Recovered confirmation" }),
+    ).not.toBeInTheDocument();
     expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
       operationB.operation_id,
     );

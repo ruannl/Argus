@@ -1,5 +1,5 @@
-using System.Net.Http.Headers;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using argus.Server.Configuration;
 
@@ -7,22 +7,17 @@ namespace argus.Server.Mail;
 
 public interface IMailer
 {
-    Task SendVerificationAsync(
-        string recipient,
-        string rawToken,
-        string frontendUrl,
-        CancellationToken cancellationToken = default);
+    Task SendVerificationAsync(string recipient,
+                               string rawToken,
+                               string frontendUrl,
+                               CancellationToken cancellationToken = default);
 
-    Task SendPasswordResetAsync(
-        string recipient,
-        string rawToken,
-        string frontendUrl,
-        CancellationToken cancellationToken = default);
+    Task SendPasswordResetAsync(string recipient,
+                                string rawToken,
+                                string frontendUrl,
+                                CancellationToken cancellationToken = default);
 
-    Task SendAlreadyRegisteredAsync(
-        string recipient,
-        string frontendUrl,
-        CancellationToken cancellationToken = default);
+    Task SendAlreadyRegisteredAsync(string recipient, string frontendUrl, CancellationToken cancellationToken = default);
 
     Task SendSuspiciousLoginAsync(string recipient, CancellationToken cancellationToken = default);
 }
@@ -40,15 +35,15 @@ public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> log
     private const int AntiEnumerationPadMs = 750;
     private const int NetworkTimeoutMs = 2000;
 
-    private static readonly HttpClient Client = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private static readonly HttpClient _client = new() { Timeout = Timeout.InfiniteTimeSpan };
 
-    public Task SendVerificationAsync(
-        string recipient,
-        string rawToken,
-        string frontendUrl,
-        CancellationToken cancellationToken = default)
+    public Task SendVerificationAsync(string recipient,
+                                      string rawToken,
+                                      string frontendUrl,
+                                      CancellationToken cancellationToken = default)
     {
-        var link = $"{frontendUrl.TrimEnd('/')}/verify?token={Uri.EscapeDataString(rawToken)}";
+        string link = $"{frontendUrl.TrimEnd('/')}/verify?token={Uri.EscapeDataString(rawToken)}";
+
         return SendAsync(
             recipient,
             "Verify your email address",
@@ -57,13 +52,13 @@ public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> log
             cancellationToken);
     }
 
-    public Task SendPasswordResetAsync(
-        string recipient,
-        string rawToken,
-        string frontendUrl,
-        CancellationToken cancellationToken = default)
+    public Task SendPasswordResetAsync(string recipient,
+                                       string rawToken,
+                                       string frontendUrl,
+                                       CancellationToken cancellationToken = default)
     {
-        var link = $"{frontendUrl.TrimEnd('/')}/reset?token={Uri.EscapeDataString(rawToken)}";
+        string link = $"{frontendUrl.TrimEnd('/')}/reset?token={Uri.EscapeDataString(rawToken)}";
+
         return SendAsync(
             recipient,
             "Reset your password",
@@ -72,12 +67,10 @@ public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> log
             cancellationToken);
     }
 
-    public Task SendAlreadyRegisteredAsync(
-        string recipient,
-        string frontendUrl,
-        CancellationToken cancellationToken = default)
+    public Task SendAlreadyRegisteredAsync(string recipient, string frontendUrl, CancellationToken cancellationToken = default)
     {
-        var link = $"{frontendUrl.TrimEnd('/')}/login";
+        string link = $"{frontendUrl.TrimEnd('/')}/login";
+
         return SendAsync(
             recipient,
             "Your account is already set up",
@@ -96,24 +89,16 @@ public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> log
             cancellationToken);
     }
 
-    private async Task SendAsync(
-        string recipient,
-        string subject,
-        string text,
-        string html,
-        CancellationToken cancellationToken)
+    private async Task SendAsync(string recipient,
+                                 string subject,
+                                 string text,
+                                 string html,
+                                 CancellationToken cancellationToken)
     {
         var pad = Task.Delay(AntiEnumerationPadMs, CancellationToken.None);
         try
         {
-            var payload = System.Text.Json.JsonSerializer.Serialize(new
-            {
-                from = settings.ResendFrom,
-                to = new[] { recipient },
-                subject,
-                text,
-                html,
-            });
+            string payload = System.Text.Json.JsonSerializer.Serialize(new { from = settings.ResendFrom, to = new[] { recipient }, subject, text, html, });
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(NetworkTimeoutMs);
@@ -124,13 +109,10 @@ public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> log
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ResendApiKey);
 
-            using var response = await Client.SendAsync(request, timeout.Token);
+            using var response = await _client.SendAsync(request, timeout.Token);
             if (!response.IsSuccessStatusCode)
             {
-                logger.LogWarning(
-                    "mailer.resend_rejected status={Status} recipient={Recipient}",
-                    (int)response.StatusCode,
-                    recipient);
+                logger.LogWarning("mailer.resend_rejected status={Status} recipient={Recipient}", (int)response.StatusCode, recipient);
             }
         }
         catch (Exception exception)

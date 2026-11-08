@@ -4,19 +4,18 @@ using Npgsql;
 
 namespace argus.Server.Data;
 
-public sealed record CustomerRecord(
-    Guid Id,
-    string CanonicalEmail,
-    string PasswordHash,
-    DateTime? EmailVerifiedAt,
-    DateTime? SubscriberActivatedAt,
-    DateTime? NextBillingAt,
-    bool IsLifetime,
-    bool IsAdmin,
-    DateTime CreatedAt,
-    DateTime UpdatedAt,
-    int FailedLoginCount,
-    DateTime? LockedUntil);
+public sealed record CustomerRecord(Guid Id,
+                                    string CanonicalEmail,
+                                    string PasswordHash,
+                                    DateTime? EmailVerifiedAt,
+                                    DateTime? SubscriberActivatedAt,
+                                    DateTime? NextBillingAt,
+                                    bool IsLifetime,
+                                    bool IsAdmin,
+                                    DateTime CreatedAt,
+                                    DateTime UpdatedAt,
+                                    int FailedLoginCount,
+                                    DateTime? LockedUntil);
 
 public abstract record ResetRequestOutcome
 {
@@ -32,11 +31,9 @@ public abstract record ResetRequestOutcome
 public sealed class Db
 {
     private readonly string _connectionString;
-    private readonly string _databaseUrl;
 
     public Db(string databaseUrl)
     {
-        _databaseUrl = databaseUrl;
         _connectionString = BuildConnectionString(databaseUrl);
     }
 
@@ -44,24 +41,23 @@ public sealed class Db
 
     public async Task<NpgsqlConnection> OpenAsync(CancellationToken cancellationToken = default)
     {
-        var connection = Connect();
+        NpgsqlConnection connection = Connect();
         await connection.OpenAsync(cancellationToken);
+
         return connection;
     }
 
     public async Task MigrateAsync(CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken);
+        await using NpgsqlConnection connection = await OpenAsync(cancellationToken);
 
-        await using (var create = connection.CreateCommand())
+        await using (NpgsqlCommand create = connection.CreateCommand())
         {
-            create.CommandText =
-                "CREATE TABLE IF NOT EXISTS schema_migrations (" +
-                "name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())";
+            create.CommandText = "CREATE TABLE IF NOT EXISTS schema_migrations (" + "name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())";
             await create.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        foreach (var (name, sql) in Migrations.All)
+        foreach ((string? name, string? sql) in Migrations.All)
         {
             await using (var check = connection.CreateCommand())
             {
@@ -99,9 +95,7 @@ public sealed class Db
     /// allocates deterministic occurrence slots without dropping data. The
     /// marker makes the operation idempotent across restarts.
     /// </summary>
-    public static async Task BackfillCanonicalIdentitiesAsync(
-        NpgsqlConnection connection,
-        CancellationToken cancellationToken = default)
+    public static async Task BackfillCanonicalIdentitiesAsync(NpgsqlConnection connection, CancellationToken cancellationToken = default)
     {
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
@@ -143,17 +137,9 @@ public sealed class Db
             while (await reader.ReadAsync(cancellationToken))
             {
                 var date = reader.GetFieldValue<DateOnly>(3);
-                var cents = reader.GetInt64(4);
-                var normalized = reader.GetString(5);
-                transactions.Add(new BackfillTransaction(
-                    reader.GetGuid(0),
-                    reader.GetGuid(1),
-                    reader.GetGuid(2),
-                    date,
-                    cents,
-                    normalized,
-                    StatementIdentity.ComputeIdentityKey(date, cents, normalized),
-                    reader.GetFieldValue<DateTime>(6)));
+                long cents = reader.GetInt64(4);
+                string normalized = reader.GetString(5);
+                transactions.Add(new BackfillTransaction(reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2), date, cents, normalized, StatementIdentity.ComputeIdentityKey(date, cents, normalized), reader.GetFieldValue<DateTime>(6)));
             }
         }
 
@@ -175,7 +161,7 @@ public sealed class Db
         foreach (var group in transactions.GroupBy(
                      row => (row.CustomerId, row.AccountId, row.IdentityKey)))
         {
-            var occurrence = 1;
+            int occurrence = 1;
             foreach (var row in group.OrderBy(row => row.CreatedAt).ThenBy(row => row.Id))
             {
                 await using var update = connection.CreateCommand();
@@ -207,14 +193,7 @@ public sealed class Db
             await using var reader = await select.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                statements.Add(new BackfillStatement(
-                    reader.GetGuid(0),
-                    reader.GetGuid(1),
-                    reader.GetGuid(2),
-                    reader.GetFieldValue<DateOnly>(3),
-                    reader.GetFieldValue<DateOnly>(4),
-                    reader.GetFieldValue<DateTime>(5),
-                    []));
+                statements.Add(new BackfillStatement(reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2), reader.GetFieldValue<DateOnly>(3), reader.GetFieldValue<DateOnly>(4), reader.GetFieldValue<DateTime>(5), []));
             }
         }
 
@@ -236,10 +215,11 @@ public sealed class Db
                 {
                     continue;
                 }
+
                 var date = reader.GetFieldValue<DateOnly>(2);
-                var cents = reader.GetInt64(5);
-                var description = reader.GetString(3);
-                var normalized = reader.GetString(4);
+                long cents = reader.GetInt64(5);
+                string description = reader.GetString(3);
+                string normalized = reader.GetString(4);
                 statement.Rows.Add(new ParsedStatementRow(
                     reader.GetGuid(1),
                     reader.IsDBNull(7) ? 1 : reader.GetInt32(7),
@@ -264,8 +244,7 @@ public sealed class Db
 
         foreach (var statement in statements)
         {
-            statement.Fingerprint = StatementIdentity.ComputeStatementFingerprint(
-                statement.Rows, statement.StartDate, statement.EndDate);
+            statement.Fingerprint = StatementIdentity.ComputeStatementFingerprint(statement.Rows, statement.StartDate, statement.EndDate);
         }
 
         await using (var stage = connection.CreateCommand())
@@ -282,7 +261,7 @@ public sealed class Db
         foreach (var group in statements.GroupBy(
                      statement => (statement.CustomerId, statement.AccountId, statement.Fingerprint)))
         {
-            var occurrence = 1;
+            int occurrence = 1;
             foreach (var statement in group.OrderBy(item => item.CreatedAt).ThenBy(item => item.Id))
             {
                 await using var update = connection.CreateCommand();
@@ -304,23 +283,21 @@ public sealed class Db
         await using (var marker = connection.CreateCommand())
         {
             marker.Transaction = transaction;
-            marker.CommandText =
-                "INSERT INTO data_migrations (name) VALUES ('0006_canonical_identity_backfill')";
+            marker.CommandText = "INSERT INTO data_migrations (name) VALUES ('0006_canonical_identity_backfill')";
             await marker.ExecuteNonQueryAsync(cancellationToken);
         }
 
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private sealed class BackfillTransaction(
-        Guid id,
-        Guid customerId,
-        Guid accountId,
-        DateOnly date,
-        long cents,
-        string normalized,
-        string identityKey,
-        DateTime createdAt)
+    private sealed class BackfillTransaction(Guid id,
+                                             Guid customerId,
+                                             Guid accountId,
+                                             DateOnly date,
+                                             long cents,
+                                             string normalized,
+                                             string identityKey,
+                                             DateTime createdAt)
     {
         public Guid Id { get; } = id;
         public Guid CustomerId { get; } = customerId;
@@ -332,14 +309,13 @@ public sealed class Db
         public DateTime CreatedAt { get; } = createdAt;
     }
 
-    private sealed class BackfillStatement(
-        Guid id,
-        Guid customerId,
-        Guid accountId,
-        DateOnly startDate,
-        DateOnly endDate,
-        DateTime createdAt,
-        List<ParsedStatementRow> rows)
+    private sealed class BackfillStatement(Guid id,
+                                           Guid customerId,
+                                           Guid accountId,
+                                           DateOnly startDate,
+                                           DateOnly endDate,
+                                           DateTime createdAt,
+                                           List<ParsedStatementRow> rows)
     {
         public Guid Id { get; } = id;
         public Guid CustomerId { get; } = customerId;
@@ -367,7 +343,7 @@ public sealed class Db
 
         if (!string.IsNullOrEmpty(uri.UserInfo))
         {
-            var parts = uri.UserInfo.Split(':', 2);
+            string[] parts = uri.UserInfo.Split(':', 2);
             builder.Username = Uri.UnescapeDataString(parts[0]);
             if (parts.Length == 2)
             {
@@ -375,7 +351,7 @@ public sealed class Db
             }
         }
 
-        var sslmode = QueryValue(uri.Query, "sslmode");
+        string? sslmode = QueryValue(uri.Query, "sslmode");
         if (sslmode is not null)
         {
             builder.SslMode = sslmode switch
@@ -394,18 +370,20 @@ public sealed class Db
 
     private static string? QueryValue(string query, string name)
     {
-        foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        foreach (string pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
-            var separator = pair.IndexOf('=');
+            int separator = pair.IndexOf('=');
             if (separator <= 0)
             {
                 continue;
             }
+
             if (pair[..separator].Equals(name, StringComparison.OrdinalIgnoreCase))
             {
                 return Uri.UnescapeDataString(pair[(separator + 1)..]).ToLowerInvariant();
             }
         }
+
         return null;
     }
 }

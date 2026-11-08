@@ -133,8 +133,8 @@ export default function AccountsSection({ accounts }: { accounts: FinancialAccou
         Accounts
       </h2>
       <p className="mt-3 max-w-2xl text-base leading-7 text-muted">
-        Bank and credit-card accounts you import statements from. Every account uses the fixed
-        ZAR workspace currency. Accounts are archived, never deleted.
+        Bank and credit-card accounts you import statements from. Every account uses the fixed ZAR
+        workspace currency. Accounts are archived, never deleted.
       </p>
 
       <form

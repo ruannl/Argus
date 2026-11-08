@@ -67,16 +67,21 @@ describe("pinned Auth.js composition", () => {
     vi.stubEnv("ARGUS_BACKEND_URL", "http://backend.test/");
     vi.stubEnv("ARGUS_API_SECRET", "application-secret");
     vi.stubEnv("ARGUS_FRONTEND_URL", "http://frontend.test");
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({
-      id: "account-id",
-      email: "customer@example.test",
-      email_verified: true,
-      subscriber_active: true,
-      subscription_started_at: "2030-01-01T00:00:00Z",
-      next_billing_at: null,
-      lifetime: false,
-      admin: false,
-    }), { status: 200 }));
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "account-id",
+          email: "customer@example.test",
+          email_verified: true,
+          subscriber_active: true,
+          subscription_started_at: "2030-01-01T00:00:00Z",
+          next_billing_at: null,
+          lifetime: false,
+          admin: false,
+        }),
+        { status: 200 },
+      ),
+    );
 
     const session = await auth();
     expect(session?.user?.backendToken).toBe("backend-token");
@@ -89,10 +94,11 @@ describe("pinned Auth.js composition", () => {
   });
 
   it("does not leak backend credentials through the public session handler", async () => {
-    const response = await handlers.GET(new NextRequest(
-      "http://127.0.0.1:3000/api/auth/session",
-      { headers: { cookie: await sessionCookie() } },
-    ));
+    const response = await handlers.GET(
+      new NextRequest("http://127.0.0.1:3000/api/auth/session", {
+        headers: { cookie: await sessionCookie() },
+      }),
+    );
     const text = await response.text();
 
     expect(text).not.toContain("backend-token");

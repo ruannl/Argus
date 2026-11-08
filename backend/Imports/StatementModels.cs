@@ -108,32 +108,30 @@ public sealed record ParserConfig
     public bool IsGeneric => string.Equals(Format, "generic", StringComparison.Ordinal);
 }
 
-public sealed record ParsedStatementRow(
-    Guid RowId,
-    int SourceLine,
-    int? SourcePage,
-    int SourceRowNumber,
-    IReadOnlyDictionary<string, string?> RawValues,
-    DateOnly? TransactionDate,
-    string Description,
-    string NormalizedDescription,
-    long? AmountCents,
-    IReadOnlyList<string> ValidationCodes,
-    IReadOnlyList<string> Warnings,
-    string? SourceIdNamespace,
-    string? SourceIdValue)
+public sealed record ParsedStatementRow(Guid RowId,
+                                        int SourceLine,
+                                        int? SourcePage,
+                                        int SourceRowNumber,
+                                        IReadOnlyDictionary<string, string?> RawValues,
+                                        DateOnly? TransactionDate,
+                                        string Description,
+                                        string NormalizedDescription,
+                                        long? AmountCents,
+                                        IReadOnlyList<string> ValidationCodes,
+                                        IReadOnlyList<string> Warnings,
+                                        string? SourceIdNamespace,
+                                        string? SourceIdValue)
 {
     public bool IsValid => ValidationCodes.Count == 0;
 }
 
-public sealed record ParsedStatement(
-    StatementFormat Format,
-    IReadOnlyList<ParsedStatementRow> Rows,
-    DateOnly? ProposedStartDate,
-    DateOnly? ProposedEndDate,
-    IReadOnlyDictionary<string, string> MappingSuggestions,
-    IReadOnlyList<string> RequiredConfirmations,
-    IReadOnlyList<string> Warnings)
+public sealed record ParsedStatement(StatementFormat Format,
+                                     IReadOnlyList<ParsedStatementRow> Rows,
+                                     DateOnly? ProposedStartDate,
+                                     DateOnly? ProposedEndDate,
+                                     IReadOnlyDictionary<string, string> MappingSuggestions,
+                                     IReadOnlyList<string> RequiredConfirmations,
+                                     IReadOnlyList<string> Warnings)
 {
     public string SourceType => Format switch
     {

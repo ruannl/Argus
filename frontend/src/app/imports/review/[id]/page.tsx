@@ -4,11 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import AppShell from "@/components/app-shell";
 import WorkspaceExpired from "@/components/workspace-expired";
-import {
-  getCurrentAccount,
-  getImportReview,
-  listMerchantTags,
-} from "@/lib/server/backend-client";
+import { getCurrentAccount, getImportReview, listMerchantTags } from "@/lib/server/backend-client";
 import type { ImportErrorKind } from "@/lib/server/backend-client";
 import ReviewWorkspace from "./review-workspace";
 

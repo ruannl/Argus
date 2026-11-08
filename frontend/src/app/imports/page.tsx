@@ -27,10 +27,7 @@ type ImportsData = {
   nextCursor: string | null;
 };
 
-async function loadImportsData(
-  backendToken: string,
-  cursor?: string,
-): Promise<ImportsData> {
+async function loadImportsData(backendToken: string, cursor?: string): Promise<ImportsData> {
   const [accounts, reviews, history] = await Promise.all([
     listFinancialAccounts(backendToken),
     listOpenImportReviews(backendToken),
@@ -54,13 +51,7 @@ async function loadImportsData(
   };
 }
 
-function ImportsWorkspace({
-  account,
-  data,
-}: {
-  account: CurrentAccount;
-  data: ImportsData;
-}) {
+function ImportsWorkspace({ account, data }: { account: CurrentAccount; data: ImportsData }) {
   return (
     <AppShell
       account={account}

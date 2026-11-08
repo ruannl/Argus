@@ -1,6 +1,6 @@
-using Npgsql;
 using argus.Server.Data;
 using argus.Server.Imports;
+using Npgsql;
 
 namespace argus.Server.Tests;
 
@@ -24,9 +24,7 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
 
             await using (var use = connection.CreateCommand())
             {
-                use.CommandText =
-                    $"SET search_path TO {schema}; " +
-                    "CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());";
+                use.CommandText = $"SET search_path TO {schema}; " + "CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());";
                 await use.ExecuteNonQueryAsync();
             }
 
@@ -37,12 +35,12 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
                 await apply.ExecuteNonQueryAsync();
             }
 
-            var customerId = Guid.NewGuid();
-            var accountId = Guid.NewGuid();
-            var categoryId = Guid.NewGuid();
-            var statementId = Guid.NewGuid();
-            var transactionId = Guid.NewGuid();
-            var tagId = Guid.NewGuid();
+            Guid customerId = Guid.NewGuid();
+            Guid accountId = Guid.NewGuid();
+            Guid categoryId = Guid.NewGuid();
+            Guid statementId = Guid.NewGuid();
+            Guid transactionId = Guid.NewGuid();
+            Guid tagId = Guid.NewGuid();
             await using (var seed = connection.CreateCommand())
             {
                 seed.CommandText = $"""
@@ -81,10 +79,8 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
             }
             await Db.BackfillCanonicalIdentitiesAsync(connection);
 
-            var canonicalKey = StatementIdentity.ComputeIdentityKey(
-                new DateOnly(2025, 1, 5), -1234, "migration row");
-            var storedKey = (string)(await ScalarAsync(
-                connection, "SELECT identity_key FROM transactions"))!;
+            var canonicalKey = StatementIdentity.ComputeIdentityKey(new DateOnly(2025, 1, 5), -1234, "migration row");
+            var storedKey = (string)(await ScalarAsync(connection, "SELECT identity_key FROM transactions"))!;
             Assert.Equal(canonicalKey, storedKey);
             var expectedFingerprint = StatementIdentity.ComputeStatementFingerprint(
                 [
@@ -110,8 +106,7 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
                 ],
                 new DateOnly(2025, 1, 1),
                 new DateOnly(2025, 1, 31));
-            Assert.Equal(expectedFingerprint, (string)(await ScalarAsync(
-                connection, "SELECT statement_fingerprint FROM statement_imports"))!);
+            Assert.Equal(expectedFingerprint, (string)(await ScalarAsync(connection, "SELECT statement_fingerprint FROM statement_imports"))!);
 
             Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM transactions")));
             Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM statement_imports")));
@@ -119,8 +114,7 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
             Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT identity_version FROM transactions")));
             Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT occurrence_index FROM transactions")));
             Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT fingerprint_occurrence FROM statement_imports")));
-            Assert.Equal(customerId, (Guid)(await ScalarAsync(connection,
-                "SELECT customer_id FROM transaction_merchant_tags"))!);
+            Assert.Equal(customerId, (Guid)(await ScalarAsync(connection, "SELECT customer_id FROM transaction_merchant_tags"))!);
 
             // A second row with the same fallback identity and occurrence must
             // violate the new uniqueness constraint.
@@ -137,8 +131,8 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
             Assert.Equal(PostgresErrorCodes.UniqueViolation, (await duplicate).SqlState);
 
             // A tag link with a foreign owner is rejected by the composite FK.
-            var foreignOwner = Guid.NewGuid();
-            var foreignTagId = Guid.NewGuid();
+            Guid foreignOwner = Guid.NewGuid();
+            Guid foreignTagId = Guid.NewGuid();
             await ExecuteAsync(connection, $"""
                 INSERT INTO customers (id, canonical_email, password_hash, created_at, updated_at)
                 VALUES ('{foreignOwner}', 'foreign-migration@example.test', 'hash', NOW(), NOW());
@@ -163,6 +157,7 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
+
         return await command.ExecuteScalarAsync();
     }
 

@@ -67,6 +67,8 @@ describe("verification confirm control", () => {
     resolveFirst({ ok: true, message: "Your email is verified. You can sign in." });
     await firstClick;
     expect(await screen.findByText("Your email is verified. You can sign in.")).toBeInTheDocument();
-    expect(screen.queryByText("This verification link is invalid or has expired.")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("This verification link is invalid or has expired."),
+    ).not.toBeInTheDocument();
   });
 });

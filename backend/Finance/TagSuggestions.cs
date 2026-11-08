@@ -7,17 +7,14 @@ namespace argus.Server.Finance;
 /// </summary>
 public static class TagSuggestions
 {
-    public static IEnumerable<Guid> Match(
-        string normalizedDescription,
-        IReadOnlyList<(Guid Id, string[] Tokens)> tags)
+    public static IEnumerable<Guid> Match(string normalizedDescription, IReadOnlyList<(Guid Id, string[] Tokens)> tags)
     {
         if (string.IsNullOrWhiteSpace(normalizedDescription))
         {
             yield break;
         }
 
-        var descriptionTokens = normalizedDescription.Split(
-            ' ', StringSplitOptions.RemoveEmptyEntries);
+        string[] descriptionTokens = normalizedDescription.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         foreach (var (id, tagTokens) in tags)
         {
             if (tagTokens.Length == 0 || tagTokens.Length > descriptionTokens.Length)
@@ -25,15 +22,13 @@ public static class TagSuggestions
                 continue;
             }
 
-            var found = false;
-            for (var start = 0; start <= descriptionTokens.Length - tagTokens.Length; start++)
+            bool found = false;
+            for (int start = 0; start <= descriptionTokens.Length - tagTokens.Length; start++)
             {
-                var match = true;
-                for (var offset = 0; offset < tagTokens.Length; offset++)
+                bool match = true;
+                for (int offset = 0; offset < tagTokens.Length; offset++)
                 {
-                    if (!string.Equals(
-                            descriptionTokens[start + offset], tagTokens[offset],
-                            StringComparison.Ordinal))
+                    if (!string.Equals(descriptionTokens[start + offset], tagTokens[offset], StringComparison.Ordinal))
                     {
                         match = false;
                         break;

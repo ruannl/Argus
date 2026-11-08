@@ -9,13 +9,9 @@ public sealed record MultipartImport(byte[] FileBytes, string OptionsJson);
 
 public static class MultipartImportReader
 {
-    public static async Task<MultipartImport> ReadAsync(
-        HttpRequest request,
-        CancellationToken cancellationToken)
+    public static async Task<MultipartImport> ReadAsync(HttpRequest request, CancellationToken cancellationToken)
     {
-        if (!MediaTypeHeaderValue.TryParse(request.ContentType, out var mediaType) ||
-            !string.Equals(mediaType.MediaType.Value, "multipart/form-data", StringComparison.OrdinalIgnoreCase) ||
-            mediaType.Boundary.Length == 0)
+        if (!MediaTypeHeaderValue.TryParse(request.ContentType, out var mediaType) || !string.Equals(mediaType.MediaType.Value, "multipart/form-data", StringComparison.OrdinalIgnoreCase) || mediaType.Boundary.Length == 0)
         {
             throw new StatementRejectedException(ParserReasons.InvalidRequest);
         }
@@ -24,7 +20,7 @@ public static class MultipartImportReader
             throw new StatementRejectedException(ParserReasons.FileTooLarge);
         }
 
-        var boundary = HeaderUtilities.RemoveQuotes(mediaType.Boundary).Value;
+        string? boundary = HeaderUtilities.RemoveQuotes(mediaType.Boundary).Value;
         if (string.IsNullOrEmpty(boundary))
         {
             throw new StatementRejectedException(ParserReasons.InvalidRequest);
@@ -38,20 +34,18 @@ public static class MultipartImportReader
         while ((section = await reader.ReadNextSectionAsync(cancellationToken)) is not null)
         {
             var disposition = section.GetContentDispositionHeader();
-            if (disposition is null ||
-                !disposition.DispositionType.Equals("form-data", StringComparison.OrdinalIgnoreCase))
+            if (disposition is null || !disposition.DispositionType.Equals("form-data", StringComparison.OrdinalIgnoreCase))
             {
                 throw new StatementRejectedException(ParserReasons.InvalidRequest);
             }
-            var name = disposition.Name.Value?.Trim('"');
+            string? name = disposition.Name.Value?.Trim('"');
             switch (name)
             {
                 case "file" when file is null:
                     file = await ReadBytesAsync(section.Body, ImportLimits.MaxFileBytes, cancellationToken);
                     break;
                 case "options" when options is null:
-                    options = await ReadTextAsync(
-                        section.Body, ImportLimits.MaxMultipartOptionsBytes, cancellationToken);
+                    options = await ReadTextAsync(section.Body, ImportLimits.MaxMultipartOptionsBytes, cancellationToken);
                     break;
                 default:
                     throw new StatementRejectedException(ParserReasons.InvalidRequest);
@@ -62,16 +56,14 @@ public static class MultipartImportReader
         {
             throw new StatementRejectedException(ParserReasons.InvalidRequest);
         }
+
         return new MultipartImport(file, options);
     }
 
-    private static async Task<byte[]> ReadBytesAsync(
-        Stream stream,
-        int maximum,
-        CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadBytesAsync(Stream stream, int maximum, CancellationToken cancellationToken)
     {
         using var output = new MemoryStream();
-        var buffer = new byte[64 * 1024];
+        byte[] buffer = new byte[64 * 1024];
         int read;
         while ((read = await stream.ReadAsync(buffer, cancellationToken)) > 0)
         {
@@ -79,17 +71,15 @@ public static class MultipartImportReader
             {
                 throw new StatementRejectedException(ParserReasons.FileTooLarge);
             }
-            output.Write(buffer, 0, read);
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
         }
+
         return output.ToArray();
     }
 
-    private static async Task<string> ReadTextAsync(
-        Stream stream,
-        int maximum,
-        CancellationToken cancellationToken)
+    private static async Task<string> ReadTextAsync(Stream stream, int maximum, CancellationToken cancellationToken)
     {
-        var bytes = await ReadBytesAsync(stream, maximum, cancellationToken);
+        byte[] bytes = await ReadBytesAsync(stream, maximum, cancellationToken);
         try
         {
             return new UTF8Encoding(false, true).GetString(bytes);
@@ -116,17 +106,17 @@ public static class MultipartImportReader
 
         public override int Read(byte[] buffer, int offset, int count)
         {
-            var read = inner.Read(buffer, offset, count);
+            int read = inner.Read(buffer, offset, count);
             Count(read);
+
             return read;
         }
 
-        public override async ValueTask<int> ReadAsync(
-            Memory<byte> buffer,
-            CancellationToken cancellationToken = default)
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            var read = await inner.ReadAsync(buffer, cancellationToken);
+            int read = await inner.ReadAsync(buffer, cancellationToken);
             Count(read);
+
             return read;
         }
 

@@ -60,7 +60,6 @@ type PendingPreparation = {
   intent: number;
 };
 
-
 function omitEmptyFilters(filters: TransactionFilters): TransactionFilters {
   const next: TransactionFilters = {};
   if (filters.search?.trim()) next.search = filters.search.trim();
@@ -127,9 +126,7 @@ export default function TransactionsWorkspace({
   const [filters, setFilters] = useState<TransactionFilters>(initialQuery.filters);
   const [page, setPage] = useState(initialQuery.page);
   const [pageSize, setPageSize] = useState(initialQuery.pageSize);
-  const [sortBy, setSortBy] = useState<TransactionsInitialQuery["sortBy"]>(
-    initialQuery.sortBy,
-  );
+  const [sortBy, setSortBy] = useState<TransactionsInitialQuery["sortBy"]>(initialQuery.sortBy);
   const [sortDirection, setSortDirection] = useState<TransactionsInitialQuery["sortDirection"]>(
     initialQuery.sortDirection,
   );
@@ -251,44 +248,49 @@ export default function TransactionsWorkspace({
       return;
     }
     let cancelled = false;
-    void loadOperationAction(initialOperationId).then((result) => {
-      if (cancelled) {
-        return;
-      }
-      setRecoveryLoading(false);
-      if (!result.ok) {
-        setMessage({
-          tone: "error",
-          text:
-            result.kind === "not_found"
-              ? "The operation was not found yet. Its outcome remains unresolved; check status again."
-              : result.message,
-        });
-        return;
-      }
-      const operation = result.value;
-      if (operation.status === "Applied") {
-        setReceipt({
-          operation_id: operation.operation_id,
-          status: operation.status,
-          selected_count: operation.selected_count,
-          changed_count: operation.changed_count,
-          unchanged_count: operation.unchanged_count,
-          applied_at: operation.applied_at,
-          replayed: true,
-        });
-      } else if (operation.status === "Prepared") {
-        setRecovery(operation);
-      } else {
-        setTerminalStatus(operation.status);
-        setTerminalOperationId(operation.operation_id);
-      }
-    }).catch(() => {
-      if (!cancelled) {
+    void loadOperationAction(initialOperationId)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
         setRecoveryLoading(false);
-        setMessage({ tone: "error", text: "Operation status is unavailable. Check status again." });
-      }
-    });
+        if (!result.ok) {
+          setMessage({
+            tone: "error",
+            text:
+              result.kind === "not_found"
+                ? "The operation was not found yet. Its outcome remains unresolved; check status again."
+                : result.message,
+          });
+          return;
+        }
+        const operation = result.value;
+        if (operation.status === "Applied") {
+          setReceipt({
+            operation_id: operation.operation_id,
+            status: operation.status,
+            selected_count: operation.selected_count,
+            changed_count: operation.changed_count,
+            unchanged_count: operation.unchanged_count,
+            applied_at: operation.applied_at,
+            replayed: true,
+          });
+        } else if (operation.status === "Prepared") {
+          setRecovery(operation);
+        } else {
+          setTerminalStatus(operation.status);
+          setTerminalOperationId(operation.operation_id);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRecoveryLoading(false);
+          setMessage({
+            tone: "error",
+            text: "Operation status is unavailable. Check status again.",
+          });
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -342,14 +344,7 @@ export default function TransactionsWorkspace({
             if (requestPage !== nextPage) {
               viewRef.current = { ...viewRef.current, page: requestPage };
               setPage(requestPage);
-              syncUrl(
-                nextFilters,
-                requestPage,
-                nextPageSize,
-                nextSortBy,
-                nextSortDirection,
-                null,
-              );
+              syncUrl(nextFilters, requestPage, nextPageSize, nextSortBy, nextSortDirection, null);
               continue;
             }
           }
@@ -369,18 +364,15 @@ export default function TransactionsWorkspace({
     [syncUrl],
   );
 
-  const invalidateConfirmation = useCallback(
-    () => {
-      // A changed view invalidates the old confirmation, not its durable
-      // operation identity. Keep it recoverable until its outcome is known.
-      intentRef.current += 1;
-      if (prepared) {
-        setRecovery(prepared);
-        setPrepared(null);
-      }
-    },
-    [prepared],
-  );
+  const invalidateConfirmation = useCallback(() => {
+    // A changed view invalidates the old confirmation, not its durable
+    // operation identity. Keep it recoverable until its outcome is known.
+    intentRef.current += 1;
+    if (prepared) {
+      setRecovery(prepared);
+      setPrepared(null);
+    }
+  }, [prepared]);
 
   const clearSelection = useCallback(() => {
     invalidateConfirmation();
@@ -464,7 +456,14 @@ export default function TransactionsWorkspace({
 
   function syncCurrentUrl() {
     const current = viewRef.current;
-    syncUrl(current.filters, current.page, current.pageSize, current.sortBy, current.sortDirection, null);
+    syncUrl(
+      current.filters,
+      current.page,
+      current.pageSize,
+      current.sortBy,
+      current.sortDirection,
+      null,
+    );
   }
 
   function rememberOperation(id: string) {
@@ -512,7 +511,13 @@ export default function TransactionsWorkspace({
 
   function refreshCurrentView() {
     const current = viewRef.current;
-    void runQuery(current.filters, current.page, current.pageSize, current.sortBy, current.sortDirection);
+    void runQuery(
+      current.filters,
+      current.page,
+      current.pageSize,
+      current.sortBy,
+      current.sortDirection,
+    );
   }
 
   function showAppliedReceipt(result: TransactionApplyResult) {
@@ -557,9 +562,10 @@ export default function TransactionsWorkspace({
       if (!result.ok) {
         setMessage({
           tone: "error",
-          text: result.kind === "not_found"
-            ? "The operation was not found yet. Its outcome remains unresolved; check status again."
-            : result.message,
+          text:
+            result.kind === "not_found"
+              ? "The operation was not found yet. Its outcome remains unresolved; check status again."
+              : result.message,
         });
         return;
       }
@@ -601,16 +607,28 @@ export default function TransactionsWorkspace({
       const result = await prepareTransactionsAction(pending.input);
       if (!result.ok) {
         setMessage({ tone: "error", text: result.message, details: result.details });
-        setKnownRejection([
-          "invalid_request", "empty_selection", "category_unavailable", "tag_unavailable",
-          "tag_limit_exceeded", "selection_too_large", "request_too_large", "parent_hidden",
-          "selection_stale", "classification_changed",
-        ].includes(result.kind));
+        setKnownRejection(
+          [
+            "invalid_request",
+            "empty_selection",
+            "category_unavailable",
+            "tag_unavailable",
+            "tag_limit_exceeded",
+            "selection_too_large",
+            "request_too_large",
+            "parent_hidden",
+            "selection_stale",
+            "classification_changed",
+          ].includes(result.kind),
+        );
         return;
       }
       const operation = result.value.operation;
       if (operation.operation_id !== pending.input.operation_id) {
-        setMessage({ tone: "error", text: "The preparation response could not be matched. Check operation status." });
+        setMessage({
+          tone: "error",
+          text: "The preparation response could not be matched. Check operation status.",
+        });
         return;
       }
       setPendingPreparation(null);
@@ -648,7 +666,10 @@ export default function TransactionsWorkspace({
 
   async function prepareBulkChange() {
     if (!hasBulkAction) {
-      setMessage({ tone: "error", text: "Choose a category, tag change, or hide/restore action first." });
+      setMessage({
+        tone: "error",
+        text: "Choose a category, tag change, or hide/restore action first.",
+      });
       return;
     }
     if (!allMatching && selectionCount === 0) {
@@ -668,7 +689,10 @@ export default function TransactionsWorkspace({
     if (bulkHidden !== null) changes.is_hidden_by_user = bulkHidden;
 
     if (operationIdRef.current) {
-      setMessage({ tone: "error", text: "Resolve the existing operation before preparing another." });
+      setMessage({
+        tone: "error",
+        text: "Resolve the existing operation before preparing another.",
+      });
       return;
     }
 
@@ -688,7 +712,10 @@ export default function TransactionsWorkspace({
     };
     const pending = { input, intent: ++intentRef.current };
     setPendingPreparation(pending);
-    setCaptureContext({ listCount: data?.filtered_total ?? null, filters: omitEmptyFilters(filters) });
+    setCaptureContext({
+      listCount: data?.filtered_total ?? null,
+      filters: omitEmptyFilters(filters),
+    });
     setReceipt(null);
     setRecovery(null);
     rememberOperation(id);
@@ -747,9 +774,10 @@ export default function TransactionsWorkspace({
               setTerminalOperationId(recoveredOperation.operation_id);
               setMessage({
                 tone: "status",
-                text: recoveredOperation.status === "Expired"
-                  ? "Status confirms the operation expired without applying."
-                  : "Status confirms the operation was abandoned without applying.",
+                text:
+                  recoveredOperation.status === "Expired"
+                    ? "Status confirms the operation expired without applying."
+                    : "Status confirms the operation was abandoned without applying.",
               });
               return;
             }
@@ -761,10 +789,7 @@ export default function TransactionsWorkspace({
           return;
         }
         setMessage({ tone: "error", text: result.message, details: result.details });
-        if (
-          result.kind === "selection_stale" ||
-          result.kind === "classification_changed"
-        ) {
+        if (result.kind === "selection_stale" || result.kind === "classification_changed") {
           setPrepared(null);
           setRecovery(operation);
           setTerminalStatus(null);
@@ -822,16 +847,23 @@ export default function TransactionsWorkspace({
         setTerminalOperationId(id);
         setMessage({
           tone: "status",
-          text: result.value.status === "Abandoned"
-            ? "The operation was abandoned before applying."
-            : "The operation expired before applying.",
+          text:
+            result.value.status === "Abandoned"
+              ? "The operation was abandoned before applying."
+              : "The operation expired before applying.",
         });
       } else {
-        setMessage({ tone: "error", text: "The operation outcome is unresolved. Check its status again." });
+        setMessage({
+          tone: "error",
+          text: "The operation outcome is unresolved. Check its status again.",
+        });
       }
     } catch {
       if (operationIdRef.current === id) {
-        setMessage({ tone: "error", text: "The abandon outcome is uncertain. Check operation status again." });
+        setMessage({
+          tone: "error",
+          text: "The abandon outcome is uncertain. Check operation status again.",
+        });
       }
     } finally {
       if (owner === busyOwnerRef.current) {
@@ -948,8 +980,8 @@ export default function TransactionsWorkspace({
     : 1;
   const visibility = filters.visibility ?? "visible";
   const statementFilter = filters.statement_import_id
-    ? data?.transactions.find((row) => row.statement_import.id === filters.statement_import_id)
-        ?.statement_import ?? null
+    ? (data?.transactions.find((row) => row.statement_import.id === filters.statement_import_id)
+        ?.statement_import ?? null)
     : null;
 
   const preparedAction = prepared?.action ?? null;
@@ -1021,10 +1053,7 @@ export default function TransactionsWorkspace({
               {message.details.statements.map((statement, index) => (
                 <span key={statement.id}>
                   {index > 0 ? ", " : ""}
-                  <Link
-                    className="underline underline-offset-4"
-                    href={`/imports/${statement.id}`}
-                  >
+                  <Link className="underline underline-offset-4" href={`/imports/${statement.id}`}>
                     {statement.statement_label}
                   </Link>
                 </span>
@@ -1116,9 +1145,7 @@ export default function TransactionsWorkspace({
             <select
               className="mt-1 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
               disabled={inventoryFailed}
-              onChange={(event) =>
-                changeFilters({ category_id: event.target.value || undefined })
-              }
+              onChange={(event) => changeFilters({ category_id: event.target.value || undefined })}
               value={filters.category_id ?? ""}
             >
               <option value="">All categories</option>
@@ -1135,9 +1162,7 @@ export default function TransactionsWorkspace({
             <select
               className="mt-1 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
               disabled={inventoryFailed}
-              onChange={(event) =>
-                changeFilters({ merchant_tag: event.target.value || undefined })
-              }
+              onChange={(event) => changeFilters({ merchant_tag: event.target.value || undefined })}
               value={filters.merchant_tag ?? ""}
             >
               <option value="">Any tag</option>
@@ -1157,8 +1182,7 @@ export default function TransactionsWorkspace({
               onChange={(event) =>
                 changeFilters({
                   category_kind: (event.target.value || undefined) as
-                    | TransactionFilters["category_kind"]
-                    | undefined,
+                    TransactionFilters["category_kind"] | undefined,
                 })
               }
               value={filters.category_kind ?? ""}
@@ -1178,8 +1202,7 @@ export default function TransactionsWorkspace({
               onChange={(event) =>
                 changeFilters({
                   direction: (event.target.value || undefined) as
-                    | TransactionFilters["direction"]
-                    | undefined,
+                    TransactionFilters["direction"] | undefined,
                 })
               }
               value={filters.direction ?? ""}
@@ -1245,7 +1268,11 @@ export default function TransactionsWorkspace({
           </p>
         ) : null}
 
-        <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label="Visibility">
+        <div
+          className="mt-4 flex flex-wrap items-center gap-2"
+          role="group"
+          aria-label="Visibility"
+        >
           {(["visible", "hidden", "all"] as const).map((value) => (
             <button
               aria-pressed={visibility === value}
@@ -1295,17 +1322,15 @@ export default function TransactionsWorkspace({
                 Matching transactions
               </h2>
               <p className="mt-1 text-sm text-muted" role="status">
-                {data.matching_visible_count} visible and {data.matching_hidden_count} hidden
-                match these filters; showing {data.filtered_total}{" "}
+                {data.matching_visible_count} visible and {data.matching_hidden_count} hidden match
+                these filters; showing {data.filtered_total}{" "}
                 {visibility === "all"
                   ? "rows"
                   : visibility === "hidden"
                     ? "hidden rows"
                     : "visible rows"}{" "}
                 of {data.matching_total}. Page {data.page} of {totalPages}.
-                {data.inventory_count === 0
-                  ? " Your workspace has no transactions yet."
-                  : ""}
+                {data.inventory_count === 0 ? " Your workspace has no transactions yet." : ""}
               </p>
             </div>
             <label className="flex items-center gap-2 text-sm font-semibold text-ink">
@@ -1375,10 +1400,7 @@ export default function TransactionsWorkspace({
                 const badge = hiddenBadge(row);
                 const isSelected = selection.has(row.id);
                 return (
-                  <li
-                    className="rounded-2xl border border-line bg-page p-4"
-                    key={row.id}
-                  >
+                  <li className="rounded-2xl border border-line bg-page p-4" key={row.id}>
                     <div className="flex flex-wrap items-start gap-3">
                       <input
                         aria-label={`Select transaction ${row.description || "no description"} on ${row.transaction_date} for ${amountLabel(row)}`}
@@ -1438,9 +1460,7 @@ export default function TransactionsWorkspace({
                         className="rounded-full border border-line px-3 py-1.5 text-xs font-bold text-ink disabled:opacity-50"
                         disabled={inventoryFailed}
                         onClick={() =>
-                          setInlineEditorId((current) =>
-                            current === row.id ? null : row.id,
-                          )
+                          setInlineEditorId((current) => (current === row.id ? null : row.id))
                         }
                         type="button"
                       >
@@ -1548,9 +1568,7 @@ export default function TransactionsWorkspace({
               disabled={!canAssignCategories || busy || operationId !== null}
               multiple
               onChange={(event) =>
-                setBulkAddTagIds(
-                  Array.from(event.target.selectedOptions, (option) => option.value),
-                )
+                setBulkAddTagIds(Array.from(event.target.selectedOptions, (option) => option.value))
               }
               value={bulkAddTagIds}
             >
@@ -1667,7 +1685,8 @@ export default function TransactionsWorkspace({
                       .map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`)
                       .join(" · ")}
               </p>
-              {captureContext.listCount !== null && captureContext.listCount !== prepared.selected_count ? (
+              {captureContext.listCount !== null &&
+              captureContext.listCount !== prepared.selected_count ? (
                 <p className="mt-1 font-semibold">
                   The earlier list showed {captureContext.listCount}; the saved scope now contains{" "}
                   {prepared.selected_count}. Review this updated count before applying.
@@ -1677,9 +1696,7 @@ export default function TransactionsWorkspace({
           ) : null}
           <p className="mt-2 text-sm text-accent-soft-ink">
             Action:{" "}
-            {preparedAction?.category
-              ? `category “${preparedAction.category.display_name}”; `
-              : ""}
+            {preparedAction?.category ? `category “${preparedAction.category.display_name}”; ` : ""}
             {preparedAction?.add_tags.length
               ? `add ${preparedAction.add_tags.map((tag) => tag.display_name).join(", ")}; `
               : ""}
@@ -1734,8 +1751,8 @@ export default function TransactionsWorkspace({
             Operation status unresolved
           </h2>
           <p className="mt-2 text-sm leading-6 text-warning-ink">
-            The operation identity is retained. A temporary missing or unavailable status does
-            not prove that an in-flight preparation was cancelled.
+            The operation identity is retained. A temporary missing or unavailable status does not
+            prove that an in-flight preparation was cancelled.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <button
@@ -1780,10 +1797,10 @@ export default function TransactionsWorkspace({
           </h2>
           <p className="mt-2 text-sm leading-6 text-warning-ink">
             A previously prepared operation is still pending: {recovery.selected_count} selected,{" "}
-            {recovery.changed_count} would change, {recovery.unchanged_count} already match.
-            Expires {formatTimestamp(recovery.expires_at)}. The original private search and filter
-            context is not current or cannot be reconstructed after reload, so this screen does not
-            apply it.
+            {recovery.changed_count} would change, {recovery.unchanged_count} already match. Expires{" "}
+            {formatTimestamp(recovery.expires_at)}. The original private search and filter context
+            is not current or cannot be reconstructed after reload, so this screen does not apply
+            it.
           </p>
           {recovery.action?.stale ? (
             <p className="mt-2 text-sm font-semibold text-warning-ink">

@@ -103,9 +103,7 @@ describe("import server actions", () => {
 
     expect(result.ok).toBe(true);
     expect(result.review).toEqual(summary);
-    expect(patchImportReview).toHaveBeenCalledWith(
-      "backend-token", "review-id", 1, [], true,
-    );
+    expect(patchImportReview).toHaveBeenCalledWith("backend-token", "review-id", 1, [], true);
     expect(revalidatePath).toHaveBeenCalledWith("/imports");
   });
 
@@ -153,7 +151,10 @@ describe("import server actions", () => {
       ok: true,
       value: { committed: false, statement: null, replayed: false },
     });
-    vi.mocked(setImportVisibility).mockResolvedValue({ ok: true, value: { ...statement, is_hidden: true } });
+    vi.mocked(setImportVisibility).mockResolvedValue({
+      ok: true,
+      value: { ...statement, is_hidden: true },
+    });
     vi.mocked(deleteImportStatement).mockResolvedValue({
       ok: true,
       value: { deleted: true, deleted_transaction_count: 3 },
@@ -163,7 +164,10 @@ describe("import server actions", () => {
       expect.objectContaining({ ok: true, message: expect.stringContaining("abandoned") }),
     );
     await expect(setImportVisibilityAction("statement-id", true, 1, 3)).resolves.toEqual(
-      expect.objectContaining({ ok: true, statement: expect.objectContaining({ is_hidden: true }) }),
+      expect.objectContaining({
+        ok: true,
+        statement: expect.objectContaining({ is_hidden: true }),
+      }),
     );
     await expect(deleteImportStatementAction("statement-id", 1, 3)).resolves.toEqual(
       expect.objectContaining({ ok: true, deletedTransactionCount: 3 }),

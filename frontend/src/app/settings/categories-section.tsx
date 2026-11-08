@@ -155,8 +155,8 @@ function CategoryRow({ category }: { category: Category }) {
         </summary>
         <p className="mt-3 text-sm leading-6 text-warning-ink">
           Deleting this category moves {category.transaction_count}{" "}
-          {category.transaction_count === 1 ? "transaction" : "transactions"} to Uncategorised.
-          No transactions are deleted.
+          {category.transaction_count === 1 ? "transaction" : "transactions"} to Uncategorised. No
+          transactions are deleted.
         </p>
         <form
           action={async (formData) => {
@@ -190,8 +190,8 @@ export default function CategoriesSection({ categories }: { categories: Category
         Categories
       </h2>
       <p className="mt-3 max-w-2xl text-base leading-7 text-muted">
-        The default set is seeded once per workspace. Renames and deletions are kept, and the
-        system Uncategorised bucket can never be removed.
+        The default set is seeded once per workspace. Renames and deletions are kept, and the system
+        Uncategorised bucket can never be removed.
       </p>
 
       {system ? (

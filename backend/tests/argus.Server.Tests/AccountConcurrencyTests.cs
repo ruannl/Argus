@@ -1,8 +1,8 @@
 using System.Net;
 using System.Reflection;
+using argus.Server.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
-using argus.Server.Http;
 
 namespace argus.Server.Tests;
 
@@ -17,8 +17,7 @@ public sealed class AccountConcurrencyTests(KitFactory factory) : ApiTestBase(fa
         var originalSession = await RegisterVerifyLoginAsync(email);
         var unrelatedEmail = UniqueEmail();
         var unrelatedSession = await RegisterVerifyLoginAsync(unrelatedEmail);
-        var customerId = (await BodyAsync(await SendAsync(Get("/v1/me", session: originalSession))))
-            .GetProperty("id").GetGuid();
+        var customerId = (await BodyAsync(await SendAsync(Get("/v1/me", session: originalSession)))).GetProperty("id").GetGuid();
         var requested = await SendAsync(Post("/v1/password/reset/request", Json(new { email })));
         Assert.Equal(HttpStatusCode.Accepted, requested.StatusCode);
         var resetToken = Factory.Mailer.LastToken("reset", email);
@@ -27,11 +26,10 @@ public sealed class AccountConcurrencyTests(KitFactory factory) : ApiTestBase(fa
         await ExecuteSqlAsync($"UPDATE customers SET failed_login_count = 2 WHERE id = '{customerId}'");
         Factory.LogCapture.Clear();
 
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var api = Factory.Services.GetRequiredService<AccountApi>();
-        var field = typeof(AccountApi).GetField(
-            "_beforeSessionIssuanceForTests", BindingFlags.Instance | BindingFlags.NonPublic);
+        var field = typeof(AccountApi).GetField("_beforeSessionIssuanceForTests", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(field);
         Assert.Null(field.GetValue(api));
         field.SetValue(api, (Func<Guid, CancellationToken, Task>)(async (id, cancellationToken) =>
@@ -46,57 +44,32 @@ public sealed class AccountConcurrencyTests(KitFactory factory) : ApiTestBase(fa
         Task<HttpResponseMessage>? loginTask = null;
         try
         {
-            loginTask = SendAsync(Post("/v1/login", Json(new
-            {
-                email,
-                password = TestEnvironment.GoodPassword,
-            })));
+            loginTask = SendAsync(Post("/v1/login", Json(new { email, password = TestEnvironment.GoodPassword, })));
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
-            var reset = await SendAsync(Post("/v1/password/reset", Json(new
-            {
-                token = resetToken,
-                password = NewPassword,
-            })));
+            var reset = await SendAsync(Post("/v1/password/reset", Json(new { token = resetToken, password = NewPassword, })));
             Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
-            Assert.Equal(HttpStatusCode.Unauthorized,
-                (await SendAsync(Get("/v1/me", session: originalSession))).StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, (await SendAsync(Get("/v1/me", session: originalSession))).StatusCode);
 
             release.TrySetResult();
             var staleLogin = await loginTask.WaitAsync(TimeSpan.FromSeconds(10));
             Assert.Equal(HttpStatusCode.Unauthorized, staleLogin.StatusCode);
             Assert.Equal("invalid_credentials", await ErrorKindAsync(staleLogin));
-            Assert.Equal(0L, await CountWhereAsync("sessions",
-                $"customer_id = '{customerId}' AND revoked_at IS NULL"));
-            Assert.Equal(2L, await ScalarAsync(
-                $"SELECT failed_login_count FROM customers WHERE id = '{customerId}'"));
+            Assert.Equal(0L, await CountWhereAsync("sessions", $"customer_id = '{customerId}' AND revoked_at IS NULL"));
+            Assert.Equal(2L, await ScalarAsync($"SELECT failed_login_count FROM customers WHERE id = '{customerId}'"));
             Assert.False(Factory.LogCapture.Contains("audit.login_success"));
-            Assert.Equal(HttpStatusCode.OK,
-                (await SendAsync(Get("/v1/me", session: unrelatedSession))).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await SendAsync(Get("/v1/me", session: unrelatedSession))).StatusCode);
 
-            var oldPassword = await SendAsync(Post("/v1/login", Json(new
-            {
-                email,
-                password = TestEnvironment.GoodPassword,
-            })));
+            var oldPassword = await SendAsync(Post("/v1/login", Json(new { email, password = TestEnvironment.GoodPassword, })));
             Assert.Equal(HttpStatusCode.Unauthorized, oldPassword.StatusCode);
-            var replay = await SendAsync(Post("/v1/password/reset", Json(new
-            {
-                token = resetToken,
-                password = NewPassword,
-            })));
+            var replay = await SendAsync(Post("/v1/password/reset", Json(new { token = resetToken, password = NewPassword, })));
             Assert.Equal(HttpStatusCode.BadRequest, replay.StatusCode);
             Assert.Equal("invalid_token", await ErrorKindAsync(replay));
 
-            var newLogin = await SendAsync(Post("/v1/login", Json(new
-            {
-                email,
-                password = NewPassword,
-            })));
+            var newLogin = await SendAsync(Post("/v1/login", Json(new { email, password = NewPassword, })));
             Assert.Equal(HttpStatusCode.OK, newLogin.StatusCode);
             var token = (await BodyAsync(newLogin)).GetProperty("token").GetString();
-            Assert.Equal(HttpStatusCode.OK,
-                (await SendAsync(Get("/v1/me", session: token))).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await SendAsync(Get("/v1/me", session: token))).StatusCode);
         }
         finally
         {
@@ -121,8 +94,7 @@ public sealed class AccountConcurrencyTests(KitFactory factory) : ApiTestBase(fa
     {
         var email = UniqueEmail();
         var originalSession = await RegisterVerifyLoginAsync(email);
-        var customerId = (await BodyAsync(await SendAsync(Get("/v1/me", session: originalSession))))
-            .GetProperty("id").GetGuid();
+        var customerId = (await BodyAsync(await SendAsync(Get("/v1/me", session: originalSession)))).GetProperty("id").GetGuid();
         var request = await SendAsync(Post("/v1/password/reset/request", Json(new { email })));
         Assert.Equal(HttpStatusCode.Accepted, request.StatusCode);
         var resetToken = Factory.Mailer.LastToken("reset", email);
@@ -174,20 +146,11 @@ public sealed class AccountConcurrencyTests(KitFactory factory) : ApiTestBase(fa
             }
 
             Factory.LogCapture.Clear();
-            loginTask = SendAsync(Post("/v1/login", Json(new
-            {
-                email,
-                password = TestEnvironment.GoodPassword,
-            })));
-            var issuingPid = await WaitForBlockedPidAsync(
-                observer, blockerPid, "INSERT INTO sessions");
+            loginTask = SendAsync(Post("/v1/login", Json(new { email, password = TestEnvironment.GoodPassword, })));
+            var issuingPid = await WaitForBlockedPidAsync(observer, blockerPid, "INSERT INTO sessions");
             Assert.False(loginTask.IsCompleted);
 
-            resetTask = SendAsync(Post("/v1/password/reset", Json(new
-            {
-                token = resetToken,
-                password = NewPassword,
-            })));
+            resetTask = SendAsync(Post("/v1/password/reset", Json(new { token = resetToken, password = NewPassword, })));
             await WaitForBlockedPidAsync(observer, issuingPid, "UPDATE customers SET password_hash");
             Assert.False(resetTask.IsCompleted);
 
@@ -205,12 +168,9 @@ public sealed class AccountConcurrencyTests(KitFactory factory) : ApiTestBase(fa
             var reset = await resetTask.WaitAsync(TimeSpan.FromSeconds(10));
             Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
 
-            Assert.Equal(HttpStatusCode.Unauthorized,
-                (await SendAsync(Get("/v1/me", session: token))).StatusCode);
-            Assert.Equal(HttpStatusCode.Unauthorized,
-                (await SendAsync(Get("/v1/me", session: originalSession))).StatusCode);
-            Assert.Equal(0L, await CountWhereAsync("sessions",
-                $"customer_id = '{customerId}' AND revoked_at IS NULL"));
+            Assert.Equal(HttpStatusCode.Unauthorized, (await SendAsync(Get("/v1/me", session: token))).StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, (await SendAsync(Get("/v1/me", session: originalSession))).StatusCode);
+            Assert.Equal(0L, await CountWhereAsync("sessions", $"customer_id = '{customerId}' AND revoked_at IS NULL"));
             Assert.True(Factory.LogCapture.Contains("audit.login_success"));
         }
         finally
@@ -246,8 +206,7 @@ public sealed class AccountConcurrencyTests(KitFactory factory) : ApiTestBase(fa
     {
         var email = UniqueEmail();
         var originalSession = await RegisterVerifyLoginAsync(email);
-        var customerId = (await BodyAsync(await SendAsync(Get("/v1/me", session: originalSession))))
-            .GetProperty("id").GetGuid();
+        var customerId = (await BodyAsync(await SendAsync(Get("/v1/me", session: originalSession)))).GetProperty("id").GetGuid();
         await ExecuteSqlAsync($"UPDATE customers SET failed_login_count = 2 WHERE id = '{customerId}'");
 
         var db = Factory.CreateDb();
@@ -270,18 +229,13 @@ public sealed class AccountConcurrencyTests(KitFactory factory) : ApiTestBase(fa
 
         Factory.LogCapture.Clear();
         await using var observer = await db.OpenAsync();
-        using var cancellation = new CancellationTokenSource();
-        var loginTask = Client.SendAsync(Post("/v1/login", Json(new
-        {
-            email,
-            password = TestEnvironment.GoodPassword,
-        })), cancellation.Token);
+        using CancellationTokenSource cancellation = new CancellationTokenSource();
+        var loginTask = Client.SendAsync(Post("/v1/login", Json(new { email, password = TestEnvironment.GoodPassword, })), cancellation.Token);
         try
         {
             await WaitForBlockedPidAsync(observer, blockerPid, "SELECT password_hash");
             cancellation.Cancel();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-                await loginTask.WaitAsync(TimeSpan.FromSeconds(10)));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await loginTask.WaitAsync(TimeSpan.FromSeconds(10)));
         }
         finally
         {
@@ -296,19 +250,13 @@ public sealed class AccountConcurrencyTests(KitFactory factory) : ApiTestBase(fa
             }
         }
 
-        Assert.Equal(1L, await CountWhereAsync("sessions",
-            $"customer_id = '{customerId}' AND revoked_at IS NULL"));
-        Assert.Equal(2L, await ScalarAsync(
-            $"SELECT failed_login_count FROM customers WHERE id = '{customerId}'"));
+        Assert.Equal(1L, await CountWhereAsync("sessions", $"customer_id = '{customerId}' AND revoked_at IS NULL"));
+        Assert.Equal(2L, await ScalarAsync($"SELECT failed_login_count FROM customers WHERE id = '{customerId}'"));
         Assert.False(Factory.LogCapture.Contains("audit.login_success"));
-        Assert.Equal(HttpStatusCode.OK,
-            (await SendAsync(Get("/v1/me", session: originalSession))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(Get("/v1/me", session: originalSession))).StatusCode);
     }
 
-    private static async Task<int> WaitForBlockedPidAsync(
-        NpgsqlConnection observer,
-        int blockerPid,
-        string queryFragment)
+    private static async Task<int> WaitForBlockedPidAsync(NpgsqlConnection observer, int blockerPid, string queryFragment)
     {
         for (var attempt = 0; attempt < 200; attempt++)
         {
@@ -325,9 +273,11 @@ public sealed class AccountConcurrencyTests(KitFactory factory) : ApiTestBase(fa
             {
                 return pid;
             }
+
             await Task.Delay(25);
         }
         Assert.Fail($"A real {queryFragment} request did not reach the PostgreSQL lock wait.");
+
         return 0;
     }
 }

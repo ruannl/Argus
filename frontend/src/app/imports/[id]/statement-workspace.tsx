@@ -47,11 +47,7 @@ export default function StatementWorkspace({ detail }: StatementWorkspaceProps) 
   async function deleteStatement() {
     setConfirmDelete(false);
     const result = await run(() =>
-      deleteImportStatementAction(
-        summary.id,
-        summary.version,
-        detail.expected_transaction_count,
-      ),
+      deleteImportStatementAction(summary.id, summary.version, detail.expected_transaction_count),
     );
     if (result?.ok) {
       router.push("/imports");
@@ -154,9 +150,9 @@ export default function StatementWorkspace({ detail }: StatementWorkspaceProps) 
             {summary.is_hidden ? "Restore this statement?" : "Hide this statement?"}
           </h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-            {summary.statement_label} currently owns {detail.expected_transaction_count}{" "}
-            transaction{detail.expected_transaction_count === 1 ? "" : "s"}. This changes only
-            the statement visibility layer; individual transaction hide flags are preserved.
+            {summary.statement_label} currently owns {detail.expected_transaction_count} transaction
+            {detail.expected_transaction_count === 1 ? "" : "s"}. This changes only the statement
+            visibility layer; individual transaction hide flags are preserved.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
@@ -240,10 +236,7 @@ export default function StatementWorkspace({ detail }: StatementWorkspaceProps) 
           </p>
         ) : (
           detail.rows.map((row) => (
-            <article
-              className="rounded-2xl border border-line bg-surface p-4"
-              key={row.id}
-            >
+            <article className="rounded-2xl border border-line bg-surface p-4" key={row.id}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold tracking-[0.1em] text-muted uppercase">

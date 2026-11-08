@@ -58,8 +58,8 @@ function ProfileSection({ account }: { account: CurrentAccount }) {
         Profile
       </h2>
       <p className="mt-3 max-w-2xl text-base leading-7 text-muted">
-        Your customer account and session details. Bank and credit-card accounts live under
-        Accounts above.
+        Your customer account and session details. Bank and credit-card accounts live under Accounts
+        above.
       </p>
 
       <AccountDetails account={account} />
@@ -84,8 +84,8 @@ function ProfileSection({ account }: { account: CurrentAccount }) {
       </div>
 
       <p className="mt-6 text-sm leading-6 text-muted">
-        Theme preference: use the theme button in the bottom-right corner to switch between
-        light and dark. Your choice is remembered in this browser.
+        Theme preference: use the theme button in the bottom-right corner to switch between light
+        and dark. Your choice is remembered in this browser.
       </p>
     </section>
   );

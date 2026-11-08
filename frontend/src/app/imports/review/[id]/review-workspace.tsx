@@ -60,8 +60,7 @@ export default function ReviewWorkspace({ review, tags }: ReviewWorkspaceProps) 
   const hasReviewedOutcome =
     review.summary.imported_count > 0 || review.summary.suppressed_count > 0;
   const includedCount = review.summary.imported_count;
-  const canCommit =
-    !busy && !invalidUnskipped && !pendingGroups && hasReviewedOutcome;
+  const canCommit = !busy && !invalidUnskipped && !pendingGroups && hasReviewedOutcome;
 
   async function run(
     action: () => Promise<ImportActionResult>,
@@ -140,11 +139,7 @@ export default function ReviewWorkspace({ review, tags }: ReviewWorkspaceProps) 
     setBusy(true);
     setMessage(null);
     try {
-      const result = await commitImportReviewAction(
-        review.summary.id,
-        version,
-        hash,
-      );
+      const result = await commitImportReviewAction(review.summary.id, version, hash);
       if (result.ok && result.statementId) {
         router.push(`/imports/${result.statementId}`);
         return;
@@ -162,12 +157,7 @@ export default function ReviewWorkspace({ review, tags }: ReviewWorkspaceProps) 
     setBusy(true);
     setMessage(null);
     try {
-      const patched = await patchImportReviewAction(
-        review.summary.id,
-        version,
-        [],
-        true,
-      );
+      const patched = await patchImportReviewAction(review.summary.id, version, [], true);
       if (!patched.ok || !patched.review) {
         setMessage({ tone: "error", text: patched.message });
         return;
@@ -207,20 +197,16 @@ export default function ReviewWorkspace({ review, tags }: ReviewWorkspaceProps) 
           ["Skipped", review.summary.skipped_count],
         ].map(([label, value]) => (
           <div className="rounded-2xl border border-line bg-surface p-4" key={String(label)}>
-            <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">
-              {label}
-            </p>
-            <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-ink">
-              {value}
-            </p>
+            <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">{label}</p>
+            <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-ink">{value}</p>
           </div>
         ))}
       </section>
 
       <section className="rounded-2xl border border-line bg-surface p-4 text-sm text-muted">
         <p className="font-semibold text-ink">
-          {review.summary.start_date ?? "Unknown start"} to {review.summary.end_date ?? "Unknown end"} ·{" "}
-          {review.summary.source_kind}
+          {review.summary.start_date ?? "Unknown start"} to{" "}
+          {review.summary.end_date ?? "Unknown end"} · {review.summary.source_kind}
         </p>
         <p className="mt-1">
           Review version {version} · {review.summary.possible_duplicate_count} possible duplicate
@@ -376,7 +362,9 @@ export default function ReviewWorkspace({ review, tags }: ReviewWorkspaceProps) 
                         </li>
                       ))}
                       {row.near_candidate_total > row.near_candidates.length ? (
-                        <li>{row.near_candidate_total - row.near_candidates.length} more candidate(s)</li>
+                        <li>
+                          {row.near_candidate_total - row.near_candidates.length} more candidate(s)
+                        </li>
                       ) : null}
                     </ul>
                   ) : null}

@@ -4,9 +4,7 @@ import { buildUploadOptions } from "@/app/imports/import-options";
 
 describe("import upload options", () => {
   it("omits parser_config for the initial generic inspect", () => {
-    const options = buildUploadOptions(
-      "generic_csv", "account-id", "", "", false, {}, "inspect",
-    );
+    const options = buildUploadOptions("generic_csv", "account-id", "", "", false, {}, "inspect");
 
     expect(options.source_kind).toBe("generic_csv");
     expect(options.parser_config).toBeUndefined();
@@ -22,10 +20,22 @@ describe("import upload options", () => {
       amount_column: "2",
     };
     const inspect = buildUploadOptions(
-      "generic_csv", "account-id", "", "", false, mapping, "inspect",
+      "generic_csv",
+      "account-id",
+      "",
+      "",
+      false,
+      mapping,
+      "inspect",
     );
     const prepare = buildUploadOptions(
-      "generic_csv", "account-id", "2025-01-01", "2025-01-31", true, mapping, "prepare",
+      "generic_csv",
+      "account-id",
+      "2025-01-01",
+      "2025-01-31",
+      true,
+      mapping,
+      "prepare",
     );
 
     expect(inspect.parser_config).toEqual(expect.objectContaining({ header_line: 1 }));
@@ -54,8 +64,9 @@ describe("import upload options", () => {
   });
 
   it("uses the preset config for FNB and Standard Bank", () => {
-    expect(buildUploadOptions("fnb", "account", "", "", false, {}, "inspect").parser_config)
-      .toEqual({ format: "fnb" });
+    expect(
+      buildUploadOptions("fnb", "account", "", "", false, {}, "inspect").parser_config,
+    ).toEqual({ format: "fnb" });
     expect(
       buildUploadOptions("standard_bank_pdf", "account", "", "", false, {}, "inspect")
         .parser_config,

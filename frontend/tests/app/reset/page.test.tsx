@@ -25,9 +25,7 @@ describe("reset page", () => {
   ])("shows invalid-link copy and does not call the action on GET for %#", async (searchParams) => {
     await renderReset(searchParams);
 
-    expect(
-      screen.getByText("This reset link is invalid or has expired."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("This reset link is invalid or has expired.")).toBeInTheDocument();
     expect(screen.queryByLabelText("New password")).not.toBeInTheDocument();
     expect(resetPasswordAction).not.toHaveBeenCalled();
   });
@@ -35,10 +33,7 @@ describe("reset page", () => {
   it("renders the password form for a well-formed token without consuming it or exposing it", async () => {
     await renderReset({ token });
 
-    expect(screen.getByLabelText("New password")).toHaveAttribute(
-      "autocomplete",
-      "new-password",
-    );
+    expect(screen.getByLabelText("New password")).toHaveAttribute("autocomplete", "new-password");
     expect(screen.getByLabelText("New password")).toHaveAttribute("minlength", "12");
     expect(screen.getByRole("button", { name: "Reset password" })).toBeInTheDocument();
     expect(resetPasswordAction).not.toHaveBeenCalled();

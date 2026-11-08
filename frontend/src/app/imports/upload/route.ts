@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "@/auth";
-import {
-  inspectImportFile,
-  prepareImportReview,
-} from "@/lib/server/backend-client";
+import { inspectImportFile, prepareImportReview } from "@/lib/server/backend-client";
 import type { ImportParseOptions } from "@/lib/server/backend-client";
 
 export const runtime = "nodejs";
@@ -46,10 +43,7 @@ function statusFor(kind: string): number {
   }
 }
 
-async function readBounded(
-  request: Request,
-  maximum: number,
-): Promise<Uint8Array | null> {
+async function readBounded(request: Request, maximum: number): Promise<Uint8Array | null> {
   if (!request.body) {
     return null;
   }
@@ -105,8 +99,10 @@ function findDelimiter(body: string, marker: string, from: number): number {
   while (index >= 0) {
     const beforeIsLineStart = index >= 2 && body.slice(index - 2, index) === "\r\n";
     const suffix = body.slice(index + marker.length, index + marker.length + 2);
-    if (beforeIsLineStart &&
-        (suffix === "\r\n" || (suffix === "--" && validClosingMarker(body, index, marker)))) {
+    if (
+      beforeIsLineStart &&
+      (suffix === "\r\n" || (suffix === "--" && validClosingMarker(body, index, marker)))
+    ) {
       return index;
     }
     index = body.indexOf(marker, index + 1);

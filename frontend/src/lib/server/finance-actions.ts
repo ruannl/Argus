@@ -116,10 +116,7 @@ export async function createAccountAction(formData: FormData): Promise<FinanceAc
       ? { display_name: displayName }
       : { display_name: displayName, institution };
 
-  return withSession(
-    (token) => createFinancialAccount(token, input),
-    "Financial account created.",
-  );
+  return withSession((token) => createFinancialAccount(token, input), "Financial account created.");
 }
 
 export async function renameAccountAction(formData: FormData): Promise<FinanceActionResult> {
@@ -160,10 +157,7 @@ export async function archiveAccountAction(formData: FormData): Promise<FinanceA
   if (!id) {
     return failure("invalid_request");
   }
-  return withSession(
-    (token) => archiveFinancialAccount(token, id),
-    "Financial account archived.",
-  );
+  return withSession((token) => archiveFinancialAccount(token, id), "Financial account archived.");
 }
 
 export async function restoreAccountAction(formData: FormData): Promise<FinanceActionResult> {
@@ -171,10 +165,7 @@ export async function restoreAccountAction(formData: FormData): Promise<FinanceA
   if (!id) {
     return failure("invalid_request");
   }
-  return withSession(
-    (token) => restoreFinancialAccount(token, id),
-    "Financial account restored.",
-  );
+  return withSession((token) => restoreFinancialAccount(token, id), "Financial account restored.");
 }
 
 // --- Categories ------------------------------------------------------------
@@ -260,10 +251,7 @@ export async function createMerchantTagAction(formData: FormData): Promise<Finan
   if (displayName === null) {
     return failure("invalid_request");
   }
-  return withSession(
-    (token) => createMerchantTag(token, displayName),
-    "Merchant tag created.",
-  );
+  return withSession((token) => createMerchantTag(token, displayName), "Merchant tag created.");
 }
 
 export async function updateMerchantTagAction(formData: FormData): Promise<FinanceActionResult> {
@@ -272,10 +260,7 @@ export async function updateMerchantTagAction(formData: FormData): Promise<Finan
   if (!id || displayName === null) {
     return failure("invalid_request");
   }
-  return withSession(
-    (token) => updateMerchantTag(token, id, displayName),
-    "Merchant tag renamed.",
-  );
+  return withSession((token) => updateMerchantTag(token, id, displayName), "Merchant tag renamed.");
 }
 
 export async function archiveMerchantTagAction(formData: FormData): Promise<FinanceActionResult> {
@@ -312,9 +297,7 @@ export async function deleteMerchantTagAction(formData: FormData): Promise<Finan
     }
     revalidateWorkspace();
     const count = result.value.unassigned_transaction_count;
-    return success(
-      `Tag removed from ${count} ${count === 1 ? "transaction" : "transactions"}.`,
-    );
+    return success(`Tag removed from ${count} ${count === 1 ? "transaction" : "transactions"}.`);
   } catch {
     return failure("unavailable");
   }

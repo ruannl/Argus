@@ -16,10 +16,7 @@ describe("forgot-password page", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toHaveAttribute("autocomplete", "email");
     expect(screen.getByRole("button", { name: "Request password reset" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Back to sign in" })).toHaveAttribute(
-      "href",
-      "/login",
-    );
+    expect(screen.getByRole("link", { name: "Back to sign in" })).toHaveAttribute("href", "/login");
     expect(document.querySelectorAll("input")).toHaveLength(1);
   });
 });

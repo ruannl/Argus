@@ -27,8 +27,7 @@ public sealed class AccountContractTests(KitFactory factory) : ApiTestBase(facto
         var wrong = await SendAsync(Get("/v1/me", secret: "wrong-secret"));
         Assert.Equal(HttpStatusCode.Unauthorized, wrong.StatusCode);
 
-        var register = await SendAsync(
-            Post("/v1/register", Json(new { email = UniqueEmail(), password = TestEnvironment.GoodPassword }), secret: null));
+        var register = await SendAsync(Post("/v1/register", Json(new { email = UniqueEmail(), password = TestEnvironment.GoodPassword }), secret: null));
         Assert.Equal(HttpStatusCode.Unauthorized, register.StatusCode);
     }
 
@@ -43,9 +42,7 @@ public sealed class AccountContractTests(KitFactory factory) : ApiTestBase(facto
         var body = await BodyAsync(me);
 
         var names = body.EnumerateObject().Select(property => property.Name).OrderBy(name => name).ToArray();
-        Assert.Equal(
-            ["admin", "email", "email_verified", "id", "lifetime", "next_billing_at", "subscriber_active", "subscription_started_at"],
-            names);
+        Assert.Equal(["admin", "email", "email_verified", "id", "lifetime", "next_billing_at", "subscriber_active", "subscription_started_at"], names);
         Assert.Equal(email, body.GetProperty("email").GetString());
         Assert.True(body.GetProperty("email_verified").GetBoolean());
         Assert.True(body.GetProperty("subscriber_active").GetBoolean());
@@ -76,8 +73,7 @@ public sealed class AccountContractTests(KitFactory factory) : ApiTestBase(facto
         Assert.Equal("accepted", (await BodyAsync(second)).GetProperty("status").GetString());
         Assert.Equal(1, await CountRowsAsync("customers"));
 
-        var unknown = await SendAsync(
-            Post("/v1/register", Json(new { email = UniqueEmail(), password = TestEnvironment.GoodPassword, extra = 1 })));
+        var unknown = await SendAsync(Post("/v1/register", Json(new { email = UniqueEmail(), password = TestEnvironment.GoodPassword, extra = 1 })));
         Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
         Assert.Equal("invalid_request", await ErrorKindAsync(unknown));
     }
@@ -85,17 +81,14 @@ public sealed class AccountContractTests(KitFactory factory) : ApiTestBase(facto
     [Fact]
     public async Task Register_RejectsWeakAndCommonPasswords_AndInvalidEmail()
     {
-        var shortPassword = await SendAsync(
-            Post("/v1/register", Json(new { email = UniqueEmail(), password = "short" })));
+        var shortPassword = await SendAsync(Post("/v1/register", Json(new { email = UniqueEmail(), password = "short" })));
         Assert.Equal(HttpStatusCode.BadRequest, shortPassword.StatusCode);
         Assert.Equal("invalid_request", await ErrorKindAsync(shortPassword));
 
-        var commonPassword = await SendAsync(
-            Post("/v1/register", Json(new { email = UniqueEmail(), password = "Password123" })));
+        var commonPassword = await SendAsync(Post("/v1/register", Json(new { email = UniqueEmail(), password = "Password123" })));
         Assert.Equal(HttpStatusCode.BadRequest, commonPassword.StatusCode);
 
-        var badEmail = await SendAsync(
-            Post("/v1/register", Json(new { email = "not-an-email", password = TestEnvironment.GoodPassword })));
+        var badEmail = await SendAsync(Post("/v1/register", Json(new { email = "not-an-email", password = TestEnvironment.GoodPassword })));
         Assert.Equal(HttpStatusCode.BadRequest, badEmail.StatusCode);
     }
 
@@ -132,32 +125,27 @@ public sealed class AccountContractTests(KitFactory factory) : ApiTestBase(facto
         var email = UniqueEmail();
         var verificationToken = await RegisterAsync(email);
 
-        var before = await SendAsync(
-            Post("/v1/login", Json(new { email, password = TestEnvironment.GoodPassword })));
+        var before = await SendAsync(Post("/v1/login", Json(new { email, password = TestEnvironment.GoodPassword })));
         Assert.Equal(HttpStatusCode.Unauthorized, before.StatusCode);
         Assert.Equal("invalid_credentials", await ErrorKindAsync(before));
 
         await VerifyAsync(verificationToken);
 
-        var after = await SendAsync(
-            Post("/v1/login", Json(new { email, password = TestEnvironment.GoodPassword })));
+        var after = await SendAsync(Post("/v1/login", Json(new { email, password = TestEnvironment.GoodPassword })));
         Assert.Equal(HttpStatusCode.OK, after.StatusCode);
         var body = await BodyAsync(after);
         Assert.Equal(64, body.GetProperty("token").GetString()!.Length);
         Assert.True(DateTime.TryParse(body.GetProperty("expires_at").GetString(), out _));
 
-        var wrongPassword = await SendAsync(
-            Post("/v1/login", Json(new { email, password = "definitely-wrong-password" })));
+        var wrongPassword = await SendAsync(Post("/v1/login", Json(new { email, password = "definitely-wrong-password" })));
         Assert.Equal(HttpStatusCode.Unauthorized, wrongPassword.StatusCode);
         Assert.Equal("invalid_credentials", await ErrorKindAsync(wrongPassword));
 
-        var unknownEmail = await SendAsync(
-            Post("/v1/login", Json(new { email = UniqueEmail(), password = TestEnvironment.GoodPassword })));
+        var unknownEmail = await SendAsync(Post("/v1/login", Json(new { email = UniqueEmail(), password = TestEnvironment.GoodPassword })));
         Assert.Equal(HttpStatusCode.Unauthorized, unknownEmail.StatusCode);
         Assert.Equal("invalid_credentials", await ErrorKindAsync(unknownEmail));
 
-        var unknownField = await SendAsync(
-            Post("/v1/login", Json(new { email, password = TestEnvironment.GoodPassword, extra = 1 })));
+        var unknownField = await SendAsync(Post("/v1/login", Json(new { email, password = TestEnvironment.GoodPassword, extra = 1 })));
         Assert.Equal(HttpStatusCode.BadRequest, unknownField.StatusCode);
         Assert.Equal("invalid_request", await ErrorKindAsync(unknownField));
     }
@@ -170,8 +158,7 @@ public sealed class AccountContractTests(KitFactory factory) : ApiTestBase(facto
 
         for (var attempt = 0; attempt < 5; attempt++)
         {
-            var failure = await SendAsync(
-                Post("/v1/login", Json(new { email, password = "definitely-wrong-password" })));
+            var failure = await SendAsync(Post("/v1/login", Json(new { email, password = "definitely-wrong-password" })));
             Assert.Equal(HttpStatusCode.Unauthorized, failure.StatusCode);
         }
 
@@ -223,8 +210,7 @@ public sealed class AccountContractTests(KitFactory factory) : ApiTestBase(facto
         var resetToken = Factory.Mailer.LastToken("reset", email);
         Assert.False(string.IsNullOrEmpty(resetToken));
 
-        var unknownField = await SendAsync(
-            Post("/v1/password/reset", Json(new { token = resetToken, password = TestEnvironment.GoodPassword, extra = 1 })));
+        var unknownField = await SendAsync(Post("/v1/password/reset", Json(new { token = resetToken, password = TestEnvironment.GoodPassword, extra = 1 })));
         Assert.Equal(HttpStatusCode.BadRequest, unknownField.StatusCode);
         Assert.Equal("invalid_request", await ErrorKindAsync(unknownField));
 
@@ -252,9 +238,7 @@ public sealed class AccountContractTests(KitFactory factory) : ApiTestBase(facto
     public async Task ConcurrentRegister_CreatesExactlyOneCustomer()
     {
         var email = UniqueEmail();
-        var responses = await Task.WhenAll(
-            SendAsync(Post("/v1/register", Json(new { email, password = TestEnvironment.GoodPassword }))),
-            SendAsync(Post("/v1/register", Json(new { email, password = TestEnvironment.GoodPassword }))));
+        var responses = await Task.WhenAll(SendAsync(Post("/v1/register", Json(new { email, password = TestEnvironment.GoodPassword }))), SendAsync(Post("/v1/register", Json(new { email, password = TestEnvironment.GoodPassword }))));
 
         Assert.All(responses, response => Assert.Equal(HttpStatusCode.Accepted, response.StatusCode));
         Assert.Equal(1, await CountRowsAsync("customers"));
