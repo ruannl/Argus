@@ -53,9 +53,8 @@ public static class PdfParserChild
         }
     }
 
-    private static async Task<PdfChildResponse> ReadAndParseAsync(
-        Stream input,
-        Func<byte[], PdfChildRequestOptions, ParsedStatement> parser)
+    private static async Task<PdfChildResponse> ReadAndParseAsync(Stream input,
+                                                                  Func<byte[], PdfChildRequestOptions, ParsedStatement> parser)
     {
         var headerLengthBytes = new byte[HeaderLengthBytes];
         if (!await ReadExactAsync(input, headerLengthBytes))
@@ -107,7 +106,8 @@ public static class PdfParserChild
         return new PdfChildResponse(true, null, PdfChildProtocol.ToChild(statement));
     }
 
-    private static async Task<bool> ReadExactAsync(Stream stream, byte[] buffer)
+    private static async Task<bool> ReadExactAsync(Stream stream,
+                                                   byte[] buffer)
     {
         var offset = 0;
         while (offset < buffer.Length)
@@ -122,7 +122,8 @@ public static class PdfParserChild
         return true;
     }
 
-    private static async Task WriteAsync(Stream output, PdfChildResponse response)
+    private static async Task WriteAsync(Stream output,
+                                         PdfChildResponse response)
     {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(response, PdfChildProtocol.JsonOptions);
         if (bytes.Length > ImportLimits.MaxPdfChildOutputBytes)
@@ -135,7 +136,8 @@ public static class PdfParserChild
         await output.FlushAsync();
     }
 
-    private static async Task TryWriteAsync(Stream output, PdfChildResponse response)
+    private static async Task TryWriteAsync(Stream output,
+                                            PdfChildResponse response)
     {
         try
         {

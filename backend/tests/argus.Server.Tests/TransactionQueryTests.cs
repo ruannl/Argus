@@ -6,15 +6,18 @@ using Xunit.Abstractions;
 
 namespace argus.Server.Tests;
 
-public sealed class TransactionQueryTests(KitFactory factory, ITestOutputHelper output)
+public sealed class TransactionQueryTests(KitFactory factory,
+                                          ITestOutputHelper output)
     : TransactionTestBase(factory)
 {
     private const string QueryPath = "/v1/finance/transactions/query";
 
-    private async Task<HttpResponseMessage> QueryResponseAsync(string session, object body) =>
+    private async Task<HttpResponseMessage> QueryResponseAsync(string session,
+                                                               object body) =>
         await SendAsync(Post(QueryPath, Json(body), session: session));
 
-    private async Task<JsonElement> QueryAsync(string session, object? body = null)
+    private async Task<JsonElement> QueryAsync(string session,
+                                               object? body = null)
     {
         var response = await QueryResponseAsync(session, body ?? new { });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -24,7 +27,8 @@ public sealed class TransactionQueryTests(KitFactory factory, ITestOutputHelper 
     private static JsonElement[] Rows(JsonElement page) =>
         page.GetProperty("transactions").EnumerateArray().ToArray();
 
-    private static long Count(JsonElement page, string name) =>
+    private static long Count(JsonElement page,
+                              string name) =>
         page.GetProperty(name).GetInt64();
 
     [Fact]

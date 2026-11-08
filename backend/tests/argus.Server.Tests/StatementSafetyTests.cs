@@ -1466,7 +1466,8 @@ public sealed class StatementSafetyTests
         Assert.Equal(-1000, trailing.Rows[3].AmountCents);
     }
 
-    private static List<PdfText> HeaderAt(double y, params double[] xs)
+    private static List<PdfText> HeaderAt(double y,
+                                          params double[] xs)
     {
         var labels = new[]
         {
@@ -1476,7 +1477,8 @@ public sealed class StatementSafetyTests
         return labels.Select((label, index) => new PdfText(xs[index], y, label)).ToList();
     }
 
-    private static void AddPdfHeader(List<PdfText> texts, bool includeFees = true)
+    private static void AddPdfHeader(List<PdfText> texts,
+                                     bool includeFees = true)
     {
         texts.Add(new PdfText(40, 800, "Date"));
         texts.Add(new PdfText(100, 800, "Description"));
@@ -1634,7 +1636,8 @@ public sealed class StatementSafetyTests
         Assert.Contains("date_outside_period", result.Rows[0].ValidationCodes);
     }
 
-    private static void AssertRejected(byte[] bytes, string reason)
+    private static void AssertRejected(byte[] bytes,
+                                       string reason)
     {
         var exception = Assert.Throws<StatementRejectedException>(() =>
             reason == ParserReasons.UnsafeArchive

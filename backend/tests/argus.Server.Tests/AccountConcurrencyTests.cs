@@ -305,10 +305,9 @@ public sealed class AccountConcurrencyTests(KitFactory factory) : ApiTestBase(fa
             (await SendAsync(Get("/v1/me", session: originalSession))).StatusCode);
     }
 
-    private static async Task<int> WaitForBlockedPidAsync(
-        NpgsqlConnection observer,
-        int blockerPid,
-        string queryFragment)
+    private static async Task<int> WaitForBlockedPidAsync(NpgsqlConnection observer,
+                                                          int blockerPid,
+                                                          string queryFragment)
     {
         for (var attempt = 0; attempt < 200; attempt++)
         {

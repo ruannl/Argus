@@ -370,7 +370,8 @@ public sealed class StatementImportConcurrencyTests(KitFactory factory) : ApiTes
         Assert.Equal(40, refreshed.GetProperty("suppressed_count").GetInt32());
     }
 
-    private async Task<JsonElement> KeepAllWithinFileAsync(string session, JsonElement review)
+    private async Task<JsonElement> KeepAllWithinFileAsync(string session,
+                                                           JsonElement review)
     {
         var rows = Rows(review);
         var response = await SendAsync(Patch(
@@ -434,7 +435,8 @@ public sealed class StatementImportConcurrencyTests(KitFactory factory) : ApiTes
         Assert.Equal(5, row.GetProperty("near_candidates").GetArrayLength());
     }
 
-    private async Task<Guid> CreateTagAsync(string session, string name)
+    private async Task<Guid> CreateTagAsync(string session,
+                                            string name)
     {
         var response = await SendAsync(Post(
             "/v1/finance/merchant-tags", Json(new { display_name = name }), session: session));
@@ -464,7 +466,8 @@ public sealed class StatementImportConcurrencyTests(KitFactory factory) : ApiTes
         return await BodyAsync(response);
     }
 
-    private async Task CommitAsync(string session, JsonElement review)
+    private async Task CommitAsync(string session,
+                                   JsonElement review)
     {
         var summary = review.TryGetProperty("summary", out var nested) ? nested : review;
         var response = await SendAsync(Post(
@@ -473,7 +476,8 @@ public sealed class StatementImportConcurrencyTests(KitFactory factory) : ApiTes
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
-    private static string SharedIdentityCsv(int rows, bool reverse)
+    private static string SharedIdentityCsv(int rows,
+                                            bool reverse)
     {
         var builder = new StringBuilder("Date,Description,Amount,ID\n");
         var ids = Enumerable.Range(0, rows)

@@ -39,12 +39,12 @@ public sealed class StatementImportApi(FinanceGuard guard,
         app.MapDelete("/v1/finance/imports/{id:guid}", DeleteAsync);
     }
 
-    private async Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(
-        HttpContext context,
-        CancellationToken cancellationToken) =>
+    private async Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(HttpContext context,
+                                                                               CancellationToken cancellationToken) =>
         await guard.AuthenticateAsync(context, cancellationToken);
 
-    private async Task<IResult> GuardedAsync(Func<Task<IResult>> action, string operation)
+    private async Task<IResult> GuardedAsync(Func<Task<IResult>> action,
+                                             string operation)
     {
         try
         {
@@ -84,7 +84,8 @@ public sealed class StatementImportApi(FinanceGuard guard,
 
     // --- Inspect and prepare -----------------------------------------------
 
-    private Task<IResult> InspectAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> InspectAsync(HttpContext context,
+                                       CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -152,7 +153,8 @@ public sealed class StatementImportApi(FinanceGuard guard,
             });
         }, "imports_inspect");
 
-    private Task<IResult> CreateReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> CreateReviewAsync(HttpContext context,
+                                            CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -203,7 +205,8 @@ public sealed class StatementImportApi(FinanceGuard guard,
             return Results.Json(ReviewResponse.From(detail), statusCode: 201);
         }, "imports_review_create");
 
-    private Task<IResult> ListReviewsAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> ListReviewsAsync(HttpContext context,
+                                           CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -212,7 +215,8 @@ public sealed class StatementImportApi(FinanceGuard guard,
             return Results.Json(new { reviews = reviews.Select(OpenReviewResponse.From).ToArray() });
         }, "imports_reviews_list");
 
-    private Task<IResult> GetReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> GetReviewAsync(HttpContext context,
+                                         CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -226,7 +230,8 @@ public sealed class StatementImportApi(FinanceGuard guard,
             return Results.Json(ReviewResponse.From(detail));
         }, "imports_review_get");
 
-    private Task<IResult> PatchReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> PatchReviewAsync(HttpContext context,
+                                           CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -268,7 +273,8 @@ public sealed class StatementImportApi(FinanceGuard guard,
             return Results.Json(ReviewSummaryResponse.From(summary));
         }, "imports_review_patch");
 
-    private Task<IResult> RefreshReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> RefreshReviewAsync(HttpContext context,
+                                             CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -286,7 +292,8 @@ public sealed class StatementImportApi(FinanceGuard guard,
             return Results.Json(ReviewSummaryResponse.From(summary));
         }, "imports_review_refresh");
 
-    private Task<IResult> CommitReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> CommitReviewAsync(HttpContext context,
+                                            CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -313,7 +320,8 @@ public sealed class StatementImportApi(FinanceGuard guard,
             return Results.Json(CommitResponse.From(result), statusCode: result.Replayed ? 200 : 201);
         }, "imports_review_commit");
 
-    private Task<IResult> AbandonReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> AbandonReviewAsync(HttpContext context,
+                                             CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -338,7 +346,8 @@ public sealed class StatementImportApi(FinanceGuard guard,
 
     // --- History, detail, and statement lifecycle --------------------------
 
-    private Task<IResult> ListHistoryAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> ListHistoryAsync(HttpContext context,
+                                           CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -361,7 +370,8 @@ public sealed class StatementImportApi(FinanceGuard guard,
             });
         }, "imports_history_list");
 
-    private Task<IResult> GetImportAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> GetImportAsync(HttpContext context,
+                                         CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -382,16 +392,17 @@ public sealed class StatementImportApi(FinanceGuard guard,
             });
         }, "imports_statement_get");
 
-    private Task<IResult> HideAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> HideAsync(HttpContext context,
+                                    CancellationToken cancellationToken) =>
         SetVisibilityAsync(context, cancellationToken, hidden: true);
 
-    private Task<IResult> RestoreAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> RestoreAsync(HttpContext context,
+                                       CancellationToken cancellationToken) =>
         SetVisibilityAsync(context, cancellationToken, hidden: false);
 
-    private Task<IResult> SetVisibilityAsync(
-        HttpContext context,
-        CancellationToken cancellationToken,
-        bool hidden) =>
+    private Task<IResult> SetVisibilityAsync(HttpContext context,
+                                             CancellationToken cancellationToken,
+                                             bool hidden) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -418,7 +429,8 @@ public sealed class StatementImportApi(FinanceGuard guard,
             return Results.Json(StatementSummaryResponse.From(summary));
         }, hidden ? "imports_statement_hide" : "imports_statement_restore");
 
-    private Task<IResult> DeleteAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> DeleteAsync(HttpContext context,
+                                      CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -454,7 +466,8 @@ public sealed class StatementImportApi(FinanceGuard guard,
 
     // --- Helpers -----------------------------------------------------------
 
-    private static bool TryDate(string? value, out DateOnly date) =>
+    private static bool TryDate(string? value,
+                                out DateOnly date) =>
         DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture,
             DateTimeStyles.None, out date);
 
@@ -464,18 +477,20 @@ public sealed class StatementImportApi(FinanceGuard guard,
             ? id
             : null;
 
-    private static int QueryInt(HttpContext context, string name, int fallback) =>
+    private static int QueryInt(HttpContext context,
+                                string name,
+                                int fallback) =>
         int.TryParse(context.Request.Query[name].ToString(), NumberStyles.Integer,
             CultureInfo.InvariantCulture, out var value)
             ? value
             : fallback;
 
-    private static Guid? QueryGuid(HttpContext context, string name) =>
+    private static Guid? QueryGuid(HttpContext context,
+                                   string name) =>
         Guid.TryParse(context.Request.Query[name].ToString(), out var value) ? value : null;
 
-    private static async Task<byte[]> ReadJsonBytesAsync(
-        HttpRequest request,
-        CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadJsonBytesAsync(HttpRequest request,
+                                                         CancellationToken cancellationToken)
     {
         if (request.ContentLength is > ImportLimits.MaxJsonBodyBytes)
         {
@@ -535,10 +550,9 @@ public sealed record ImportOptionsRequest(Guid? FinancialAccountId,
                                           bool? ConfirmZar,
                                           bool? StatementOverride);
 
-public sealed record ImportReviewPatchRequest(
-    int? ExpectedReviewVersion,
-    ReviewDecisionRequest[]? Decisions,
-    bool? StatementOverride);
+public sealed record ImportReviewPatchRequest(int? ExpectedReviewVersion,
+                                              ReviewDecisionRequest[]? Decisions,
+                                              bool? StatementOverride);
 
 public sealed record ReviewDecisionRequest(Guid? RowId,
                                            bool? Skip,
@@ -550,14 +564,12 @@ public sealed record ReviewDecisionRequest(Guid? RowId,
 
 public sealed record ReviewVersionRequest(int? ExpectedReviewVersion);
 
-public sealed record ImportCommitRequest(
-    int? ExpectedReviewVersion,
-    string? ConfirmedSummaryHash);
+public sealed record ImportCommitRequest(int? ExpectedReviewVersion,
+                                         string? ConfirmedSummaryHash);
 
-public sealed record StatementMutationRequest(
-    int? ExpectedVersion,
-    long? ExpectedTransactionCount,
-    bool? Confirm);
+public sealed record StatementMutationRequest(int? ExpectedVersion,
+                                              long? ExpectedTransactionCount,
+                                              bool? Confirm);
 
 public sealed record PreviewRowResponse(Guid RowId,
                                         int SourceLine,
@@ -583,9 +595,8 @@ public sealed record PreviewRowResponse(Guid RowId,
         row.Warnings.ToArray());
 }
 
-public sealed record ReviewResponse(
-    ReviewSummaryResponse Summary,
-    ReviewPageResponse Page)
+public sealed record ReviewResponse(ReviewSummaryResponse Summary,
+                                    ReviewPageResponse Page)
 {
     public static ReviewResponse From(ImportReviewDetail detail) => new(
         ReviewSummaryResponse.From(detail.Summary),
@@ -802,14 +813,14 @@ public sealed record StatementRowResponse(Guid Id,
         record.Tags.Select(TagResponse.From).ToArray());
 }
 
-public sealed record TagResponse(Guid Id, string DisplayName)
+public sealed record TagResponse(Guid Id,
+                                 string DisplayName)
 {
     public static TagResponse From(ImportTagRecord record) => new(record.Id, record.DisplayName);
 }
 
-public sealed record CommitResponse(
-    bool Replayed,
-    StatementSummaryResponse Statement)
+public sealed record CommitResponse(bool Replayed,
+                                    StatementSummaryResponse Statement)
 {
     public static CommitResponse From(ImportCommitResult result) => new(
         result.Replayed,

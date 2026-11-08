@@ -200,10 +200,9 @@ differences from the Rust sibling kit.
 
 - Use `backend/.editorconfig` for C#. Use Prettier for frontend source and test
   formatting and `frontend/eslint.config.mjs` for Next.js linting.
-- In C# declarations with four or more parameters, keep the first parameter on
+- In C# declarations with more than one parameter, keep the first parameter on
   the declaration line and align the remaining parameters under it, one per
-  line. Shorter lists can stay inline when readable. Wrap call sites as needed
-  for readability.
+  line. Wrap call sites as needed for readability.
 - Remove unused C# usings and sort the rest with `System` first.
 - Format and lint the code you touch. Keep a repository-wide formatting pass
   separate from feature changes. Load `argus-code-style` for cleanup and

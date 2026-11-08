@@ -109,7 +109,8 @@ public sealed class StatementImportFaultTests
     [InlineData("before_commit", "suppressed")]
     [InlineData("tags_validated", "no_tags")]
     [InlineData("tags_validated", "suppressed")]
-    public async Task ExpiryAtCommitSeamsRollsBackEveryEffect(string pauseStep, string scenario)
+    public async Task ExpiryAtCommitSeamsRollsBackEveryEffect(string pauseStep,
+                                                              string scenario)
     {
         using var injector = new PausingFaultInjector();
         using var factory = new KitFactory(injector);
@@ -228,7 +229,8 @@ public sealed class StatementImportFaultTests
         Assert.Equal(afterCommit, await ImportSnapshotAsync(factory, accountId));
     }
 
-    private static async Task<string> ImportSnapshotAsync(KitFactory factory, Guid accountId)
+    private static async Task<string> ImportSnapshotAsync(KitFactory factory,
+                                                          Guid accountId)
     {
         await using var connection = await factory.CreateDb().OpenAsync();
         await using var command = connection.CreateCommand();
@@ -262,7 +264,8 @@ public sealed class StatementImportFaultTests
         factory.LogCapture.Clear();
     }
 
-    private static async Task<string> NewSessionAsync(KitFactory factory, HttpClient client)
+    private static async Task<string> NewSessionAsync(KitFactory factory,
+                                                      HttpClient client)
     {
         var email = $"fault-{Guid.NewGuid():N}@example.test";
         var password = TestEnvironment.GoodPassword;
@@ -280,7 +283,8 @@ public sealed class StatementImportFaultTests
         return (await BodyAsync(login)).GetProperty("token").GetString()!;
     }
 
-    private static async Task<Guid> CreateAccountAsync(HttpClient client, string session)
+    private static async Task<Guid> CreateAccountAsync(HttpClient client,
+                                                       string session)
     {
         var response = await client.SendAsync(Request(HttpMethod.Post, "/v1/finance/accounts",
             JsonSerializer.Serialize(new { display_name = "Cheque" }), session));
@@ -348,7 +352,8 @@ public sealed class StatementImportFaultTests
     private static async Task<JsonElement> BodyAsync(HttpResponseMessage response) =>
         JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
 
-    private static async Task<long> CountAsync(KitFactory factory, string table)
+    private static async Task<long> CountAsync(KitFactory factory,
+                                               string table)
     {
         var db = factory.CreateDb();
         await using var connection = await db.OpenAsync();

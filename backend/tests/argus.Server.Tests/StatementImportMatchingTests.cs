@@ -23,10 +23,9 @@ public sealed class StatementImportMatchingTests(KitFactory factory) : ApiTestBa
         return (await BodyAsync(response)).GetProperty("id").GetGuid();
     }
 
-    private static ParsedStatementRow Row(
-        int index,
-        string? sourceNamespace,
-        string? sourceId)
+    private static ParsedStatementRow Row(int index,
+                                          string? sourceNamespace,
+                                          string? sourceId)
     {
         var date = new DateOnly(2025, 1, 2);
         const string description = "Coffee";

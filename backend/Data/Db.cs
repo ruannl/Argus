@@ -19,7 +19,9 @@ public sealed record CustomerRecord(Guid Id,
 
 public abstract record ResetRequestOutcome
 {
-    public sealed record Issued(Guid CustomerId, string Recipient, string RawToken) : ResetRequestOutcome;
+    public sealed record Issued(Guid CustomerId,
+                                string Recipient,
+                                string RawToken) : ResetRequestOutcome;
 
     public sealed record Shade : ResetRequestOutcome;
 }
@@ -98,9 +100,8 @@ public sealed class Db
     /// allocates deterministic occurrence slots without dropping data. The
     /// marker makes the operation idempotent across restarts.
     /// </summary>
-    public static async Task BackfillCanonicalIdentitiesAsync(
-        NpgsqlConnection connection,
-        CancellationToken cancellationToken = default)
+    public static async Task BackfillCanonicalIdentitiesAsync(NpgsqlConnection connection,
+                                                              CancellationToken cancellationToken = default)
     {
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
@@ -389,7 +390,8 @@ public sealed class Db
         return builder.ConnectionString;
     }
 
-    private static string? QueryValue(string query, string name)
+    private static string? QueryValue(string query,
+                                      string name)
     {
         foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
         {

@@ -58,7 +58,8 @@ public sealed class AccountApi(AppSettings settings,
             ? Results.Json(new { status = "ok" })
             : Errors.OriginRejected();
 
-    private async Task<IResult> MeAsync(HttpContext context, CancellationToken cancellationToken)
+    private async Task<IResult> MeAsync(HttpContext context,
+                                        CancellationToken cancellationToken)
     {
         if (Guard(context) is { } failure)
         {
@@ -81,7 +82,8 @@ public sealed class AccountApi(AppSettings settings,
         return customer is null ? Errors.Unauthorized() : Results.Json(AccountResponse.From(customer));
     }
 
-    private async Task<IResult> LoginAsync(HttpContext context, CancellationToken cancellationToken)
+    private async Task<IResult> LoginAsync(HttpContext context,
+                                           CancellationToken cancellationToken)
     {
         if (Guard(context) is { } failure)
         {
@@ -199,7 +201,8 @@ public sealed class AccountApi(AppSettings settings,
         return Results.Json(new LoginResponse(token, Timestamps.Format(expiresAt)), statusCode: 200);
     }
 
-    private async Task<IResult> LogoutAsync(HttpContext context, CancellationToken cancellationToken)
+    private async Task<IResult> LogoutAsync(HttpContext context,
+                                            CancellationToken cancellationToken)
     {
         if (Guard(context) is { } failure)
         {
@@ -220,7 +223,8 @@ public sealed class AccountApi(AppSettings settings,
         return Results.StatusCode(204);
     }
 
-    private async Task<IResult> RegisterAsync(HttpContext context, CancellationToken cancellationToken)
+    private async Task<IResult> RegisterAsync(HttpContext context,
+                                              CancellationToken cancellationToken)
     {
         if (Guard(context) is { } failure)
         {
@@ -291,7 +295,8 @@ public sealed class AccountApi(AppSettings settings,
         return Results.Json(new { status = "accepted" }, statusCode: 202);
     }
 
-    private async Task<IResult> ResendVerificationAsync(HttpContext context, CancellationToken cancellationToken)
+    private async Task<IResult> ResendVerificationAsync(HttpContext context,
+                                                        CancellationToken cancellationToken)
     {
         if (Guard(context) is { } failure)
         {
@@ -335,7 +340,8 @@ public sealed class AccountApi(AppSettings settings,
         return Results.Json(new { status = "accepted" }, statusCode: 202);
     }
 
-    private async Task<IResult> RequestPasswordResetAsync(HttpContext context, CancellationToken cancellationToken)
+    private async Task<IResult> RequestPasswordResetAsync(HttpContext context,
+                                                          CancellationToken cancellationToken)
     {
         if (Guard(context) is { } failure)
         {
@@ -375,7 +381,8 @@ public sealed class AccountApi(AppSettings settings,
         return Results.Json(new { status = "accepted" }, statusCode: 202);
     }
 
-    private async Task<IResult> ResetPasswordAsync(HttpContext context, CancellationToken cancellationToken)
+    private async Task<IResult> ResetPasswordAsync(HttpContext context,
+                                                   CancellationToken cancellationToken)
     {
         if (Guard(context) is { } failure)
         {
@@ -432,7 +439,8 @@ public sealed class AccountApi(AppSettings settings,
         return Results.Json(new { status = "reset" });
     }
 
-    private async Task<IResult> VerifyAsync(HttpContext context, CancellationToken cancellationToken)
+    private async Task<IResult> VerifyAsync(HttpContext context,
+                                            CancellationToken cancellationToken)
     {
         if (Guard(context) is { } failure)
         {
@@ -479,7 +487,8 @@ public sealed class AccountApi(AppSettings settings,
     /// through the frontend. Signature failure 401, malformed 400, apply
     /// failure 500, otherwise 200 with an empty body.
     /// </summary>
-    private async Task<IResult> BillingWebhookAsync(HttpContext context, CancellationToken cancellationToken)
+    private async Task<IResult> BillingWebhookAsync(HttpContext context,
+                                                    CancellationToken cancellationToken)
     {
         string body;
         using (var reader = new StreamReader(context.Request.Body, Encoding.UTF8))
@@ -514,7 +523,8 @@ public sealed class AccountApi(AppSettings settings,
         return Results.Ok();
     }
 
-    private async Task<bool?> ScreenPasswordAsync(string password, CancellationToken cancellationToken)
+    private async Task<bool?> ScreenPasswordAsync(string password,
+                                                  CancellationToken cancellationToken)
     {
         try
         {

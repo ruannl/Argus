@@ -8,10 +8,9 @@ namespace argus.Server.Http;
 /// then scopes every store call by that customer id. User-defined names never
 /// reach a log line, an audit event, or a URL segment.
 /// </summary>
-public sealed class FinanceApi(
-    FinanceGuard guard,
-    FinanceStore financeStore,
-    ILoggerFactory loggerFactory)
+public sealed class FinanceApi(FinanceGuard guard,
+                               FinanceStore financeStore,
+                               ILoggerFactory loggerFactory)
 {
     private readonly ILogger _audit = loggerFactory.CreateLogger("audit");
     private readonly ILogger _logger = loggerFactory.CreateLogger("finance");
@@ -41,17 +40,18 @@ public sealed class FinanceApi(
 
     // --- Guard -------------------------------------------------------------
 
-    private Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(
-        HttpContext context,
-        CancellationToken cancellationToken) =>
+    private Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(HttpContext context,
+                                                                         CancellationToken cancellationToken) =>
         guard.AuthenticateAsync(context, cancellationToken);
 
-    private Task<IResult> GuardedAsync(Func<Task<IResult>> action, string operation) =>
+    private Task<IResult> GuardedAsync(Func<Task<IResult>> action,
+                                       string operation) =>
         guard.GuardedAsync(action, operation, _logger);
 
     // --- Financial accounts ------------------------------------------------
 
-    private Task<IResult> ListAccountsAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> ListAccountsAsync(HttpContext context,
+                                            CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -67,7 +67,8 @@ public sealed class FinanceApi(
             });
         }, "accounts_list");
 
-    private Task<IResult> CreateAccountAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> CreateAccountAsync(HttpContext context,
+                                             CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -105,7 +106,8 @@ public sealed class FinanceApi(
             }
         }, "accounts_create");
 
-    private Task<IResult> UpdateAccountAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> UpdateAccountAsync(HttpContext context,
+                                             CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -151,16 +153,17 @@ public sealed class FinanceApi(
             }
         }, "accounts_update");
 
-    private Task<IResult> ArchiveAccountAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> ArchiveAccountAsync(HttpContext context,
+                                              CancellationToken cancellationToken) =>
         SetAccountArchivedAsync(context, cancellationToken, archived: true);
 
-    private Task<IResult> RestoreAccountAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> RestoreAccountAsync(HttpContext context,
+                                              CancellationToken cancellationToken) =>
         SetAccountArchivedAsync(context, cancellationToken, archived: false);
 
-    private Task<IResult> SetAccountArchivedAsync(
-        HttpContext context,
-        CancellationToken cancellationToken,
-        bool archived) =>
+    private Task<IResult> SetAccountArchivedAsync(HttpContext context,
+                                                  CancellationToken cancellationToken,
+                                                  bool archived) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -201,7 +204,8 @@ public sealed class FinanceApi(
 
     // --- Categories --------------------------------------------------------
 
-    private Task<IResult> ListCategoriesAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> ListCategoriesAsync(HttpContext context,
+                                              CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -217,7 +221,8 @@ public sealed class FinanceApi(
             });
         }, "categories_list");
 
-    private Task<IResult> CreateCategoryAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> CreateCategoryAsync(HttpContext context,
+                                              CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -241,7 +246,8 @@ public sealed class FinanceApi(
             return CategoryResult(outcome, customerId.Value, "audit.finance_category_created", created: true);
         }, "categories_create");
 
-    private Task<IResult> UpdateCategoryAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> UpdateCategoryAsync(HttpContext context,
+                                              CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -273,16 +279,17 @@ public sealed class FinanceApi(
             return CategoryResult(outcome, customerId.Value, "audit.finance_category_updated", created: false);
         }, "categories_update");
 
-    private Task<IResult> ArchiveCategoryAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> ArchiveCategoryAsync(HttpContext context,
+                                               CancellationToken cancellationToken) =>
         SetCategoryArchivedAsync(context, cancellationToken, archived: true);
 
-    private Task<IResult> RestoreCategoryAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> RestoreCategoryAsync(HttpContext context,
+                                               CancellationToken cancellationToken) =>
         SetCategoryArchivedAsync(context, cancellationToken, archived: false);
 
-    private Task<IResult> SetCategoryArchivedAsync(
-        HttpContext context,
-        CancellationToken cancellationToken,
-        bool archived) =>
+    private Task<IResult> SetCategoryArchivedAsync(HttpContext context,
+                                                   CancellationToken cancellationToken,
+                                                   bool archived) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -310,7 +317,8 @@ public sealed class FinanceApi(
                 created: false);
         }, archived ? "categories_archive" : "categories_restore");
 
-    private Task<IResult> DeleteCategoryAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> DeleteCategoryAsync(HttpContext context,
+                                              CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -385,7 +393,8 @@ public sealed class FinanceApi(
 
     // --- Merchant tags -----------------------------------------------------
 
-    private Task<IResult> ListMerchantTagsAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> ListMerchantTagsAsync(HttpContext context,
+                                                CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -401,7 +410,8 @@ public sealed class FinanceApi(
             });
         }, "merchant_tags_list");
 
-    private Task<IResult> CreateMerchantTagAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> CreateMerchantTagAsync(HttpContext context,
+                                                 CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -424,7 +434,8 @@ public sealed class FinanceApi(
             return MerchantTagResult(outcome, customerId.Value, "audit.finance_merchant_tag_created", created: true);
         }, "merchant_tags_create");
 
-    private Task<IResult> UpdateMerchantTagAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> UpdateMerchantTagAsync(HttpContext context,
+                                                 CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -454,16 +465,17 @@ public sealed class FinanceApi(
             return MerchantTagResult(outcome, customerId.Value, "audit.finance_merchant_tag_updated", created: false);
         }, "merchant_tags_update");
 
-    private Task<IResult> ArchiveMerchantTagAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> ArchiveMerchantTagAsync(HttpContext context,
+                                                  CancellationToken cancellationToken) =>
         SetMerchantTagArchivedAsync(context, cancellationToken, archived: true);
 
-    private Task<IResult> RestoreMerchantTagAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> RestoreMerchantTagAsync(HttpContext context,
+                                                  CancellationToken cancellationToken) =>
         SetMerchantTagArchivedAsync(context, cancellationToken, archived: false);
 
-    private Task<IResult> SetMerchantTagArchivedAsync(
-        HttpContext context,
-        CancellationToken cancellationToken,
-        bool archived) =>
+    private Task<IResult> SetMerchantTagArchivedAsync(HttpContext context,
+                                                      CancellationToken cancellationToken,
+                                                      bool archived) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
@@ -491,7 +503,8 @@ public sealed class FinanceApi(
                 created: false);
         }, archived ? "merchant_tags_archive" : "merchant_tags_restore");
 
-    private Task<IResult> DeleteMerchantTagAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<IResult> DeleteMerchantTagAsync(HttpContext context,
+                                                 CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);

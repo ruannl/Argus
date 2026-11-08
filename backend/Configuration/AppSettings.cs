@@ -115,7 +115,9 @@ public sealed class AppSettings
         };
     }
 
-    private static void RequireMinimumBytes(string value, int minimum, string name)
+    private static void RequireMinimumBytes(string value,
+                                            int minimum,
+                                            string name)
     {
         if (Encoding.UTF8.GetByteCount(value) < minimum)
         {
@@ -181,7 +183,8 @@ public sealed class AppSettings
         }
     }
 
-    private static string? QueryValue(string query, string name)
+    private static string? QueryValue(string query,
+                                      string name)
     {
         foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
         {

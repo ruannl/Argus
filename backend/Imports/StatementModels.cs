@@ -17,7 +17,8 @@ public enum StatementFormat
 
 public static class StatementSourceKinds
 {
-    public static bool TryParse(string? value, out StatementSourceKind kind)
+    public static bool TryParse(string? value,
+                                out StatementSourceKind kind)
     {
         switch (value)
         {

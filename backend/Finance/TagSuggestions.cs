@@ -7,9 +7,8 @@ namespace argus.Server.Finance;
 /// </summary>
 public static class TagSuggestions
 {
-    public static IEnumerable<Guid> Match(
-        string normalizedDescription,
-        IReadOnlyList<(Guid Id, string[] Tokens)> tags)
+    public static IEnumerable<Guid> Match(string normalizedDescription,
+                                          IReadOnlyList<(Guid Id, string[] Tokens)> tags)
     {
         if (string.IsNullOrWhiteSpace(normalizedDescription))
         {

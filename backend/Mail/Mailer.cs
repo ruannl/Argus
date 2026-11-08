@@ -17,12 +17,12 @@ public interface IMailer
                                 string frontendUrl,
                                 CancellationToken cancellationToken = default);
 
-    Task SendAlreadyRegisteredAsync(
-        string recipient,
-        string frontendUrl,
-        CancellationToken cancellationToken = default);
+    Task SendAlreadyRegisteredAsync(string recipient,
+                                    string frontendUrl,
+                                    CancellationToken cancellationToken = default);
 
-    Task SendSuspiciousLoginAsync(string recipient, CancellationToken cancellationToken = default);
+    Task SendSuspiciousLoginAsync(string recipient,
+                                  CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -32,7 +32,8 @@ public interface IMailer
 /// failures are logged, never surfaced to the caller: the account flows stay
 /// non-enumerating.
 /// </summary>
-public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> logger) : IMailer
+public sealed class ResendMailer(AppSettings settings,
+                                 ILogger<ResendMailer> logger) : IMailer
 {
     private const string Endpoint = "https://api.resend.com/emails";
     private const int AntiEnumerationPadMs = 750;
@@ -68,10 +69,9 @@ public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> log
             cancellationToken);
     }
 
-    public Task SendAlreadyRegisteredAsync(
-        string recipient,
-        string frontendUrl,
-        CancellationToken cancellationToken = default)
+    public Task SendAlreadyRegisteredAsync(string recipient,
+                                           string frontendUrl,
+                                           CancellationToken cancellationToken = default)
     {
         var link = $"{frontendUrl.TrimEnd('/')}/login";
         return SendAsync(
@@ -82,7 +82,8 @@ public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> log
             cancellationToken);
     }
 
-    public Task SendSuspiciousLoginAsync(string recipient, CancellationToken cancellationToken = default)
+    public Task SendSuspiciousLoginAsync(string recipient,
+                                         CancellationToken cancellationToken = default)
     {
         return SendAsync(
             recipient,

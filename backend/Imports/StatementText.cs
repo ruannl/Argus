@@ -48,9 +48,8 @@ public static class StatementText
     /// while still trimming the documented outer padding; PDF continuation
     /// fragments continue to collapse their display whitespace.
     /// </summary>
-    public static (string Display, string Normalized, bool Empty, bool TooLong) NormalizeDescription(
-        string? raw,
-        bool collapseDisplay = true)
+    public static (string Display, string Normalized, bool Empty, bool TooLong) NormalizeDescription(string? raw,
+                                                                                                     bool collapseDisplay = true)
     {
         var source = (raw ?? string.Empty).Trim();
         var empty = source.Length == 0;
@@ -69,7 +68,8 @@ public static class StatementText
         return (display, normalized, empty, tooLong);
     }
 
-    public static string TruncateScalars(string value, int max)
+    public static string TruncateScalars(string value,
+                                         int max)
     {
         if (CountScalars(value) <= max)
         {
@@ -130,11 +130,14 @@ public static class StatementDates
         "yy/MM/dd",
     ];
 
-    public static bool TryParseFullYear(string value, out DateOnly date) =>
+    public static bool TryParseFullYear(string value,
+                                        out DateOnly date) =>
         DateOnly.TryParseExact(value.Trim(), _fullYearFormats, CultureInfo.InvariantCulture,
             DateTimeStyles.None, out date);
 
-    public static bool TryParseFullYearWithFormat(string value, string format, out DateOnly date)
+    public static bool TryParseFullYearWithFormat(string value,
+                                                  string format,
+                                                  out DateOnly date)
     {
         date = default;
         if (!DateTime.TryParseExact(value.Trim(), format, CultureInfo.InvariantCulture,
@@ -255,12 +258,16 @@ public static class StatementDates
         return (null, false);
     }
 
-    public static bool InPeriod(DateOnly date, DateOnly start, DateOnly end) =>
+    public static bool InPeriod(DateOnly date,
+                                DateOnly start,
+                                DateOnly end) =>
         date >= start && date <= end;
 
     public static bool IsFuture(DateOnly date) => date > DateOnly.FromDateTime(DateTime.UtcNow);
 
-    private static DateOnly? TryCreate(int year, int month, int day)
+    private static DateOnly? TryCreate(int year,
+                                       int month,
+                                       int day)
     {
         if (year is < 1900 or > 2099 || month is < 1 or > 12 || day < 1)
         {
@@ -278,7 +285,8 @@ public static class StatementAmounts
 {
     public const long MaxAbsoluteCents = 999_999_999_999_999_999L;
 
-    public static bool TryParseSignedDecimal(string? raw, out long cents)
+    public static bool TryParseSignedDecimal(string? raw,
+                                             out long cents)
     {
         cents = 0;
         if (string.IsNullOrWhiteSpace(raw))
@@ -391,10 +399,9 @@ public static class StatementAmounts
         return true;
     }
 
-    private static string? NormalizeGrouping(
-        string value,
-        string decimalSeparator,
-        string thousandsSeparator)
+    private static string? NormalizeGrouping(string value,
+                                             string decimalSeparator,
+                                             string thousandsSeparator)
     {
         var decimalIndex = decimalSeparator.Length == 0
             ? -1
@@ -438,7 +445,8 @@ public static class StatementAmounts
         return fractionPart.Length == 0 ? integerPart : $"{integerPart}.{fractionPart}";
     }
 
-    private static bool ValidateGrouping(string integerPart, string separator)
+    private static bool ValidateGrouping(string integerPart,
+                                         string separator)
     {
         if (integerPart.Length == 0)
         {
@@ -466,7 +474,9 @@ public static class StatementAmounts
         return true;
     }
 
-    private static bool TryParseDecimalDigits(string value, char separator, out long cents)
+    private static bool TryParseDecimalDigits(string value,
+                                              char separator,
+                                              out long cents)
     {
         cents = 0;
         var parts = value.Split(separator);

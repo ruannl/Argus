@@ -81,9 +81,8 @@ public sealed record ImportReviewPage(IReadOnlyList<ImportReviewRowRecord> Rows,
                                       int Page,
                                       int PageSize);
 
-public sealed record ImportReviewDetail(
-    ImportReviewSummaryRecord Summary,
-    ImportReviewPage Page);
+public sealed record ImportReviewDetail(ImportReviewSummaryRecord Summary,
+                                        ImportReviewPage Page);
 
 public sealed record ImportOpenReviewSummary(Guid Id,
                                              Guid FinancialAccountId,
@@ -117,7 +116,8 @@ public sealed record ImportStatementSummary(Guid Id,
                                             DateTime CreatedAt,
                                             DateTime UpdatedAt);
 
-public sealed record ImportTagRecord(Guid Id, string DisplayName);
+public sealed record ImportTagRecord(Guid Id,
+                                     string DisplayName);
 
 public sealed record ImportStatementRowRecord(Guid Id,
                                               int SourceRowNumber,
@@ -135,15 +135,17 @@ public sealed record ImportStatementDetail(ImportStatementSummary Summary,
                                            int PageSize,
                                            long ExpectedTransactionCount);
 
-public sealed record ImportHistoryPage(
-    IReadOnlyList<ImportStatementSummary> Items,
-    string? NextCursor);
+public sealed record ImportHistoryPage(IReadOnlyList<ImportStatementSummary> Items,
+                                       string? NextCursor);
 
-public sealed record ImportDeleteResult(bool Deleted, long DeletedTransactionCount);
+public sealed record ImportDeleteResult(bool Deleted,
+                                        long DeletedTransactionCount);
 
-public sealed record ImportCommitResult(ImportStatementSummary Summary, bool Replayed);
+public sealed record ImportCommitResult(ImportStatementSummary Summary,
+                                        bool Replayed);
 
-public sealed record ImportAbandonResult(bool Committed, ImportCommitResult? Commit);
+public sealed record ImportAbandonResult(bool Committed,
+                                         ImportCommitResult? Commit);
 
 public sealed record ImportDecision(Guid RowId,
                                     bool? Skip,
@@ -200,20 +202,18 @@ public sealed class StatementImportStore
     private readonly FinanceStore _financeStore;
     private readonly IImportFaultInjector _faults;
 
-    public StatementImportStore(
-        Db db,
-        FinanceStore financeStore,
-        IImportFaultInjector faults)
+    public StatementImportStore(Db db,
+                                FinanceStore financeStore,
+                                IImportFaultInjector faults)
     {
         _db = db;
         _financeStore = financeStore;
         _faults = faults;
     }
 
-    public async Task<ImportAccountRecord?> GetAccountAsync(
-        Guid customerId,
-        Guid accountId,
-        CancellationToken cancellationToken = default)
+    public async Task<ImportAccountRecord?> GetAccountAsync(Guid customerId,
+                                                            Guid accountId,
+                                                            CancellationToken cancellationToken = default)
     {
         await using var connection = await _db.OpenAsync(cancellationToken);
         return await GetAccountAsync(connection, null, customerId, accountId, false, cancellationToken);
@@ -333,9 +333,8 @@ public sealed class StatementImportStore
         return new ImportReviewDetail(summary, page);
     }
 
-    public async Task<IReadOnlyList<ImportOpenReviewSummary>> ListOpenReviewsAsync(
-        Guid customerId,
-        CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ImportOpenReviewSummary>> ListOpenReviewsAsync(Guid customerId,
+                                                                                   CancellationToken cancellationToken = default)
     {
         await using var connection = await _db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -1225,7 +1224,8 @@ public sealed class StatementImportStore
         return new DuplicateSnapshot(rows);
     }
 
-    private static IncomingRow? ToIncoming(ParsedStatementRow row, int index)
+    private static IncomingRow? ToIncoming(ParsedStatementRow row,
+                                           int index)
     {
         if (row.TransactionDate is null || row.AmountCents is null)
         {
@@ -1260,10 +1260,9 @@ public sealed class StatementImportStore
         row.SourceIdNamespace,
         row.SourceIdValue);
 
-    private static List<(IncomingRow Incoming, ExistingRow Existing)> MatchOccurrences(
-        IReadOnlyList<IncomingRow> incoming,
-        IReadOnlyList<ExistingRow> existing,
-        CancellationToken cancellationToken)
+    private static List<(IncomingRow Incoming, ExistingRow Existing)> MatchOccurrences(IReadOnlyList<IncomingRow> incoming,
+                                                                                       IReadOnlyList<ExistingRow> existing,
+                                                                                       CancellationToken cancellationToken)
     {
         if (incoming.Count == 0 || existing.Count == 0)
         {
@@ -1302,7 +1301,8 @@ public sealed class StatementImportStore
                 throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
             }
             var matchExisting = Enumerable.Repeat(-1, remainingExisting.Count).ToArray();
-            bool TryMatch(int incomingIndex, bool[] seen)
+            bool TryMatch(int incomingIndex,
+                          bool[] seen)
             {
                 foreach (var existingIndex in adjacency[incomingIndex])
                 {
@@ -1365,7 +1365,8 @@ public sealed class StatementImportStore
         return matched;
     }
 
-    private static double Jaccard(string left, string right)
+    private static double Jaccard(string left,
+                                  string right)
     {
         if (left.Length == 0 && right.Length == 0)
         {
@@ -1992,7 +1993,8 @@ public sealed class StatementImportStore
         return rows;
     }
 
-    private static void EnsureEditable(ImportReviewSummaryRecord summary, int expectedVersion)
+    private static void EnsureEditable(ImportReviewSummaryRecord summary,
+                                       int expectedVersion)
     {
         if (summary.Status == "Expired" || summary.ExpiresAt <= DateTime.UtcNow)
         {
@@ -2083,10 +2085,9 @@ public sealed class StatementImportStore
         return Convert.ToHexStringLower(hash.GetHashAndReset());
     }
 
-    private static long EstimatePayload(
-        ParsedStatement parsed,
-        ParserConfig config,
-        IReadOnlyList<ImportReviewRowRecord>? rows = null)
+    private static long EstimatePayload(ParsedStatement parsed,
+                                        ParserConfig config,
+                                        IReadOnlyList<ImportReviewRowRecord>? rows = null)
     {
         long bytes = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(config, _storageJson));
         foreach (var row in parsed.Rows)
@@ -2929,10 +2930,9 @@ public sealed class StatementImportStore
     /// receipt both establish ownership; anything else must return the same
     /// 404 as an unknown operation.
     /// </summary>
-    private async Task<bool> OwnedOperationExistsAsync(
-        Guid customerId,
-        Guid operationId,
-        CancellationToken cancellationToken)
+    private async Task<bool> OwnedOperationExistsAsync(Guid customerId,
+                                                       Guid operationId,
+                                                       CancellationToken cancellationToken)
     {
         await using var connection = await _db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -3402,7 +3402,8 @@ public sealed class StatementImportStore
     private static string Digest(string value) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
-    private static string EncodeCursor(DateTime createdAt, Guid id) =>
+    private static string EncodeCursor(DateTime createdAt,
+                                       Guid id) =>
         Convert.ToBase64String(Encoding.UTF8.GetBytes($"{createdAt:O}|{id}"))
             .TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
@@ -3438,7 +3439,8 @@ public sealed class StatementImportStore
 
     private sealed record DuplicateSnapshot(IReadOnlyList<ImportReviewRowRecord> Rows);
 
-    private sealed record RowDecision(bool Skip, bool Override);
+    private sealed record RowDecision(bool Skip,
+                                      bool Override);
 
     private sealed record IncomingRow(int Index,
                                       Guid RowId,

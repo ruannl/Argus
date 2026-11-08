@@ -14,9 +14,8 @@ public sealed class ParserAdmissionTests
         Assert.Equal(ParserReasons.ImportBusy, exception.Reason);
     }
 
-    private static async Task AssertAdmittedAsync(
-        ParserAdmission admission,
-        int expected)
+    private static async Task AssertAdmittedAsync(ParserAdmission admission,
+                                                  int expected)
     {
         await admission.WaitForCapacityAsync().WaitAsync(TimeSpan.FromSeconds(2));
         var result = await admission.RunAsync(

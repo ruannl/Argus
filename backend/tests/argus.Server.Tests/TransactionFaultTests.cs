@@ -45,7 +45,9 @@ public sealed class TransactionFaultTests
         }
     }
 
-    private static HttpRequestMessage Post(string path, string json, string? session = null)
+    private static HttpRequestMessage Post(string path,
+                                           string json,
+                                           string? session = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
@@ -81,10 +83,9 @@ public sealed class TransactionFaultTests
         factory.Mailer.Clear();
     }
 
-    private static async Task<string> NewSessionAsync(
-        KitFactory factory,
-        HttpClient client,
-        string email)
+    private static async Task<string> NewSessionAsync(KitFactory factory,
+                                                      HttpClient client,
+                                                      string email)
     {
         var register = await client.SendAsync(Post(
             "/v1/register", JsonSerializer.Serialize(new
@@ -116,10 +117,9 @@ public sealed class TransactionFaultTests
                                     Guid StatementId,
                                     Guid RowId);
 
-    private static async Task<Workspace> SeedWorkspaceAsync(
-        KitFactory factory,
-        HttpClient client,
-        string session)
+    private static async Task<Workspace> SeedWorkspaceAsync(KitFactory factory,
+                                                            HttpClient client,
+                                                            string session)
     {
         var me = await client.SendAsync(Get("/v1/me", session));
         Assert.Equal(HttpStatusCode.OK, me.StatusCode);
@@ -201,7 +201,8 @@ public sealed class TransactionFaultTests
             customerId, accountId, sourceCategory, targetCategory, tagId, statementId, rowId);
     }
 
-    private static HttpRequestMessage Get(string path, string session)
+    private static HttpRequestMessage Get(string path,
+                                          string session)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, path);
         request.Headers.Add(Brand.ApplicationSecretHeader, TestEnvironment.ApiSecret);
@@ -238,10 +239,9 @@ public sealed class TransactionFaultTests
         return await BodyAsync(response);
     }
 
-    private static HttpRequestMessage ApplyRequest(
-        Guid operationId,
-        JsonElement prepared,
-        string session) =>
+    private static HttpRequestMessage ApplyRequest(Guid operationId,
+                                                   JsonElement prepared,
+                                                   string session) =>
         Post(
             $"/v1/finance/transactions/operations/{operationId}/apply",
             JsonSerializer.Serialize(new
@@ -498,7 +498,8 @@ public sealed class TransactionFaultTests
             secondFactory, $"SELECT COUNT(*) FROM transactions WHERE id = '{workspace.RowId}'"));
     }
 
-    private static async Task<long> ScalarAsync(KitFactory factory, string sql)
+    private static async Task<long> ScalarAsync(KitFactory factory,
+                                                string sql)
     {
         var db = factory.CreateDb();
         await using var connection = await db.OpenAsync();
@@ -507,7 +508,8 @@ public sealed class TransactionFaultTests
         return Convert.ToInt64(await command.ExecuteScalarAsync());
     }
 
-    private static async Task<Guid> ScalarGuidAsync(KitFactory factory, string sql)
+    private static async Task<Guid> ScalarGuidAsync(KitFactory factory,
+                                                    string sql)
     {
         var db = factory.CreateDb();
         await using var connection = await db.OpenAsync();
@@ -516,7 +518,8 @@ public sealed class TransactionFaultTests
         return (Guid)(await command.ExecuteScalarAsync())!;
     }
 
-    private static async Task<string?> ScalarStringAsync(KitFactory factory, string sql)
+    private static async Task<string?> ScalarStringAsync(KitFactory factory,
+                                                         string sql)
     {
         var db = factory.CreateDb();
         await using var connection = await db.OpenAsync();

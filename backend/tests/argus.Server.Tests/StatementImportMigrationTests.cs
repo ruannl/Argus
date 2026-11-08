@@ -159,14 +159,16 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
         }
     }
 
-    private static async Task<object?> ScalarAsync(NpgsqlConnection connection, string sql)
+    private static async Task<object?> ScalarAsync(NpgsqlConnection connection,
+                                                   string sql)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         return await command.ExecuteScalarAsync();
     }
 
-    private static async Task ExecuteAsync(NpgsqlConnection connection, string sql)
+    private static async Task ExecuteAsync(NpgsqlConnection connection,
+                                           string sql)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;

@@ -89,7 +89,9 @@ public enum MerchantTagFilterKind
     Untagged,
 }
 
-public sealed record TransactionAccountRef(Guid Id, string DisplayName, bool IsArchived);
+public sealed record TransactionAccountRef(Guid Id,
+                                           string DisplayName,
+                                           bool IsArchived);
 
 public sealed record TransactionCategoryRef(Guid Id,
                                             string DisplayName,
@@ -97,7 +99,9 @@ public sealed record TransactionCategoryRef(Guid Id,
                                             bool IsSystem,
                                             bool IsArchived);
 
-public sealed record TransactionTagRef(Guid Id, string DisplayName, bool IsArchived);
+public sealed record TransactionTagRef(Guid Id,
+                                       string DisplayName,
+                                       bool IsArchived);
 
 public sealed record TransactionStatementRef(Guid Id,
                                              string StatementLabel,
@@ -163,19 +167,18 @@ public sealed record TransactionAction(Guid? CategoryId,
         $"hidden={IsHiddenByUser?.ToString() ?? string.Empty}");
 }
 
-public sealed record TransactionSelectionMember(Guid Id, int ExpectedVersion);
+public sealed record TransactionSelectionMember(Guid Id,
+                                                int ExpectedVersion);
 
-public sealed record TransactionSelectionPlan(
-    string Mode,
-    TransactionSelectionMember[] ExplicitMembers,
-    TransactionFilter? Filters);
+public sealed record TransactionSelectionPlan(string Mode,
+                                              TransactionSelectionMember[] ExplicitMembers,
+                                              TransactionFilter? Filters);
 
 public static class TransactionRequestParser
 {
-    public static bool TryParseQuery(
-        TransactionQueryRequest request,
-        out TransactionQueryPlan plan,
-        out string error)
+    public static bool TryParseQuery(TransactionQueryRequest request,
+                                     out TransactionQueryPlan plan,
+                                     out string error)
     {
         plan = new TransactionQueryPlan(TransactionFilter.Default, 1, 25, "date", "desc");
         error = TransactionErrorCodes.InvalidRequest;
@@ -214,7 +217,8 @@ public static class TransactionRequestParser
         return true;
     }
 
-    public static bool TryParseFilter(TransactionFiltersRequest? request, out TransactionFilter filter)
+    public static bool TryParseFilter(TransactionFiltersRequest? request,
+                                      out TransactionFilter filter)
     {
         filter = TransactionFilter.Default;
         if (request is null)
@@ -314,9 +318,8 @@ public static class TransactionRequestParser
         return true;
     }
 
-    public static bool TryParseAction(
-        TransactionChangesRequest? request,
-        out TransactionAction action)
+    public static bool TryParseAction(TransactionChangesRequest? request,
+                                      out TransactionAction action)
     {
         action = new TransactionAction(null, [], [], null);
         if (request is null)
@@ -359,9 +362,8 @@ public static class TransactionRequestParser
         return !action.IsEmpty;
     }
 
-    public static bool TryParseSelection(
-        TransactionSelectionRequest? request,
-        out TransactionSelectionPlan plan)
+    public static bool TryParseSelection(TransactionSelectionRequest? request,
+                                         out TransactionSelectionPlan plan)
     {
         plan = new TransactionSelectionPlan("explicit", [], null);
         if (request?.Mode == "explicit")
@@ -406,7 +408,8 @@ public static class TransactionRequestParser
         return false;
     }
 
-    public static bool TryParseDate(string? value, out DateOnly? date)
+    public static bool TryParseDate(string? value,
+                                    out DateOnly? date)
     {
         date = null;
         if (value is null)
@@ -461,27 +464,24 @@ public sealed record TransactionChangesRequest(Guid? CategoryId,
                                                Guid[]? RemoveTagIds,
                                                bool? IsHiddenByUser);
 
-public sealed record TransactionSelectionItem(Guid? Id, int? ExpectedVersion);
+public sealed record TransactionSelectionItem(Guid? Id,
+                                              int? ExpectedVersion);
 
-public sealed record TransactionSelectionRequest(
-    string? Mode,
-    TransactionSelectionItem[]? Transactions,
-    TransactionFiltersRequest? Filters);
+public sealed record TransactionSelectionRequest(string? Mode,
+                                                 TransactionSelectionItem[]? Transactions,
+                                                 TransactionFiltersRequest? Filters);
 
-public sealed record TransactionPatchRequest(
-    int? ExpectedVersion,
-    TransactionChangesRequest? Changes,
-    bool? Confirm);
+public sealed record TransactionPatchRequest(int? ExpectedVersion,
+                                             TransactionChangesRequest? Changes,
+                                             bool? Confirm);
 
-public sealed record TransactionPrepareRequest(
-    Guid? OperationId,
-    TransactionSelectionRequest? Selection,
-    TransactionChangesRequest? Changes);
+public sealed record TransactionPrepareRequest(Guid? OperationId,
+                                               TransactionSelectionRequest? Selection,
+                                               TransactionChangesRequest? Changes);
 
-public sealed record TransactionApplyRequest(
-    string? ConfirmationHash,
-    int? ExpectedSelectedCount,
-    bool? Confirm);
+public sealed record TransactionApplyRequest(string? ConfirmationHash,
+                                             int? ExpectedSelectedCount,
+                                             bool? Confirm);
 
 public sealed record EmptyBodyRequest();
 
@@ -506,9 +506,8 @@ public sealed record TransactionOperationSummaryResponse(Guid OperationId,
                                                          string? TerminalAt,
                                                          TransactionOperationActionResponse? Action);
 
-public sealed record TransactionOperationPrepareResponse(
-    TransactionOperationSummaryResponse Operation,
-    bool Created);
+public sealed record TransactionOperationPrepareResponse(TransactionOperationSummaryResponse Operation,
+                                                         bool Created);
 
 public sealed record TransactionOperationApplyResponse(Guid OperationId,
                                                        string Status,
@@ -520,9 +519,8 @@ public sealed record TransactionOperationApplyResponse(Guid OperationId,
 
 public sealed class TransactionStoreException : Exception
 {
-    public TransactionStoreException(
-        string code,
-        IReadOnlyDictionary<string, object?>? details = null)
+    public TransactionStoreException(string code,
+                                     IReadOnlyDictionary<string, object?>? details = null)
         : base(code)
     {
         Code = code;

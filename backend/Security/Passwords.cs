@@ -25,7 +25,8 @@ public static class PasswordHasher
                $"{Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
     }
 
-    public static bool Verify(string password, string encoded)
+    public static bool Verify(string password,
+                              string encoded)
     {
         var parts = encoded.Split('$');
         if (parts.Length != 5 || parts[0] != "argon2id" || parts[1] != "v=19")
@@ -74,7 +75,9 @@ public static class PasswordHasher
         return argon2.GetBytes(HashBytes);
     }
 
-    private static bool TryParseParameter(string text, string name, out int value)
+    private static bool TryParseParameter(string text,
+                                          string name,
+                                          out int value)
     {
         value = 0;
         return text.StartsWith(name + "=", StringComparison.Ordinal)
@@ -102,5 +105,6 @@ public static class Tokens
 /// </summary>
 public interface IPwnedScreener
 {
-    Task<bool?> IsPwnedAsync(string password, CancellationToken cancellationToken = default);
+    Task<bool?> IsPwnedAsync(string password,
+                             CancellationToken cancellationToken = default);
 }

@@ -62,7 +62,8 @@ public abstract record CategoryOutcome
 
 public abstract record CategoryDeleteOutcome
 {
-    public sealed record Success(long ReassignedTransactionCount, Guid UncategorisedCategoryId) : CategoryDeleteOutcome;
+    public sealed record Success(long ReassignedTransactionCount,
+                                 Guid UncategorisedCategoryId) : CategoryDeleteOutcome;
 
     public sealed record NotFound : CategoryDeleteOutcome;
 
@@ -203,10 +204,9 @@ public sealed class FinanceStore(Db db)
     }
 
     /// <summary>Null or whitespace means "no institution"; anything else is normalized.</summary>
-    public static bool TryNormalizeInstitution(
-        string? input,
-        out string? institution,
-        int maxRunes = MaxNameRunes)
+    public static bool TryNormalizeInstitution(string? input,
+                                               out string? institution,
+                                               int maxRunes = MaxNameRunes)
     {
         institution = null;
         if (string.IsNullOrWhiteSpace(input))
@@ -223,8 +223,7 @@ public sealed class FinanceStore(Db db)
         return true;
     }
 
-    public static bool IsUserCategoryKind(string? kind) =>
-        kind is "Expense" or "Income" or "Transfer" or "Excluded";
+    public static bool IsUserCategoryKind(string? kind) => kind is "Expense" or "Income" or "Transfer" or "Excluded";
 
     private static int CountRunes(string value)
     {
@@ -236,11 +235,9 @@ public sealed class FinanceStore(Db db)
         return count;
     }
 
-    private static bool IsUniqueViolation(PostgresException exception) =>
-        exception.SqlState == PostgresErrorCodes.UniqueViolation;
+    private static bool IsUniqueViolation(PostgresException exception) => exception.SqlState == PostgresErrorCodes.UniqueViolation;
 
-    private static bool IsCheckViolation(PostgresException exception) =>
-        exception.SqlState == PostgresErrorCodes.CheckViolation;
+    private static bool IsCheckViolation(PostgresException exception) => exception.SqlState == PostgresErrorCodes.CheckViolation;
 
     // --- Category seeding --------------------------------------------------
 
@@ -250,9 +247,8 @@ public sealed class FinanceStore(Db db)
     /// serialize, and the under-lock re-check stops a second seeder from
     /// resurrecting defaults after the customer renamed or deleted them.
     /// </summary>
-    public async Task EnsureCategoriesSeededAsync(
-        Guid customerId,
-        CancellationToken cancellationToken = default)
+    public async Task EnsureCategoriesSeededAsync(Guid customerId,
+                                                  CancellationToken cancellationToken = default)
     {
         await using (var fast = await db.OpenAsync(cancellationToken))
         {
@@ -331,9 +327,8 @@ public sealed class FinanceStore(Db db)
 
     // --- Financial accounts ------------------------------------------------
 
-    public async Task<IReadOnlyList<FinancialAccountRecord>> ListAccountsAsync(
-        Guid customerId,
-        CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<FinancialAccountRecord>> ListAccountsAsync(Guid customerId,
+                                                                               CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -477,10 +472,9 @@ public sealed class FinanceStore(Db db)
         return updated is null ? new AccountOutcome.NotFound() : new AccountOutcome.Success(updated);
     }
 
-    private async Task<FinancialAccountRecord?> FindAccountAsync(
-        Guid customerId,
-        Guid id,
-        CancellationToken cancellationToken)
+    private async Task<FinancialAccountRecord?> FindAccountAsync(Guid customerId,
+                                                                 Guid id,
+                                                                 CancellationToken cancellationToken)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         return await FindAccountAsync(connection, null, customerId, id, cancellationToken);
@@ -525,9 +519,8 @@ public sealed class FinanceStore(Db db)
 
     // --- Categories --------------------------------------------------------
 
-    public async Task<IReadOnlyList<CategoryRecord>> ListCategoriesAsync(
-        Guid customerId,
-        CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<CategoryRecord>> ListCategoriesAsync(Guid customerId,
+                                                                         CancellationToken cancellationToken = default)
     {
         await EnsureCategoriesSeededAsync(customerId, cancellationToken);
 
@@ -729,10 +722,9 @@ public sealed class FinanceStore(Db db)
     /// to the customer's system <c>Uncategorised</c> bucket. No transaction row
     /// is ever deleted.
     /// </summary>
-    public async Task<CategoryDeleteOutcome> DeleteCategoryAsync(
-        Guid customerId,
-        Guid id,
-        CancellationToken cancellationToken = default)
+    public async Task<CategoryDeleteOutcome> DeleteCategoryAsync(Guid customerId,
+                                                                 Guid id,
+                                                                 CancellationToken cancellationToken = default)
     {
         await EnsureCategoriesSeededAsync(customerId, cancellationToken);
 
@@ -858,10 +850,9 @@ public sealed class FinanceStore(Db db)
         return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
     }
 
-    private async Task<CategoryRecord?> FindCategoryAsync(
-        Guid customerId,
-        Guid id,
-        CancellationToken cancellationToken)
+    private async Task<CategoryRecord?> FindCategoryAsync(Guid customerId,
+                                                          Guid id,
+                                                          CancellationToken cancellationToken)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         return await FindCategoryAsync(connection, null, customerId, id, cancellationToken);
@@ -888,9 +879,8 @@ public sealed class FinanceStore(Db db)
 
     // --- Merchant tags -----------------------------------------------------
 
-    public async Task<IReadOnlyList<MerchantTagRecord>> ListMerchantTagsAsync(
-        Guid customerId,
-        CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<MerchantTagRecord>> ListMerchantTagsAsync(Guid customerId,
+                                                                              CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -911,10 +901,9 @@ public sealed class FinanceStore(Db db)
         return tags;
     }
 
-    public async Task<MerchantTagOutcome> CreateMerchantTagAsync(
-        Guid customerId,
-        string? displayName,
-        CancellationToken cancellationToken = default)
+    public async Task<MerchantTagOutcome> CreateMerchantTagAsync(Guid customerId,
+                                                                 string? displayName,
+                                                                 CancellationToken cancellationToken = default)
     {
         if (!TryNormalizeName(displayName, out var name, out var normalizedName))
         {
@@ -1041,10 +1030,9 @@ public sealed class FinanceStore(Db db)
     /// Deletes a merchant tag and atomically removes its transaction
     /// assignments. Transactions themselves are preserved.
     /// </summary>
-    public async Task<MerchantTagDeleteOutcome> DeleteMerchantTagAsync(
-        Guid customerId,
-        Guid id,
-        CancellationToken cancellationToken = default)
+    public async Task<MerchantTagDeleteOutcome> DeleteMerchantTagAsync(Guid customerId,
+                                                                       Guid id,
+                                                                       CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -1131,10 +1119,9 @@ public sealed class FinanceStore(Db db)
         return new MerchantTagDeleteOutcome.Success(unassigned);
     }
 
-    private async Task<MerchantTagRecord?> FindMerchantTagAsync(
-        Guid customerId,
-        Guid id,
-        CancellationToken cancellationToken)
+    private async Task<MerchantTagRecord?> FindMerchantTagAsync(Guid customerId,
+                                                                Guid id,
+                                                                CancellationToken cancellationToken)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         return await FindMerchantTagAsync(connection, null, customerId, id, cancellationToken);

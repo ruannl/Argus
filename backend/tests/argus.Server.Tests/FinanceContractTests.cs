@@ -28,10 +28,9 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         return (session, (await BodyAsync(me)).GetProperty("id").GetGuid());
     }
 
-    private async Task<Guid> CreateAccountAsync(
-        string session,
-        string displayName,
-        string? institution = null)
+    private async Task<Guid> CreateAccountAsync(string session,
+                                                string displayName,
+                                                string? institution = null)
     {
         var body = institution is null
             ? Json(new { display_name = displayName })
@@ -62,7 +61,8 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         return (await BodyAsync(response)).GetProperty("merchant_tags");
     }
 
-    private static JsonElement? FindByName(JsonElement collection, string name)
+    private static JsonElement? FindByName(JsonElement collection,
+                                           string name)
     {
         foreach (var item in collection.EnumerateArray())
         {
@@ -74,7 +74,8 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         return null;
     }
 
-    private async Task<Guid> CategoryIdAsync(string session, string name)
+    private async Task<Guid> CategoryIdAsync(string session,
+                                             string name)
     {
         var categories = await ListCategoriesAsync(session);
         var found = FindByName(categories, name);
@@ -124,7 +125,8 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         return transactionId;
     }
 
-    private static HttpRequestMessage WithTestIp(HttpRequestMessage request, string ip)
+    private static HttpRequestMessage WithTestIp(HttpRequestMessage request,
+                                                 string ip)
     {
         request.Headers.Add("X-Test-Remote-Ip", ip);
         return request;

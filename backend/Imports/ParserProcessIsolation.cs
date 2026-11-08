@@ -12,10 +12,12 @@ internal static class ParserProcessIsolation
     private const int SigKill = 9;
 
     [DllImport("libc", EntryPoint = "setpgid", SetLastError = true)]
-    private static extern int SetProcessGroup(int pid, int pgid);
+    private static extern int SetProcessGroup(int pid,
+                                              int pgid);
 
     [DllImport("libc", EntryPoint = "kill", SetLastError = true)]
-    private static extern int SendSignal(int pid, int signal);
+    private static extern int SendSignal(int pid,
+                                         int signal);
 
     public static void JoinOwnProcessGroup()
     {

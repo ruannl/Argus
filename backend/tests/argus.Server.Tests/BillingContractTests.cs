@@ -14,7 +14,8 @@ public sealed class BillingContractTests(KitFactory factory) : ApiTestBase(facto
                     Encoding.UTF8.GetBytes(payload)))
             .ToLowerInvariant();
 
-    private static HttpRequestMessage Webhook(string payload, string? signature)
+    private static HttpRequestMessage Webhook(string payload,
+                                              string? signature)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/v1/billing/webhook")
         {

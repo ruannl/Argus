@@ -42,7 +42,8 @@ public sealed class RateLimiter
 
     public bool CheckResetConsume(string tokenHash) => Check($"reset_consume:{tokenHash}", 10);
 
-    private bool Check(string bucket, int limit)
+    private bool Check(string bucket,
+                       int limit)
     {
         var now = DateTime.UtcNow;
         lock (_gate)

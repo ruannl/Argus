@@ -507,7 +507,8 @@ public sealed class StatementParserProcessTests
         Assert.Equal(ParserReasons.UnsupportedLayout, response.Reason);
     }
 
-    private static List<PdfText> ProcessHeader(double y, params double[] xs)
+    private static List<PdfText> ProcessHeader(double y,
+                                               params double[] xs)
     {
         var labels = new[]
         {
@@ -855,7 +856,8 @@ public sealed class StatementParserProcessTests
         }
     }
 
-    private static async Task<int> WaitForProcessGroupAsync(int pid, TimeSpan timeout)
+    private static async Task<int> WaitForProcessGroupAsync(int pid,
+                                                            TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
         var last = -1;
@@ -924,7 +926,8 @@ public sealed class StatementParserProcessTests
     private static string TempPath(string suffix) =>
         Path.Combine(Path.GetTempPath(), $"argus-{suffix}-{Guid.NewGuid():N}.tmp");
 
-    private static async Task<int> WaitForPidAsync(string path, TimeSpan timeout)
+    private static async Task<int> WaitForPidAsync(string path,
+                                                   TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)
@@ -942,7 +945,8 @@ public sealed class StatementParserProcessTests
         throw new TimeoutException($"PID file {path} was not written");
     }
 
-    private static async Task<bool> WaitForProcessExitAsync(int pid, TimeSpan timeout)
+    private static async Task<bool> WaitForProcessExitAsync(int pid,
+                                                            TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)

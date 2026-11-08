@@ -599,10 +599,9 @@ public static class StandardBankPdfParser
                StatementAmounts.TryParseMagnitude(tokens[0], ".", ",", out _, out _, out _);
     }
 
-    private static bool TryClassifyBalance(
-        string descriptionText,
-        string balanceText,
-        out bool isOpening)
+    private static bool TryClassifyBalance(string descriptionText,
+                                           string balanceText,
+                                           out bool isOpening)
     {
         isOpening = false;
         var normalized = StatementText.CollapseWhitespace(descriptionText).ToLowerInvariant();
@@ -654,7 +653,9 @@ public static class StandardBankPdfParser
         return true;
     }
 
-    private static bool TryConsumePageFooter(PdfLine line, int pageNumber, int pageCount)
+    private static bool TryConsumePageFooter(PdfLine line,
+                                             int pageNumber,
+                                             int pageCount)
     {
         if (line.CenterY > FooterMaxY)
         {
@@ -695,7 +696,8 @@ public static class StandardBankPdfParser
         return false;
     }
 
-    private static bool IsTopOfPage(PdfLine line, double pageHeight) =>
+    private static bool IsTopOfPage(PdfLine line,
+                                    double pageHeight) =>
         line.CenterY >= pageHeight - TopRegionBelowPageTop;
 
     private static bool IsMetadataLabelLine(PdfLine line)
@@ -738,7 +740,8 @@ public static class StandardBankPdfParser
         return gap > 0 && gap <= ContinuationVerticalTolerance;
     }
 
-    private static string[] FlowTexts(PdfLine line, PdfHeader header) =>
+    private static string[] FlowTexts(PdfLine line,
+                                      PdfHeader header) =>
     [
         line.TextIn(header, 2),
         line.TextIn(header, 3),
@@ -867,7 +870,8 @@ public static class StandardBankPdfParser
         return true;
     }
 
-    private static int ColumnOf(PdfHeader header, PdfWord word)
+    private static int ColumnOf(PdfHeader header,
+                                PdfWord word)
     {
         for (var column = 0; column < 6; column++)
         {
@@ -939,12 +943,14 @@ public static class StandardBankPdfParser
         return false;
     }
 
-    private static double Midpoint(double left, double right) => (left + right) / 2.0;
+    private static double Midpoint(double left,
+                                   double right) => (left + right) / 2.0;
 
     private static string NormalizeLabel(string value) =>
         StatementText.CollapseWhitespace(value).ToLowerInvariant().Replace(" ", string.Empty);
 
-    private static bool TryParsePeriodDate(string value, out DateOnly date)
+    private static bool TryParsePeriodDate(string value,
+                                           out DateOnly date)
     {
         // Only a printed four-digit year is accepted for prefill; two-digit
         // period dates would require a runtime pivot.
@@ -979,7 +985,8 @@ public static class StandardBankPdfParser
 
         public void Sort() => _words.Sort((left, right) => left.Left.CompareTo(right.Left));
 
-        public string TextIn(PdfHeader? header, int column)
+        public string TextIn(PdfHeader? header,
+                             int column)
         {
             if (header is null)
             {
@@ -994,9 +1001,12 @@ public static class StandardBankPdfParser
         }
     }
 
-    private sealed record PdfHeader(double[] Boundaries, double DescriptionLeft, double CenterY)
+    private sealed record PdfHeader(double[] Boundaries,
+                                    double DescriptionLeft,
+                                    double CenterY)
     {
-        public bool InColumn(PdfWord word, int column)
+        public bool InColumn(PdfWord word,
+                             int column)
         {
             var left = column == 0 ? 0 : Boundaries[column - 1];
             var right = column == 5 ? double.MaxValue : Boundaries[column];
@@ -1010,7 +1020,8 @@ public static class StandardBankPdfParser
                 .All(value => value);
     }
 
-    private sealed record HeaderMatch(int LineIndex, PdfHeader Header);
+    private sealed record HeaderMatch(int LineIndex,
+                                      PdfHeader Header);
 
     private enum BodyEventKind
     {
@@ -1021,7 +1032,9 @@ public static class StandardBankPdfParser
         Structural,
     }
 
-    private sealed record BodyEvent(int Index, BodyEventKind Kind, PdfRowDraft? Draft);
+    private sealed record BodyEvent(int Index,
+                                    BodyEventKind Kind,
+                                    PdfRowDraft? Draft);
 
     private sealed class PdfRowDraft
     {
@@ -1063,7 +1076,8 @@ public static class StandardBankPdfParser
 
         public double LastLineCenterY { get; private set; }
 
-        public void AppendContinuation(string text, double lineCenterY)
+        public void AppendContinuation(string text,
+                                       double lineCenterY)
         {
             _continuations.Add(text);
             LastLineCenterY = lineCenterY;

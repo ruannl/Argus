@@ -22,7 +22,8 @@ public sealed record StatementFixture(byte[] Bytes,
 /// </summary>
 public static class StatementFixtureBuilder
 {
-    public static StatementFixture BuildFnbCsv(int rowCount, bool chequeAccount)
+    public static StatementFixture BuildFnbCsv(int rowCount,
+                                               bool chequeAccount)
     {
         var builder = new StringBuilder();
         builder.AppendLine("Synthetic FNB export");
@@ -71,7 +72,8 @@ public static class StatementFixtureBuilder
             0);
     }
 
-    public static StatementFixture BuildFnbZip(int rowCount, bool chequeAccount)
+    public static StatementFixture BuildFnbZip(int rowCount,
+                                               bool chequeAccount)
     {
         var csv = BuildFnbCsv(rowCount, chequeAccount);
         using var output = new MemoryStream();
@@ -379,7 +381,8 @@ public static class StatementFixtureBuilder
         texts.Add(new PdfText(530, 800, "Balance"));
     }
 
-    private static int[] DistributeRows(int rowCount, int pages)
+    private static int[] DistributeRows(int rowCount,
+                                        int pages)
     {
         var result = new int[pages];
         var baseCount = rowCount / pages;
@@ -391,7 +394,8 @@ public static class StatementFixtureBuilder
         return result;
     }
 
-    private static int[] DistributeContinuations(int rowCount, int total)
+    private static int[] DistributeContinuations(int rowCount,
+                                                 int total)
     {
         var result = new int[rowCount];
         if (total <= rowCount)
@@ -438,7 +442,8 @@ public static class StatementFixtureBuilder
         };
     }
 
-    private static long? ExpectedCents(int index, PdfFlowCase flowCase)
+    private static long? ExpectedCents(int index,
+                                       PdfFlowCase flowCase)
     {
         if (flowCase is PdfFlowCase.Missing or PdfFlowCase.Multiple or PdfFlowCase.ConflictingSign)
         {
@@ -460,7 +465,8 @@ public static class StatementFixtureBuilder
         _ => [],
     };
 
-    private static List<PdfText> Shuffle(List<PdfText> texts, Random random)
+    private static List<PdfText> Shuffle(List<PdfText> texts,
+                                         Random random)
     {
         var copy = new List<PdfText>(texts);
         for (var index = copy.Count - 1; index > 0; index--)
@@ -482,7 +488,9 @@ public static class StatementFixtureBuilder
     }
 }
 
-public readonly record struct PdfText(double X, double Y, string Text);
+public readonly record struct PdfText(double X,
+                                      double Y,
+                                      string Text);
 
 public sealed class MinimalPdfBuilder
 {
@@ -596,10 +604,9 @@ public sealed class MinimalPdfBuilder
         return output.ToArray();
     }
 
-    public byte[] BuildImageOnly(
-        int imageCount = 1,
-        double imageWidth = 100,
-        double imageHeight = 100)
+    public byte[] BuildImageOnly(int imageCount = 1,
+                                 double imageWidth = 100,
+                                 double imageHeight = 100)
     {
         var pdf = new MinimalPdfBuilder();
         pdf.AddPage([], imageCount, imageWidth, imageHeight);

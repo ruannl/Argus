@@ -47,7 +47,8 @@ public static class TestEnvironment
         Set("LOG_FORMAT", "json");
     }
 
-    private static void Set(string name, string value) =>
+    private static void Set(string name,
+                            string value) =>
         Environment.SetEnvironmentVariable("ARGUS_" + name, value);
 }
 
@@ -75,22 +76,23 @@ public sealed class CapturingMailer : IMailer
         return Task.CompletedTask;
     }
 
-    public Task SendAlreadyRegisteredAsync(
-        string recipient,
-        string frontendUrl,
-        CancellationToken cancellationToken = default)
+    public Task SendAlreadyRegisteredAsync(string recipient,
+                                           string frontendUrl,
+                                           CancellationToken cancellationToken = default)
     {
         Record("already-registered", recipient, string.Empty);
         return Task.CompletedTask;
     }
 
-    public Task SendSuspiciousLoginAsync(string recipient, CancellationToken cancellationToken = default)
+    public Task SendSuspiciousLoginAsync(string recipient,
+                                         CancellationToken cancellationToken = default)
     {
         Record("suspicious-login", recipient, string.Empty);
         return Task.CompletedTask;
     }
 
-    public string? LastToken(string kind, string recipient)
+    public string? LastToken(string kind,
+                             string recipient)
     {
         lock (_gate)
         {
@@ -105,7 +107,8 @@ public sealed class CapturingMailer : IMailer
         }
     }
 
-    public int Count(string kind, string recipient)
+    public int Count(string kind,
+                     string recipient)
     {
         lock (_gate)
         {
@@ -121,7 +124,9 @@ public sealed class CapturingMailer : IMailer
         }
     }
 
-    private void Record(string kind, string recipient, string token)
+    private void Record(string kind,
+                        string recipient,
+                        string token)
     {
         lock (_gate)
         {
@@ -182,7 +187,8 @@ public sealed class CapturingLoggerProvider : ILoggerProvider
         }
     }
 
-    private sealed class CapturingLogger(CapturingLoggerProvider provider, string category) : ILogger
+    private sealed class CapturingLogger(CapturingLoggerProvider provider,
+                                         string category) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -234,9 +240,8 @@ public sealed class KitFactory : WebApplicationFactory<Program>
     {
     }
 
-    internal KitFactory(
-        IImportFaultInjector? faultInjector,
-        ITransactionFaultInjector? transactionFaultInjector)
+    internal KitFactory(IImportFaultInjector? faultInjector,
+                        ITransactionFaultInjector? transactionFaultInjector)
     {
         FaultInjector = faultInjector;
         TransactionFaultInjector = transactionFaultInjector;

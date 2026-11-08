@@ -19,7 +19,8 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
         return (session, (await BodyAsync(me)).GetProperty("id").GetGuid());
     }
 
-    protected async Task<Guid> CreateAccountAsync(string session, string name = "Cheque")
+    protected async Task<Guid> CreateAccountAsync(string session,
+                                                  string name = "Cheque")
     {
         var response = await SendAsync(Post(
             "/v1/finance/accounts", Json(new { display_name = name }), session: session));
@@ -47,7 +48,8 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
         return (system.GetProperty("id").GetGuid(), expense.GetProperty("id").GetGuid());
     }
 
-    protected async Task<Guid> CreateTagAsync(string session, string name)
+    protected async Task<Guid> CreateTagAsync(string session,
+                                              string name)
     {
         var response = await SendAsync(Post(
             "/v1/finance/merchant-tags", Json(new { display_name = name }), session: session));
@@ -55,7 +57,8 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
         return (await BodyAsync(response)).GetProperty("id").GetGuid();
     }
 
-    protected async Task<Guid> SeedTagAsync(Guid customerId, string name)
+    protected async Task<Guid> SeedTagAsync(Guid customerId,
+                                            string name)
     {
         var id = Guid.NewGuid();
         await ExecuteSqlParamsAsync(
@@ -159,7 +162,8 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
         return id;
     }
 
-    protected async Task SetStatementHiddenAsync(Guid statementId, bool hidden)
+    protected async Task SetStatementHiddenAsync(Guid statementId,
+                                                 bool hidden)
     {
         await ExecuteSqlParamsAsync(
             """
@@ -174,9 +178,8 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
             ("id", statementId));
     }
 
-    protected async Task ExecuteSqlParamsAsync(
-        string sql,
-        params (string Name, object? Value)[] parameters)
+    protected async Task ExecuteSqlParamsAsync(string sql,
+                                               params (string Name, object? Value)[] parameters)
     {
         var db = Factory.CreateDb();
         await using var connection = await db.OpenAsync();

@@ -19,10 +19,9 @@ public static class StatementParser
         }
     }
 
-    private static Task<ParsedStatement> RunCsvAsync(
-        ParserAdmission admission,
-        Func<CancellationToken, ParsedStatement> parse,
-        CancellationToken cancellationToken) =>
+    private static Task<ParsedStatement> RunCsvAsync(ParserAdmission admission,
+                                                     Func<CancellationToken, ParsedStatement> parse,
+                                                     CancellationToken cancellationToken) =>
         admission.RunAsync(
             token => Task.Run(() => parse(token), token),
             cancellationToken);

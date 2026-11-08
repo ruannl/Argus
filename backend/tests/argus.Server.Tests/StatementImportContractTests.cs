@@ -22,7 +22,8 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         return (session, (await BodyAsync(me)).GetProperty("id").GetGuid());
     }
 
-    private async Task<Guid> CreateAccountAsync(string session, string name = "Cheque")
+    private async Task<Guid> CreateAccountAsync(string session,
+                                                string name = "Cheque")
     {
         var response = await SendAsync(Post(
             "/v1/finance/accounts", Json(new { display_name = name }), session: session));
@@ -1515,7 +1516,8 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
             "Total payments", BuildPdfWithTotalBeforeSummary());
     }
 
-    private async Task AssertPdfRejectionHasNoEffectsAsync(string canary, byte[] file)
+    private async Task AssertPdfRejectionHasNoEffectsAsync(string canary,
+                                                           byte[] file)
     {
         var (session, _) = await NewCustomerAsync();
         var accountId = await CreateAccountAsync(session);
@@ -1583,7 +1585,8 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         new(530, 800, "Balance"),
     ];
 
-    private static List<PdfText> PdfHeaderAt(double y, params double[] xs)
+    private static List<PdfText> PdfHeaderAt(double y,
+                                             params double[] xs)
     {
         var labels = new[]
         {

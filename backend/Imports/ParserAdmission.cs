@@ -12,9 +12,8 @@ public sealed class ParserAdmission : IDisposable
     private readonly SemaphoreSlim _slots;
     private readonly TimeSpan _deadline;
 
-    public ParserAdmission(
-        int capacity = ImportLimits.MaxConcurrentParsers,
-        TimeSpan? deadline = null)
+    public ParserAdmission(int capacity = ImportLimits.MaxConcurrentParsers,
+                           TimeSpan? deadline = null)
     {
         if (capacity < 1)
         {
@@ -32,9 +31,8 @@ public sealed class ParserAdmission : IDisposable
     /// worker until the action task finishes, even after the caller stops
     /// waiting.
     /// </summary>
-    public async Task<T> RunAsync<T>(
-        Func<CancellationToken, Task<T>> action,
-        CancellationToken cancellationToken)
+    public async Task<T> RunAsync<T>(Func<CancellationToken, Task<T>> action,
+                                     CancellationToken cancellationToken)
     {
         await EnterAsync(cancellationToken);
         var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -92,9 +90,8 @@ public sealed class ParserAdmission : IDisposable
 
     public void Dispose() => _slots.Dispose();
 
-    private async Task ObserveAndReleaseAsync<T>(
-        Task<T> actionTask,
-        CancellationTokenSource deadline)
+    private async Task ObserveAndReleaseAsync<T>(Task<T> actionTask,
+                                                 CancellationTokenSource deadline)
     {
         try
         {

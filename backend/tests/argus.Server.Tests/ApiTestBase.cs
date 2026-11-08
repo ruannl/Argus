@@ -149,7 +149,8 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
 
     protected static string UniqueEmail() => $"user-{Guid.NewGuid():N}@example.test";
 
-    protected async Task<string> RegisterAsync(string email, string? password = null)
+    protected async Task<string> RegisterAsync(string email,
+                                               string? password = null)
     {
         password ??= TestEnvironment.GoodPassword;
         var response = await SendAsync(Post("/v1/register", Json(new { email, password })));
@@ -165,7 +166,8 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
-    protected async Task<string> RegisterVerifyLoginAsync(string email, string? password = null)
+    protected async Task<string> RegisterVerifyLoginAsync(string email,
+                                                          string? password = null)
     {
         password ??= TestEnvironment.GoodPassword;
         var verificationToken = await RegisterAsync(email, password);
@@ -176,7 +178,8 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         return (await BodyAsync(login)).GetProperty("token").GetString()!;
     }
 
-    protected async Task<long> CountWhereAsync(string table, string predicate)
+    protected async Task<long> CountWhereAsync(string table,
+                                               string predicate)
     {
         var db = Factory.CreateDb();
         await using var connection = await db.OpenAsync();
@@ -225,7 +228,9 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
 /// <summary>Database-clock and lock observations for bounded import-expiry tests.</summary>
 internal static class ImportExpiryTestHelpers
 {
-    internal static async Task<DateTime> SetDeadlineAsync(KitFactory factory, Guid reviewId, int seconds = 7)
+    internal static async Task<DateTime> SetDeadlineAsync(KitFactory factory,
+                                                          Guid reviewId,
+                                                          int seconds = 7)
     {
         await using var connection = await factory.CreateDb().OpenAsync();
         await using var command = connection.CreateCommand();
@@ -238,7 +243,8 @@ internal static class ImportExpiryTestHelpers
         return (DateTime)(await command.ExecuteScalarAsync())!;
     }
 
-    internal static async Task WaitForTagWaitAsync(NpgsqlConnection observer, int blockerPid)
+    internal static async Task WaitForTagWaitAsync(NpgsqlConnection observer,
+                                                   int blockerPid)
     {
         var watch = Stopwatch.StartNew();
         while (watch.Elapsed < TimeSpan.FromSeconds(5))
@@ -258,7 +264,8 @@ internal static class ImportExpiryTestHelpers
         Assert.Fail("The import commit did not reach the selected tag lock wait.");
     }
 
-    internal static async Task WaitForDeadlineAsync(NpgsqlConnection observer, DateTime deadline)
+    internal static async Task WaitForDeadlineAsync(NpgsqlConnection observer,
+                                                    DateTime deadline)
     {
         var watch = Stopwatch.StartNew();
         while (watch.Elapsed < TimeSpan.FromSeconds(15))

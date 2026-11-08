@@ -5,7 +5,8 @@ using Xunit.Abstractions;
 
 namespace argus.Server.Tests;
 
-public sealed class TransactionMutationTests(KitFactory factory, ITestOutputHelper output)
+public sealed class TransactionMutationTests(KitFactory factory,
+                                             ITestOutputHelper output)
     : TransactionTestBase(factory)
 {
     private const string PreparePath = "/v1/finance/transactions/operations/prepare";
@@ -30,10 +31,9 @@ public sealed class TransactionMutationTests(KitFactory factory, ITestOutputHelp
         return await BodyAsync(response);
     }
 
-    private async Task<JsonElement> ApplyAsync(
-        string session,
-        JsonElement operation,
-        HttpStatusCode expected = HttpStatusCode.OK)
+    private async Task<JsonElement> ApplyAsync(string session,
+                                               JsonElement operation,
+                                               HttpStatusCode expected = HttpStatusCode.OK)
     {
         var operationId = operation.GetProperty("operation").GetProperty("operation_id").GetGuid();
         var body = Json(new
@@ -60,7 +60,8 @@ public sealed class TransactionMutationTests(KitFactory factory, ITestOutputHelp
 
     private static object AllMatching(object filters) => new { mode = "all_matching", filters };
 
-    private async Task<Guid> CreateCategoryAsync(string session, string name)
+    private async Task<Guid> CreateCategoryAsync(string session,
+                                                 string name)
     {
         var response = await SendAsync(Post(
             "/v1/finance/categories",

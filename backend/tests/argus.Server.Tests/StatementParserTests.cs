@@ -452,7 +452,8 @@ public sealed class StatementParserTests
     [InlineData("Total payments", 300)]
     [InlineData("Total deposits", 400)]
     [InlineData("Total bank fees", 470)]
-    public void TerminalTotalsForEachFlowBandAreExcluded(string label, double flowX)
+    public void TerminalTotalsForEachFlowBandAreExcluded(string label,
+                                                         double flowX)
     {
         var texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
@@ -1117,7 +1118,8 @@ public sealed class StatementParserTests
         Assert.Equal(356, eighteenPage.Rows.Sum(row => CountOccurrences(row.Description, "continued note")));
     }
 
-    private static List<PdfText> Header(double y, params double[] xs)
+    private static List<PdfText> Header(double y,
+                                        params double[] xs)
     {
         var labels = new[]
         {
@@ -1127,7 +1129,8 @@ public sealed class StatementParserTests
         return labels.Select((label, index) => new PdfText(xs[index], y, label)).ToList();
     }
 
-    private static int CountOccurrences(string value, string needle)
+    private static int CountOccurrences(string value,
+                                        string needle)
     {
         var count = 0;
         var index = 0;

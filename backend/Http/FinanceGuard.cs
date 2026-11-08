@@ -11,14 +11,12 @@ namespace argus.Server.Http;
 /// applies the dedicated finance rate-limit bucket. Import routes reuse this
 /// exact chain so their authority cannot drift from the entity surface.
 /// </summary>
-public sealed class FinanceGuard(
-    AppSettings settings,
-    Store store,
-    RateLimiter rateLimiter)
+public sealed class FinanceGuard(AppSettings settings,
+                                 Store store,
+                                 RateLimiter rateLimiter)
 {
-    public async Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(
-        HttpContext context,
-        CancellationToken cancellationToken)
+    public async Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(HttpContext context,
+                                                                              CancellationToken cancellationToken)
     {
         if (!Trust.OriginValid(context, settings))
         {
@@ -61,10 +59,9 @@ public sealed class FinanceGuard(
     /// plus the frozen 500 body. PostgreSQL exceptions are never logged whole:
     /// their Detail can echo user-supplied names or financial values.
     /// </summary>
-    public async Task<IResult> GuardedAsync(
-        Func<Task<IResult>> action,
-        string operation,
-        ILogger logger)
+    public async Task<IResult> GuardedAsync(Func<Task<IResult>> action,
+                                            string operation,
+                                            ILogger logger)
     {
         try
         {

@@ -15,7 +15,8 @@ namespace argus.Server.Data;
 /// scoped by the authenticated customer id; foreign and unknown identifiers
 /// are indistinguishable.
 /// </summary>
-public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
+public sealed class TransactionStore(Db db,
+                                     ITransactionFaultInjector faults)
 {
     private static readonly JsonSerializerOptions _storedJson = new(JsonSerializerDefaults.Web)
     {
@@ -23,10 +24,9 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
     };
     // --- Queries -----------------------------------------------------------
 
-    public async Task<TransactionPageResult> QueryAsync(
-        Guid customerId,
-        TransactionQueryPlan plan,
-        CancellationToken cancellationToken = default)
+    public async Task<TransactionPageResult> QueryAsync(Guid customerId,
+                                                        TransactionQueryPlan plan,
+                                                        CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(
@@ -103,10 +103,9 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             plan.SortDirection);
     }
 
-    public async Task<TransactionDetailResult> GetAsync(
-        Guid customerId,
-        Guid transactionId,
-        CancellationToken cancellationToken = default)
+    public async Task<TransactionDetailResult> GetAsync(Guid customerId,
+                                                        Guid transactionId,
+                                                        CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(
@@ -475,10 +474,9 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
 
     // --- Status, apply and abandon -----------------------------------------
 
-    public async Task<TransactionOperationSummaryResponse> StatusAsync(
-        Guid customerId,
-        Guid operationId,
-        CancellationToken cancellationToken = default)
+    public async Task<TransactionOperationSummaryResponse> StatusAsync(Guid customerId,
+                                                                       Guid operationId,
+                                                                       CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await BeginWorkspaceTransactionAsync(
@@ -701,10 +699,9 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             false);
     }
 
-    public async Task<TransactionOperationApplyResponse> AbandonAsync(
-        Guid customerId,
-        Guid operationId,
-        CancellationToken cancellationToken = default)
+    public async Task<TransactionOperationApplyResponse> AbandonAsync(Guid customerId,
+                                                                      Guid operationId,
+                                                                      CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await BeginWorkspaceTransactionAsync(
@@ -898,10 +895,9 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                                          bool IsArchived,
                                          string UpdatedAt);
 
-    private sealed record StoredTargets(
-        StoredCategoryStamp? Category,
-        StoredTagStamp[] AddTags,
-        StoredTagStamp[] RemoveTags);
+    private sealed record StoredTargets(StoredCategoryStamp? Category,
+                                        StoredTagStamp[] AddTags,
+                                        StoredTagStamp[] RemoveTags);
 
     private sealed record OperationHeader(Guid CustomerId,
                                           Guid OperationId,
@@ -920,10 +916,9 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                                           DateTime? AppliedAt,
                                           DateTime? TerminalAt);
 
-    private static async Task<NpgsqlTransaction> BeginWorkspaceTransactionAsync(
-        NpgsqlConnection connection,
-        CancellationToken cancellationToken,
-        IsolationLevel isolation = IsolationLevel.ReadCommitted)
+    private static async Task<NpgsqlTransaction> BeginWorkspaceTransactionAsync(NpgsqlConnection connection,
+                                                                                CancellationToken cancellationToken,
+                                                                                IsolationLevel isolation = IsolationLevel.ReadCommitted)
     {
         var transaction = await connection.BeginTransactionAsync(isolation, cancellationToken);
         await using var command = connection.CreateCommand();
@@ -1386,10 +1381,9 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         }
     }
 
-    private static async Task<(DateTime CapturedAt, DateTime ExpiresAt)> ReadOperationClockAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        CancellationToken cancellationToken)
+    private static async Task<(DateTime CapturedAt, DateTime ExpiresAt)> ReadOperationClockAsync(NpgsqlConnection connection,
+                                                                                                 NpgsqlTransaction transaction,
+                                                                                                 CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1403,10 +1397,9 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return (reader.GetFieldValue<DateTime>(0), reader.GetFieldValue<DateTime>(1));
     }
 
-    private static async Task<DateTime> ClockAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        CancellationToken cancellationToken)
+    private static async Task<DateTime> ClockAsync(NpgsqlConnection connection,
+                                                   NpgsqlTransaction transaction,
+                                                   CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1648,7 +1641,8 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         }
     }
 
-    private static bool IsChanged(MemberRow member, TransactionAction action)
+    private static bool IsChanged(MemberRow member,
+                                  TransactionAction action)
     {
         if (action.CategoryId is not null && action.CategoryId.Value != member.CategoryId)
         {
@@ -1667,7 +1661,8 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return action.AddTagIds.Any(tagId => !assigned.Contains(tagId));
     }
 
-    private static void ValidateTagLimit(MemberRow member, TransactionAction action)
+    private static void ValidateTagLimit(MemberRow member,
+                                         TransactionAction action)
     {
         var existing = member.TagIds.ToHashSet();
         var adds = action.AddTagIds.ToHashSet();
@@ -2052,7 +2047,8 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         JsonSerializer.Deserialize<StoredTargets>(json, _storedJson)
         ?? throw new TransactionStoreException(TransactionErrorCodes.InvalidRequest);
 
-    private static string RequestDigest(TransactionSelectionPlan selection, TransactionAction action)
+    private static string RequestDigest(TransactionSelectionPlan selection,
+                                        TransactionAction action)
     {
         if (selection.Mode == "explicit")
         {
@@ -2175,10 +2171,9 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                                   int? SourcePage,
                                   int SourceRowNumber);
 
-    private static async Task SetReadOnlyAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        CancellationToken cancellationToken)
+    private static async Task SetReadOnlyAsync(NpgsqlConnection connection,
+                                               NpgsqlTransaction transaction,
+                                               CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -2369,9 +2364,8 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         reader.IsDBNull(19) ? null : reader.GetInt32(19),
         reader.GetInt32(20));
 
-    private static RowData MapRow(
-        RawRow raw,
-        IReadOnlyDictionary<Guid, TransactionTagRef[]> tags)
+    private static RowData MapRow(RawRow raw,
+                                  IReadOnlyDictionary<Guid, TransactionTagRef[]> tags)
     {
         var amount = TransactionRequestParser.FormatAmount(raw.Amount);
         var direction = TransactionRequestParser.DirectionOf(raw.Amount);

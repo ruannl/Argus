@@ -5,13 +5,13 @@ using Microsoft.Net.Http.Headers;
 
 namespace argus.Server.Http;
 
-public sealed record MultipartImport(byte[] FileBytes, string OptionsJson);
+public sealed record MultipartImport(byte[] FileBytes,
+                                     string OptionsJson);
 
 public static class MultipartImportReader
 {
-    public static async Task<MultipartImport> ReadAsync(
-        HttpRequest request,
-        CancellationToken cancellationToken)
+    public static async Task<MultipartImport> ReadAsync(HttpRequest request,
+                                                        CancellationToken cancellationToken)
     {
         if (!MediaTypeHeaderValue.TryParse(request.ContentType, out var mediaType) ||
             !string.Equals(mediaType.MediaType.Value, "multipart/form-data", StringComparison.OrdinalIgnoreCase) ||
@@ -65,10 +65,9 @@ public static class MultipartImportReader
         return new MultipartImport(file, options);
     }
 
-    private static async Task<byte[]> ReadBytesAsync(
-        Stream stream,
-        int maximum,
-        CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadBytesAsync(Stream stream,
+                                                     int maximum,
+                                                     CancellationToken cancellationToken)
     {
         using var output = new MemoryStream();
         var buffer = new byte[64 * 1024];
@@ -84,10 +83,9 @@ public static class MultipartImportReader
         return output.ToArray();
     }
 
-    private static async Task<string> ReadTextAsync(
-        Stream stream,
-        int maximum,
-        CancellationToken cancellationToken)
+    private static async Task<string> ReadTextAsync(Stream stream,
+                                                    int maximum,
+                                                    CancellationToken cancellationToken)
     {
         var bytes = await ReadBytesAsync(stream, maximum, cancellationToken);
         try
@@ -100,7 +98,8 @@ public static class MultipartImportReader
         }
     }
 
-    private sealed class BoundedReadStream(Stream inner, int maximum) : Stream
+    private sealed class BoundedReadStream(Stream inner,
+                                           int maximum) : Stream
     {
         private int _read;
 
@@ -114,16 +113,17 @@ public static class MultipartImportReader
             set => throw new NotSupportedException();
         }
 
-        public override int Read(byte[] buffer, int offset, int count)
+        public override int Read(byte[] buffer,
+                                 int offset,
+                                 int count)
         {
             var read = inner.Read(buffer, offset, count);
             Count(read);
             return read;
         }
 
-        public override async ValueTask<int> ReadAsync(
-            Memory<byte> buffer,
-            CancellationToken cancellationToken = default)
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer,
+                                                       CancellationToken cancellationToken = default)
         {
             var read = await inner.ReadAsync(buffer, cancellationToken);
             Count(read);
@@ -140,9 +140,12 @@ public static class MultipartImportReader
         }
 
         public override void Flush() => throw new NotSupportedException();
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override long Seek(long offset,
+                                  SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Write(byte[] buffer,
+                                   int offset,
+                                   int count) => throw new NotSupportedException();
         protected override void Dispose(bool disposing)
         {
             if (disposing)

@@ -174,7 +174,8 @@ public sealed class TransactionMigrationTests(KitFactory factory) : IClassFixtur
         }
     }
 
-    private static async Task<object?> ScalarAsync(NpgsqlConnection connection, string sql)
+    private static async Task<object?> ScalarAsync(NpgsqlConnection connection,
+                                                   string sql)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;

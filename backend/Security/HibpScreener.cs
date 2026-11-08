@@ -16,7 +16,8 @@ public sealed class HibpScreener(ILogger<HibpScreener> logger) : IPwnedScreener
 
     private static readonly HttpClient _client = new() { Timeout = Timeout.InfiniteTimeSpan };
 
-    public async Task<bool?> IsPwnedAsync(string password, CancellationToken cancellationToken = default)
+    public async Task<bool?> IsPwnedAsync(string password,
+                                          CancellationToken cancellationToken = default)
     {
         try
         {

@@ -42,7 +42,8 @@ public sealed class TransactionConcurrencyTests(KitFactory factory) : Transactio
         }).ToArray(),
     };
 
-    private static HttpRequestMessage ApplyRequest(string session, JsonElement operation)
+    private static HttpRequestMessage ApplyRequest(string session,
+                                                   JsonElement operation)
     {
         var id = operation.GetProperty("operation").GetProperty("operation_id").GetGuid();
         return Post(
@@ -396,8 +397,9 @@ public sealed class TransactionConcurrencyTests(KitFactory factory) : Transactio
         return (shortHash, shortExpiry);
     }
 
-    private static async Task WaitForBlockedRequestAsync(
-        NpgsqlConnection observer, int blockerPid, long requiredCount = 1)
+    private static async Task WaitForBlockedRequestAsync(NpgsqlConnection observer,
+                                                         int blockerPid,
+                                                         long requiredCount = 1)
     {
         var watch = Stopwatch.StartNew();
         while (watch.Elapsed < TimeSpan.FromSeconds(2))
@@ -424,8 +426,9 @@ public sealed class TransactionConcurrencyTests(KitFactory factory) : Transactio
         Assert.Fail($"The expected {requiredCount} requests did not reach the database lock wait.");
     }
 
-    private static async Task<int> LockCustomerForTestAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction, Guid customerId)
+    private static async Task<int> LockCustomerForTestAsync(NpgsqlConnection connection,
+                                                            NpgsqlTransaction transaction,
+                                                            Guid customerId)
     {
         await using (var command = connection.CreateCommand())
         {
@@ -471,7 +474,8 @@ public sealed class TransactionConcurrencyTests(KitFactory factory) : Transactio
     // and sleeps longer after a backward step. The one-second margin covers
     // the gap between this wait returning and the blocked request re-checking
     // expiry.
-    private static async Task WaitForDatabaseTimeAsync(NpgsqlConnection observer, DateTime expiresAt)
+    private static async Task WaitForDatabaseTimeAsync(NpgsqlConnection observer,
+                                                       DateTime expiresAt)
     {
         await using var command = observer.CreateCommand();
         command.CommandText = "SELECT pg_sleep_until(@expiry)";

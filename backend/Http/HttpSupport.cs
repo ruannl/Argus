@@ -47,7 +47,8 @@ public static class Errors
 /// </summary>
 public static class Trust
 {
-    public static bool OriginValid(HttpContext context, AppSettings settings)
+    public static bool OriginValid(HttpContext context,
+                                   AppSettings settings)
     {
         foreach (var name in new[] { "Origin", Brand.FrontendOriginHeader })
         {
@@ -60,7 +61,8 @@ public static class Trust
         return true;
     }
 
-    public static bool ApplicationSecretValid(HttpContext context, AppSettings settings)
+    public static bool ApplicationSecretValid(HttpContext context,
+                                              AppSettings settings)
     {
         var provided = context.Request.Headers[Brand.ApplicationSecretHeader].ToString();
         if (string.IsNullOrEmpty(provided))
@@ -83,9 +85,11 @@ public static class Trust
     }
 }
 
-public sealed record LoginRequest(string? Email, string? Password);
+public sealed record LoginRequest(string? Email,
+                                  string? Password);
 
-public sealed record RegisterRequest(string? Email, string? Password);
+public sealed record RegisterRequest(string? Email,
+                                     string? Password);
 
 public sealed record VerifyRequest(string? Token);
 
@@ -93,15 +97,21 @@ public sealed record ResendRequest(string? Email);
 
 public sealed record PasswordResetRequest(string? Email);
 
-public sealed record PasswordResetConsumeRequest(string? Token, string? Password);
+public sealed record PasswordResetConsumeRequest(string? Token,
+                                                 string? Password);
 
-public sealed record LoginResponse(string Token, string ExpiresAt);
+public sealed record LoginResponse(string Token,
+                                   string ExpiresAt);
 
-public sealed record CreateAccountRequest(string? DisplayName, string? Institution);
+public sealed record CreateAccountRequest(string? DisplayName,
+                                          string? Institution);
 
-public sealed record CreateCategoryRequest(string? DisplayName, string? Kind);
+public sealed record CreateCategoryRequest(string? DisplayName,
+                                           string? Kind);
 
-public sealed record UpdateCategoryRequest(string? DisplayName, string? Kind, bool? ConfirmKindChange);
+public sealed record UpdateCategoryRequest(string? DisplayName,
+                                           string? Kind,
+                                           bool? ConfirmKindChange);
 
 public sealed record CreateMerchantTagRequest(string? DisplayName);
 
@@ -116,7 +126,9 @@ public static class JsonBody
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
     };
 
-    public readonly record struct ParseResult<T>(T? Value, bool Parsed, bool UnknownField);
+    public readonly record struct ParseResult<T>(T? Value,
+                                                 bool Parsed,
+                                                 bool UnknownField);
 
     /// <summary>
     /// Account PATCH needs to tell "institution omitted" from "institution
@@ -130,9 +142,8 @@ public static class JsonBody
                                                           bool InstitutionProvided,
                                                           string? Institution);
 
-    public static async Task<AccountPatchParseResult> ReadAccountPatchAsync(
-        HttpRequest request,
-        CancellationToken cancellationToken = default)
+    public static async Task<AccountPatchParseResult> ReadAccountPatchAsync(HttpRequest request,
+                                                                            CancellationToken cancellationToken = default)
     {
         string body;
         using (var reader = new StreamReader(request.Body, Encoding.UTF8))
@@ -221,9 +232,8 @@ public static class JsonBody
         }
     }
 
-    public static async Task<ParseResult<T>> ReadAsync<T>(
-        HttpRequest request,
-        CancellationToken cancellationToken = default)
+    public static async Task<ParseResult<T>> ReadAsync<T>(HttpRequest request,
+                                                          CancellationToken cancellationToken = default)
     {
         string body;
         using (var reader = new StreamReader(request.Body, Encoding.UTF8))

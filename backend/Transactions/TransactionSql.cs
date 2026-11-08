@@ -19,10 +19,9 @@ public static class TransactionSql
           ON s.customer_id = t.customer_id AND s.id = t.statement_import_id
         """;
 
-    public static string BuildWhere(
-        TransactionFilter filter,
-        NpgsqlCommand command,
-        bool includeVisibility)
+    public static string BuildWhere(TransactionFilter filter,
+                                    NpgsqlCommand command,
+                                    bool includeVisibility)
     {
         var clauses = new List<string> { "t.customer_id = @customer_id" };
 
@@ -129,7 +128,8 @@ public static class TransactionSql
         _ => "TRUE",
     };
 
-    public static string OrderClause(string sortBy, string sortDirection)
+    public static string OrderClause(string sortBy,
+                                     string sortDirection)
     {
         var direction = sortDirection == "asc" ? "ASC" : "DESC";
         var column = sortBy switch

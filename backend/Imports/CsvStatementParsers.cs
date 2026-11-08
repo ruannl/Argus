@@ -7,7 +7,8 @@ public static class CsvStatementParsers
 {
     private static readonly string[] _delimiterNames = [",", ";", "\t", "|"];
 
-    public static string DecodeUtf8(byte[] bytes, CancellationToken cancellationToken = default)
+    public static string DecodeUtf8(byte[] bytes,
+                                    CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (bytes.Length > ImportLimits.MaxFileBytes)
@@ -27,9 +28,8 @@ public static class CsvStatementParsers
         }
     }
 
-    public static (byte[] CsvBytes, StatementFormat Format) UnwrapFnbArchive(
-        byte[] bytes,
-        CancellationToken cancellationToken = default)
+    public static (byte[] CsvBytes, StatementFormat Format) UnwrapFnbArchive(byte[] bytes,
+                                                                             CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (bytes.Length > ImportLimits.MaxFileBytes)
@@ -238,9 +238,8 @@ public static class CsvStatementParsers
         string.Equals(fields[2].Trim(), "Balance", StringComparison.OrdinalIgnoreCase) &&
         string.Equals(fields[3].Trim(), "Description", StringComparison.OrdinalIgnoreCase);
 
-    public static ParsedStatement InspectGeneric(
-        string text,
-        CancellationToken cancellationToken = default)
+    public static ParsedStatement InspectGeneric(string text,
+                                                 CancellationToken cancellationToken = default)
     {
         var detection = DetectGeneric(text, cancellationToken);
         if (detection is null)
@@ -633,9 +632,8 @@ public static class CsvStatementParsers
             []);
     }
 
-    private static GenericDetection? DetectGeneric(
-        string text,
-        CancellationToken cancellationToken = default)
+    private static GenericDetection? DetectGeneric(string text,
+                                                   CancellationToken cancellationToken = default)
     {
         var candidates = new List<GenericCandidate>();
         foreach (var delimiter in _delimiterNames)
@@ -781,7 +779,8 @@ public static class CsvStatementParsers
     private static string NormalizeHeader(string value) =>
         StatementText.CollapseWhitespace(value).ToLowerInvariant();
 
-    private static int? FindHeader(IReadOnlyList<string> headers, params string[] names)
+    private static int? FindHeader(IReadOnlyList<string> headers,
+                                   params string[] names)
     {
         for (var index = 0; index < headers.Count; index++)
         {
@@ -793,7 +792,8 @@ public static class CsvStatementParsers
         return null;
     }
 
-    private static string ProposeDateFormat(IReadOnlyList<CsvRecord> records, int? column)
+    private static string ProposeDateFormat(IReadOnlyList<CsvRecord> records,
+                                            int? column)
     {
         if (column is null)
         {
@@ -820,9 +820,8 @@ public static class CsvStatementParsers
         return "yyyy-MM-dd";
     }
 
-    private static (string Decimal, string Thousands) ProposeSeparators(
-        IReadOnlyList<CsvRecord> records,
-        int? column)
+    private static (string Decimal, string Thousands) ProposeSeparators(IReadOnlyList<CsvRecord> records,
+                                                                        int? column)
     {
         if (column is null)
         {
@@ -847,7 +846,8 @@ public static class CsvStatementParsers
         return (".", "none");
     }
 
-    private static bool MatchesNegativeStyle(string raw, string style)
+    private static bool MatchesNegativeStyle(string raw,
+                                             string style)
     {
         var value = raw.Trim();
         return style switch
@@ -1052,7 +1052,6 @@ public static class CsvStatementParsers
                                            int Score,
                                            int CommonFieldCount);
 
-    private sealed record GenericDetection(
-        ParserConfig Config,
-        IReadOnlyDictionary<string, string> Suggestions);
+    private sealed record GenericDetection(ParserConfig Config,
+                                           IReadOnlyDictionary<string, string> Suggestions);
 }

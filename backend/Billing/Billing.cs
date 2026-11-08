@@ -14,7 +14,9 @@ public static class BillingEvents
 {
     public const string WebhookSignatureHeader = "X-Billing-Webhook-Signature";
 
-    public static bool VerifyWebhook(string payload, string? signature, string secret)
+    public static bool VerifyWebhook(string payload,
+                                     string? signature,
+                                     string secret)
     {
         if (string.IsNullOrEmpty(signature))
         {
