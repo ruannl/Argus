@@ -184,10 +184,17 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
         var db = Factory.CreateDb();
         await using var connection = await db.OpenAsync();
         await using var command = connection.CreateCommand();
-        // Bulk synthetic fixtures insert tens of thousands of rows; the
-        // production 30-second statement bound is not a fixture timeout.
-        command.CommandTimeout = 180;
-        command.CommandText = sql;
+        // Bulk synthetic fixtures insert tens of thousands of rows with foreign
+        // key and index maintenance. CI runners vary widely in disk and CPU
+        // throughput, so the production 30-second statement bound is not a
+        // fixture timeout; keep a generous bound so slow runners do not fail a
+        // correct fixture.
+        command.CommandTimeout = 600;
+        // Fixture rows are read back after this call returns, so commit
+        // visibility is all the test needs. Skipping the local WAL flush keeps
+        // a slow or contended CI disk from stalling bulk setup; durability of
+        // synthetic fixture data is not under test.
+        command.CommandText = "SET synchronous_commit = off; " + sql;
         foreach (var (name, value) in parameters)
         {
             if (value is Guid[] guids)
