@@ -107,7 +107,11 @@ describe("server backend client", () => {
   });
 
   it("does not expose backend failure bodies and rejects empty session tokens", async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: "unauthorized", detail: "PRIVATE-CANARY" }), { status: 401 }));
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: "unauthorized", detail: "PRIVATE-CANARY" }), {
+        status: 401,
+      }),
+    );
     await expect(getCurrentAccount("bad-token")).rejects.toMatchObject({
       kind: "unauthorized",
       message: "Account check failed.",
@@ -139,18 +143,22 @@ describe("server backend client", () => {
     [403, "unavailable"],
     [500, "unavailable"],
     [204, "unavailable"],
-  ] as const)("normalizes /v1/me status %i to %s without returning its body", async (status, kind) => {
-    const body = status === 401
-      ? { error: "unauthorized", detail: "PRIVATE-CANARY" }
-      : { error: "PRIVATE-CANARY" };
-    fetchMock.mockResolvedValue(new Response(
-      status === 204 || status === 403 ? null : JSON.stringify(body), { status },
-    ));
-    await expect(getCurrentAccount("opaque-session-token")).rejects.toMatchObject({
-      kind,
-      message: "Account check failed.",
-    });
-  });
+  ] as const)(
+    "normalizes /v1/me status %i to %s without returning its body",
+    async (status, kind) => {
+      const body =
+        status === 401
+          ? { error: "unauthorized", detail: "PRIVATE-CANARY" }
+          : { error: "PRIVATE-CANARY" };
+      fetchMock.mockResolvedValue(
+        new Response(status === 204 || status === 403 ? null : JSON.stringify(body), { status }),
+      );
+      await expect(getCurrentAccount("opaque-session-token")).rejects.toMatchObject({
+        kind,
+        message: "Account check failed.",
+      });
+    },
+  );
 
   it.each([
     JSON.stringify({ error: "unexpected", detail: "PRIVATE-CANARY" }),
@@ -166,17 +174,24 @@ describe("server backend client", () => {
 
   it("treats malformed, unexpected and unreachable /v1/me bodies as unavailable", async () => {
     fetchMock.mockResolvedValueOnce(new Response("not-json", { status: 200 }));
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ id: "unexpected-only" }), { status: 200 }));
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
-      id: "account-id",
-      email: "customer@example.test",
-      email_verified: "true",
-      subscriber_active: true,
-      subscription_started_at: null,
-      next_billing_at: null,
-      lifetime: false,
-      admin: false,
-    }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: "unexpected-only" }), { status: 200 }),
+    );
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: "account-id",
+          email: "customer@example.test",
+          email_verified: "true",
+          subscriber_active: true,
+          subscription_started_at: null,
+          next_billing_at: null,
+          lifetime: false,
+          admin: false,
+        }),
+        { status: 200 },
+      ),
+    );
     fetchMock.mockRejectedValueOnce(new Error("PRIVATE-CANARY backend origin"));
     for (let index = 0; index < 4; index += 1) {
       await expect(getCurrentAccount("opaque-session-token")).rejects.toMatchObject({
@@ -187,10 +202,13 @@ describe("server backend client", () => {
   });
 
   it("registers accounts through the trusted backend route", async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ status: "accepted" }), { status: 202 }));
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ status: "accepted" }), { status: 202 }),
+    );
 
-    await expect(registerAccount("customer@example.test", "a-compliant-password"))
-      .resolves.toEqual({ ok: true, value: { status: "accepted" } });
+    await expect(registerAccount("customer@example.test", "a-compliant-password")).resolves.toEqual(
+      { ok: true, value: { status: "accepted" } },
+    );
     expect(fetchMock).toHaveBeenCalledWith("http://backend.test/v1/register", {
       method: "POST",
       headers: {
@@ -205,7 +223,9 @@ describe("server backend client", () => {
   });
 
   it("verifies email tokens through the trusted backend route", async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ status: "verified" }), { status: 200 }));
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ status: "verified" }), { status: 200 }),
+    );
 
     await expect(verifyEmail("a".repeat(64))).resolves.toEqual({
       ok: true,
@@ -225,10 +245,14 @@ describe("server backend client", () => {
   });
 
   it("resends verification through the trusted backend route", async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ status: "accepted" }), { status: 202 }));
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ status: "accepted" }), { status: 202 }),
+    );
 
-    await expect(resendVerification("customer@example.test"))
-      .resolves.toEqual({ ok: true, value: { status: "accepted" } });
+    await expect(resendVerification("customer@example.test")).resolves.toEqual({
+      ok: true,
+      value: { status: "accepted" },
+    });
     expect(fetchMock).toHaveBeenCalledWith("http://backend.test/v1/verification/resend", {
       method: "POST",
       headers: {
@@ -243,7 +267,9 @@ describe("server backend client", () => {
   });
 
   it("requests a password reset through the trusted backend route", async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ status: "accepted" }), { status: 202 }));
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ status: "accepted" }), { status: 202 }),
+    );
 
     await expect(requestPasswordReset("customer@example.test")).resolves.toEqual({
       ok: true,
@@ -303,7 +329,9 @@ describe("server backend client", () => {
       kind: "invalid_token",
     });
 
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: "rate_limited" }), { status: 429 }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "rate_limited" }), { status: 429 }),
+    );
     await expect(requestPasswordReset("customer@example.test")).resolves.toEqual({
       ok: false,
       kind: "rate_limited",
@@ -317,8 +345,10 @@ describe("server backend client", () => {
     };
     fetchMock.mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
 
-    await expect(loginAccount("customer@example.test", "a-compliant-password"))
-      .resolves.toEqual({ ok: true, value: response });
+    await expect(loginAccount("customer@example.test", "a-compliant-password")).resolves.toEqual({
+      ok: true,
+      value: response,
+    });
     expect(fetchMock).toHaveBeenCalledWith("http://backend.test/v1/login", {
       method: "POST",
       headers: {
@@ -337,22 +367,28 @@ describe("server backend client", () => {
       new Response(JSON.stringify({ error: "invalid_credentials" }), { status: 401 }),
     );
 
-    await expect(loginAccount("customer@example.test", "wrong-password"))
-      .resolves.toEqual({ ok: false, kind: "invalid_credentials" });
+    await expect(loginAccount("customer@example.test", "wrong-password")).resolves.toEqual({
+      ok: false,
+      kind: "invalid_credentials",
+    });
   });
 
   it("classifies login structural failures and rate limits", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "invalid_request" }), { status: 400 }),
     );
-    await expect(loginAccount("customer@example.test", "password"))
-      .resolves.toEqual({ ok: false, kind: "invalid_request" });
+    await expect(loginAccount("customer@example.test", "password")).resolves.toEqual({
+      ok: false,
+      kind: "invalid_request",
+    });
 
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "not exposed" }), { status: 429 }),
     );
-    await expect(loginAccount("customer@example.test", "password"))
-      .resolves.toEqual({ ok: false, kind: "rate_limited" });
+    await expect(loginAccount("customer@example.test", "password")).resolves.toEqual({
+      ok: false,
+      kind: "rate_limited",
+    });
   });
 
   it("collapses other login 401 responses to unavailable", async () => {
@@ -360,8 +396,10 @@ describe("server backend client", () => {
       new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }),
     );
 
-    await expect(loginAccount("customer@example.test", "password"))
-      .resolves.toEqual({ ok: false, kind: "unavailable" });
+    await expect(loginAccount("customer@example.test", "password")).resolves.toEqual({
+      ok: false,
+      kind: "unavailable",
+    });
   });
 
   it("logs out with the session header and no JSON body", async () => {
@@ -385,7 +423,9 @@ describe("server backend client", () => {
   });
 
   it("collapses every non-204 logout response to unavailable", async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }));
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }),
+    );
 
     await expect(logoutSession("opaque-session-token")).resolves.toEqual({
       ok: false,
@@ -398,8 +438,10 @@ describe("server backend client", () => {
       new Response(JSON.stringify({ error: "invalid_request" }), { status: 400 }),
     );
 
-    await expect(registerAccount("not-an-email", "short"))
-      .resolves.toEqual({ ok: false, kind: "invalid_request" });
+    await expect(registerAccount("not-an-email", "short")).resolves.toEqual({
+      ok: false,
+      kind: "invalid_request",
+    });
   });
 
   it("classifies a 400 invalid token from the backend", async () => {
@@ -407,8 +449,10 @@ describe("server backend client", () => {
       new Response(JSON.stringify({ error: "invalid_token" }), { status: 400 }),
     );
 
-    await expect(verifyEmail("a".repeat(64)))
-      .resolves.toEqual({ ok: false, kind: "invalid_token" });
+    await expect(verifyEmail("a".repeat(64))).resolves.toEqual({
+      ok: false,
+      kind: "invalid_token",
+    });
   });
 
   it("classifies rate limits before inspecting the response body", async () => {
@@ -416,39 +460,47 @@ describe("server backend client", () => {
       new Response(JSON.stringify({ error: "backend detail" }), { status: 429 }),
     );
 
-    await expect(resendVerification("customer@example.test"))
-      .resolves.toEqual({ ok: false, kind: "rate_limited" });
+    await expect(resendVerification("customer@example.test")).resolves.toEqual({
+      ok: false,
+      kind: "rate_limited",
+    });
   });
 
   it("collapses unknown 400 bodies and other HTTP failures to unavailable", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: "other" }), { status: 400 }));
-    await expect(registerAccount("customer@example.test", "password"))
-      .resolves.toEqual({ ok: false, kind: "unavailable" });
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "other" }), { status: 400 }),
+    );
+    await expect(registerAccount("customer@example.test", "password")).resolves.toEqual({
+      ok: false,
+      kind: "unavailable",
+    });
 
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "sensitive backend detail" }), { status: 500 }),
     );
-    await expect(resendVerification("customer@example.test"))
-      .resolves.toEqual({ ok: false, kind: "unavailable" });
+    await expect(resendVerification("customer@example.test")).resolves.toEqual({
+      ok: false,
+      kind: "unavailable",
+    });
 
     fetchMock.mockResolvedValueOnce(new Response("not json", { status: 400 }));
-    await expect(verifyEmail("a".repeat(64)))
-      .resolves.toEqual({ ok: false, kind: "unavailable" });
+    await expect(verifyEmail("a".repeat(64))).resolves.toEqual({ ok: false, kind: "unavailable" });
   });
 
   it("returns unavailable instead of throwing for missing environment", async () => {
     vi.stubEnv("ARGUS_BACKEND_URL", "");
 
-    await expect(registerAccount("customer@example.test", "password"))
-      .resolves.toEqual({ ok: false, kind: "unavailable" });
+    await expect(registerAccount("customer@example.test", "password")).resolves.toEqual({
+      ok: false,
+      kind: "unavailable",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("returns unavailable instead of throwing when fetch rejects", async () => {
     fetchMock.mockRejectedValue(new Error("network failure with secret details"));
 
-    await expect(verifyEmail("a".repeat(64)))
-      .resolves.toEqual({ ok: false, kind: "unavailable" });
+    await expect(verifyEmail("a".repeat(64))).resolves.toEqual({ ok: false, kind: "unavailable" });
   });
 });
 
@@ -551,10 +603,7 @@ describe("server finance client", () => {
       ok: true,
       value: { accounts: [account] },
     });
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://backend.test/v1/finance/accounts",
-      getInit(),
-    );
+    expect(fetchMock).toHaveBeenCalledWith("http://backend.test/v1/finance/accounts", getInit());
   });
 
   it("creates an account with an institution and omits it when absent", async () => {
@@ -872,34 +921,45 @@ describe("server import client", () => {
 
   it("uploads inspect multipart with trust headers and no JSON content type", async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({
-        detected_source_kind: "fnb_csv",
-        limits: { max_file_bytes: 1, max_data_rows: 1, max_pdf_pages: 1, max_description_scalars: 1 },
-        proposed_start_date: null,
-        proposed_end_date: null,
-        mapping: {},
-        required_confirmations: [],
-        warnings: [],
-        preview: [],
-        preview_truncated: false,
-        can_prepare: true,
-      }), { status: 200 }),
+      new Response(
+        JSON.stringify({
+          detected_source_kind: "fnb_csv",
+          limits: {
+            max_file_bytes: 1,
+            max_data_rows: 1,
+            max_pdf_pages: 1,
+            max_description_scalars: 1,
+          },
+          proposed_start_date: null,
+          proposed_end_date: null,
+          mapping: {},
+          required_confirmations: [],
+          warnings: [],
+          preview: [],
+          preview_truncated: false,
+          can_prepare: true,
+        }),
+        { status: 200 },
+      ),
     );
 
-    await expect(inspectImportFile(
-      "opaque-session-token",
-      new Uint8Array([1, 2, 3]),
-      { financial_account_id: "account", source_kind: "fnb" },
-    )).resolves.toEqual(expect.objectContaining({ ok: true }));
+    await expect(
+      inspectImportFile("opaque-session-token", new Uint8Array([1, 2, 3]), {
+        financial_account_id: "account",
+        source_kind: "fnb",
+      }),
+    ).resolves.toEqual(expect.objectContaining({ ok: true }));
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("http://backend.test/v1/finance/imports/inspect");
     expect(init?.method).toBe("POST");
-    expect(init?.headers).toEqual(expect.objectContaining({
-      [APPLICATION_SECRET_HEADER]: "application-secret",
-      [SESSION_HEADER]: "opaque-session-token",
-      [FRONTEND_ORIGIN_HEADER]: "http://frontend.test",
-    }));
+    expect(init?.headers).toEqual(
+      expect.objectContaining({
+        [APPLICATION_SECRET_HEADER]: "application-secret",
+        [SESSION_HEADER]: "opaque-session-token",
+        [FRONTEND_ORIGIN_HEADER]: "http://frontend.test",
+      }),
+    );
     expect((init?.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
     expect(init?.body).toBeInstanceOf(FormData);
     const form = init?.body as FormData;
@@ -913,11 +973,12 @@ describe("server import client", () => {
   it("prepares a review through the multipart route", async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(review), { status: 201 }));
 
-    await expect(prepareImportReview(
-      "opaque-session-token",
-      new Uint8Array([1]),
-      { financial_account_id: "account", source_kind: "fnb" },
-    )).resolves.toEqual({ ok: true, value: review });
+    await expect(
+      prepareImportReview("opaque-session-token", new Uint8Array([1]), {
+        financial_account_id: "account",
+        source_kind: "fnb",
+      }),
+    ).resolves.toEqual({ ok: true, value: review });
     expect(fetchMock.mock.calls[0][0]).toBe("http://backend.test/v1/finance/imports/reviews");
   });
 
@@ -926,19 +987,23 @@ describe("server import client", () => {
       new Response(JSON.stringify({ error: "pdf_import_deferred" }), { status: 400 }),
     );
 
-    await expect(inspectImportFile(
-      "opaque-session-token",
-      new Uint8Array([1]),
-      { financial_account_id: "account", source_kind: "standard_bank_pdf" },
-    )).resolves.toEqual({ ok: false, kind: "pdf_import_deferred" });
+    await expect(
+      inspectImportFile("opaque-session-token", new Uint8Array([1]), {
+        financial_account_id: "account",
+        source_kind: "standard_bank_pdf",
+      }),
+    ).resolves.toEqual({ ok: false, kind: "pdf_import_deferred" });
   });
 
   it("returns statement repeat IDs from the commit error body", async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({
-        error: "statement_repeat",
-        existing_import_ids: ["00000000-0000-0000-0000-000000000010"],
-      }), { status: 409 }),
+      new Response(
+        JSON.stringify({
+          error: "statement_repeat",
+          existing_import_ids: ["00000000-0000-0000-0000-000000000010"],
+        }),
+        { status: 409 },
+      ),
     );
 
     await expect(commitImportReview("opaque-session-token", "review", 2, "hash")).resolves.toEqual({
@@ -980,21 +1045,27 @@ describe("server import client", () => {
 
   it("sends DELETE with the confirmation JSON body", async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ deleted: true, deleted_transaction_count: 4 }), { status: 200 }),
+      new Response(JSON.stringify({ deleted: true, deleted_transaction_count: 4 }), {
+        status: 200,
+      }),
     );
 
-    await expect(deleteImportStatement("opaque-session-token", "statement", 2, 4)).resolves.toEqual({
-      ok: true,
-      value: { deleted: true, deleted_transaction_count: 4 },
-    });
+    await expect(deleteImportStatement("opaque-session-token", "statement", 2, 4)).resolves.toEqual(
+      {
+        ok: true,
+        value: { deleted: true, deleted_transaction_count: 4 },
+      },
+    );
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("http://backend.test/v1/finance/imports/statement");
     expect(init?.method).toBe("DELETE");
-    expect(init?.body).toBe(JSON.stringify({
-      expected_version: 2,
-      expected_transaction_count: 4,
-      confirm: true,
-    }));
+    expect(init?.body).toBe(
+      JSON.stringify({
+        expected_version: 2,
+        expected_transaction_count: 4,
+        confirm: true,
+      }),
+    );
   });
 
   it("returns unavailable without fetching when the session token is empty", async () => {
@@ -1036,13 +1107,15 @@ describe("server transaction client", () => {
   it("queries through a body-only POST with the trusted headers", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify(page), { status: 200 }));
 
-    await expect(queryTransactions("opaque-session-token", {
-      filters: { search: "private merchant", visibility: "hidden" },
-      page: 2,
-      page_size: 50,
-      sort_by: "amount",
-      sort_direction: "asc",
-    })).resolves.toEqual({ ok: true, value: page });
+    await expect(
+      queryTransactions("opaque-session-token", {
+        filters: { search: "private merchant", visibility: "hidden" },
+        page: 2,
+        page_size: 50,
+        sort_by: "amount",
+        sort_direction: "asc",
+      }),
+    ).resolves.toEqual({ ok: true, value: page });
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("http://backend.test/v1/finance/transactions/query");
@@ -1054,13 +1127,15 @@ describe("server transaction client", () => {
       [SESSION_HEADER]: "opaque-session-token",
       [FRONTEND_ORIGIN_HEADER]: "http://frontend.test",
     });
-    expect(init?.body).toBe(JSON.stringify({
-      filters: { search: "private merchant", visibility: "hidden" },
-      page: 2,
-      page_size: 50,
-      sort_by: "amount",
-      sort_direction: "asc",
-    }));
+    expect(init?.body).toBe(
+      JSON.stringify({
+        filters: { search: "private merchant", visibility: "hidden" },
+        page: 2,
+        page_size: 50,
+        sort_by: "amount",
+        sort_direction: "asc",
+      }),
+    );
     expect(init?.cache).toBe("no-store");
   });
 
@@ -1087,15 +1162,19 @@ describe("server transaction client", () => {
     const result = { transaction: {}, selected_count: 1, changed_count: 1, unchanged_count: 0 };
     fetchMock.mockResolvedValue(new Response(JSON.stringify(result), { status: 200 }));
 
-    await expect(patchTransaction("opaque-session-token", "transaction-id", {
-      expected_version: 3,
-      changes: { category_id: "category-id", add_tag_ids: ["tag-a"], remove_tag_ids: ["tag-b"] },
-    })).resolves.toEqual({ ok: true, value: result });
+    await expect(
+      patchTransaction("opaque-session-token", "transaction-id", {
+        expected_version: 3,
+        changes: { category_id: "category-id", add_tag_ids: ["tag-a"], remove_tag_ids: ["tag-b"] },
+      }),
+    ).resolves.toEqual({ ok: true, value: result });
     expect(fetchMock.mock.calls[0][1]?.method).toBe("PATCH");
-    expect(fetchMock.mock.calls[0][1]?.body).toBe(JSON.stringify({
-      expected_version: 3,
-      changes: { category_id: "category-id", add_tag_ids: ["tag-a"], remove_tag_ids: ["tag-b"] },
-    }));
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(
+      JSON.stringify({
+        expected_version: 3,
+        changes: { category_id: "category-id", add_tag_ids: ["tag-a"], remove_tag_ids: ["tag-b"] },
+      }),
+    );
   });
 
   it("prepares, applies, and abandons operations", async () => {
@@ -1114,17 +1193,26 @@ describe("server transaction client", () => {
       action: null,
     };
     fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({ operation, created: true }), { status: 201 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        operation_id: "operation-id",
-        status: "Applied",
-        selected_count: 2,
-        changed_count: 1,
-        unchanged_count: 1,
-        applied_at: "2026-01-01T00:01:00Z",
-        replayed: false,
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ...operation, status: "Abandoned" }), { status: 200 }));
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ operation, created: true }), { status: 201 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            operation_id: "operation-id",
+            status: "Applied",
+            selected_count: 2,
+            changed_count: 1,
+            unchanged_count: 1,
+            applied_at: "2026-01-01T00:01:00Z",
+            replayed: false,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ...operation, status: "Abandoned" }), { status: 200 }),
+      );
 
     await prepareTransactionOperation("opaque-session-token", {
       operation_id: "operation-id",
@@ -1139,11 +1227,13 @@ describe("server transaction client", () => {
     expect(fetchMock.mock.calls[1][0]).toBe(
       "http://backend.test/v1/finance/transactions/operations/operation-id/apply",
     );
-    expect(fetchMock.mock.calls[1][1]?.body).toBe(JSON.stringify({
-      confirmation_hash: "hash",
-      expected_selected_count: 2,
-      confirm: true,
-    }));
+    expect(fetchMock.mock.calls[1][1]?.body).toBe(
+      JSON.stringify({
+        confirmation_hash: "hash",
+        expected_selected_count: 2,
+        confirm: true,
+      }),
+    );
 
     await abandonTransactionOperation("opaque-session-token", "operation-id");
     expect(fetchMock.mock.calls[2][0]).toBe(

@@ -19,9 +19,7 @@ test("security headers are present on every page response", async ({ page }) => 
   await expect
     .poll(() => response?.headers()["content-security-policy"] ?? "")
     .toContain("default-src 'self'");
-  await expect
-    .poll(() => response?.headers()["x-content-type-options"] ?? "")
-    .toBe("nosniff");
+  await expect.poll(() => response?.headers()["x-content-type-options"] ?? "").toBe("nosniff");
   await expect.poll(() => response?.headers()["x-frame-options"] ?? "").toBe("DENY");
   await expect
     .poll(() => response?.headers()["referrer-policy"] ?? "")
@@ -34,17 +32,13 @@ test("security headers are present on every page response", async ({ page }) => 
 test("landing page presents the Argus finance story and tagline", async ({ page }) => {
   await page.goto("/");
 
-  await expect(
-    page.getByRole("heading", { level: 1, name: PRODUCT_NAME }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: PRODUCT_NAME })).toBeVisible();
   await expect(page.getByText(PRODUCT_TAGLINE, { exact: true })).toBeVisible();
   await expect(page.getByText(AUDIENCE_OUTCOME_LEAD)).toBeVisible();
   await expect(page.getByText(AUDIENCE_OUTCOME_DETAIL)).toBeVisible();
 
   for (const content of FEATURE_HIGHLIGHTS) {
-    await expect(
-      page.getByRole("heading", { level: 3, name: content.heading }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { level: 3, name: content.heading })).toBeVisible();
   }
 
   for (const step of HOW_IT_WORKS_STEPS) {
@@ -66,12 +60,11 @@ test("the landing header links to login and register", async ({ page }) => {
   await page.goto("/");
 
   const accountNav = page.getByRole("navigation", { name: "Account" });
-  await expect(
-    accountNav.getByRole("link", { name: "Log in" }),
-  ).toHaveAttribute("href", "/login");
-  await expect(
-    accountNav.getByRole("link", { name: "Create an account" }),
-  ).toHaveAttribute("href", "/register");
+  await expect(accountNav.getByRole("link", { name: "Log in" })).toHaveAttribute("href", "/login");
+  await expect(accountNav.getByRole("link", { name: "Create an account" })).toHaveAttribute(
+    "href",
+    "/register",
+  );
 
   await accountNav.getByRole("link", { name: "Log in" }).click();
   await expect(page).toHaveURL(/\/login$/);
@@ -82,9 +75,7 @@ test("the primary action opens the registration page", async ({ page }) => {
   await page.getByRole("link", { name: PRIMARY_CTA_LABEL }).click();
 
   await expect(page).toHaveURL(/\/register$/);
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Create an account" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Create an account" })).toBeVisible();
 });
 
 test("the retired sample page returns 404", async ({ page }) => {
@@ -164,9 +155,7 @@ test("the register page shows the customer form", async ({ page }) => {
 test("verify without a token shows the invalid-link copy", async ({ page }) => {
   await page.goto("/verify");
 
-  await expect(
-    page.getByText("This verification link is invalid or has expired."),
-  ).toBeVisible();
+  await expect(page.getByText("This verification link is invalid or has expired.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Verify email" })).not.toBeVisible();
 });
 

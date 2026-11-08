@@ -220,9 +220,7 @@ export default function ImportWorkspace({
     setBusy("preparing");
     setMessage(null);
     try {
-      const body = (await sendUpload("prepare")) as
-        | { summary?: { id?: string } }
-        | null;
+      const body = (await sendUpload("prepare")) as { summary?: { id?: string } } | null;
       const reviewId = body?.summary?.id;
       if (!reviewId) {
         setMessage({ tone: "error", text: messageFor("unavailable") });
@@ -277,8 +275,8 @@ export default function ImportWorkspace({
             Add a financial account first
           </h2>
           <p className="mt-3 max-w-2xl text-base leading-7 text-muted">
-            Imports need an active ZAR account. Create one here, or restore an archived
-            account in Settings.
+            Imports need an active ZAR account. Create one here, or restore an archived account in
+            Settings.
           </p>
           <form action={createAccount} className="mt-5 grid gap-3 sm:max-w-xl">
             <label className="grid gap-2 text-sm font-semibold text-ink">
@@ -307,7 +305,10 @@ export default function ImportWorkspace({
           {archivedAccounts.length > 0 ? (
             <p className="mt-4 text-sm leading-6 text-muted">
               Archived accounts keep their history. Restore one in{" "}
-              <Link className="font-semibold text-accent-text underline underline-offset-4" href="/settings">
+              <Link
+                className="font-semibold text-accent-text underline underline-offset-4"
+                href="/settings"
+              >
                 Settings
               </Link>
               .
@@ -325,8 +326,8 @@ export default function ImportWorkspace({
                 Choose a statement
               </h2>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-                Files are processed in memory. Only sanitized, reviewed rows are stored.
-                The original filename is not displayed or retained.
+                Files are processed in memory. Only sanitized, reviewed rows are stored. The
+                original filename is not displayed or retained.
               </p>
             </div>
             <span className="rounded-full border border-line px-3 py-1 text-xs font-semibold text-muted">
@@ -435,8 +436,8 @@ export default function ImportWorkspace({
                   Detected {sourceKindLabel(inspect.detected_source_kind)}
                 </p>
                 <p className="mt-1 text-sm text-muted">
-                  Confirm the statement is in ZAR and that the coverage dates are inclusive.
-                  Rows outside the coverage period stay invalid until you adjust the dates or skip them.
+                  Confirm the statement is in ZAR and that the coverage dates are inclusive. Rows
+                  outside the coverage period stay invalid until you adjust the dates or skip them.
                 </p>
               </div>
 

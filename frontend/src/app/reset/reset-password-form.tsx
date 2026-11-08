@@ -108,10 +108,7 @@ export default function ResetPasswordForm() {
   return (
     <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
       <div>
-        <label
-          className="block text-sm font-semibold text-ink"
-          htmlFor="reset-password"
-        >
+        <label className="block text-sm font-semibold text-ink" htmlFor="reset-password">
           New password
         </label>
         <input

@@ -24,8 +24,7 @@ import AccountReadUnavailable from "../account-read-unavailable";
 
 export const dynamic = "force-dynamic";
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function DetailUnavailable({
   account,
@@ -87,9 +86,11 @@ export default async function TransactionDetailPage({
     }
     return (
       <AccountReadUnavailable
-        kind={error instanceof AccountReadError && error.kind === "rate_limited"
-          ? "rate_limited"
-          : "unavailable"}
+        kind={
+          error instanceof AccountReadError && error.kind === "rate_limited"
+            ? "rate_limited"
+            : "unavailable"
+        }
         view="detail"
       />
     );

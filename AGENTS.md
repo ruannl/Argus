@@ -196,6 +196,20 @@ runbook; `docs/secret-rotation.md` and `docs/tls-deployment-contract.md` cover
 secrets and public deployment; `docs/divergences.md` records intentional
 differences from the Rust sibling kit.
 
+## Code style
+
+- Use `backend/.editorconfig` for C#. Use Prettier for frontend source and test
+  formatting and `frontend/eslint.config.mjs` for Next.js linting.
+- In C# declarations with four or more parameters, start the list on the next
+  line and put one parameter per line at the same four-space continuation
+  indent. Shorter lists can stay inline when readable. Wrap call sites as
+  needed for readability.
+- Remove unused C# usings and sort the rest with `System` first.
+- Format and lint the code you touch. Keep a repository-wide formatting pass
+  separate from feature changes. Load `argus-code-style` for cleanup and
+  `argus-verify` when selecting verification. Use `argus-api-change` for
+  coordinated REST API and frontend changes.
+
 ## Verification
 
 Run these before you push. CI runs the same battery.
@@ -204,12 +218,15 @@ Run these before you push. CI runs the same battery.
 # Backend
 cd backend
 dotnet format argus.Server.csproj --verify-no-changes
+dotnet format style argus.Server.csproj --diagnostics IDE0005 --severity info --verify-no-changes
 dotnet format tests/argus.Server.Tests/argus.Server.Tests.csproj --verify-no-changes
-dotnet test tests/argus.Server.Tests
-dotnet build -c Release
+dotnet format style tests/argus.Server.Tests/argus.Server.Tests.csproj --diagnostics IDE0005 --severity info --verify-no-changes
+dotnet test tests/argus.Server.Tests -warnaserror
+dotnet build -c Release -warnaserror
 
 # Frontend
 cd frontend
+npm run format:check
 npm run lint
 npm run test
 npm run build

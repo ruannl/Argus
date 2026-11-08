@@ -80,10 +80,7 @@ describe("Auth.js configuration", () => {
     });
 
     await expect(
-      provider.authorize(
-        { backendToken: "x".repeat(1025) },
-        new Request("http://127.0.0.1/login"),
-      ),
+      provider.authorize({ backendToken: "x".repeat(1025) }, new Request("http://127.0.0.1/login")),
     ).resolves.toBeNull();
   });
 

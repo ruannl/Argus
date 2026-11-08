@@ -4,10 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 
-import {
-  loadTransactionAction,
-  saveTransactionAction,
-} from "@/lib/server/transaction-actions";
+import { loadTransactionAction, saveTransactionAction } from "@/lib/server/transaction-actions";
 import type { TransactionActionResult } from "@/lib/server/transaction-actions";
 import type {
   Category,
@@ -78,9 +75,7 @@ export default function TransactionDetailView({
   );
   const assignedIds = new Set(transaction.merchant_tags.map((tag) => tag.id));
   const removableIds = new Set(
-    transaction.merchant_tags
-      .filter((tag) => !removeIds.includes(tag.id))
-      .map((tag) => tag.id),
+    transaction.merchant_tags.filter((tag) => !removeIds.includes(tag.id)).map((tag) => tag.id),
   );
   const activeAddOptions = tags.filter(
     (tag) => !tag.is_archived && !assignedIds.has(tag.id) && !addIds.includes(tag.id),
@@ -277,10 +272,7 @@ export default function TransactionDetailView({
         aria-labelledby="transaction-unavailable-title"
         className="rounded-[2rem] border border-warning-line bg-warning-soft p-5 sm:p-7"
       >
-        <h2
-          className="text-xl font-semibold text-warning-ink"
-          id="transaction-unavailable-title"
-        >
+        <h2 className="text-xl font-semibold text-warning-ink" id="transaction-unavailable-title">
           Transaction no longer available
         </h2>
         <p className="mt-2 text-sm leading-6 text-warning-ink">
@@ -328,9 +320,7 @@ export default function TransactionDetailView({
             id="transaction-detail-title"
             tabIndex={-1}
           >
-            {transaction.description.trim() === ""
-              ? "No description"
-              : transaction.description}
+            {transaction.description.trim() === "" ? "No description" : transaction.description}
           </h2>
           <p className="mt-1 text-sm text-muted">
             {transaction.transaction_date} · version {transaction.version} ·{" "}
@@ -375,9 +365,7 @@ export default function TransactionDetailView({
           </dd>
         </div>
         <div className="rounded-xl border border-line bg-page p-3">
-          <dt className="text-xs font-semibold tracking-[0.1em] text-muted uppercase">
-            Statement
-          </dt>
+          <dt className="text-xs font-semibold tracking-[0.1em] text-muted uppercase">Statement</dt>
           <dd className="mt-1 text-sm font-semibold text-ink">
             <Link
               className="underline underline-offset-4"
@@ -400,8 +388,8 @@ export default function TransactionDetailView({
       </dl>
 
       <p className="mt-4 rounded-xl border border-line bg-elevated px-4 py-3 text-sm leading-6 text-muted">
-        Imported date, description, amount, account and statement identity are read-only.
-        Only category, merchant tags and your individual hide flag can change.{" "}
+        Imported date, description, amount, account and statement identity are read-only. Only
+        category, merchant tags and your individual hide flag can change.{" "}
         {hiddenExplanation(transaction.hidden_reason)}
       </p>
 
@@ -420,10 +408,7 @@ export default function TransactionDetailView({
               {message.details.statements.map((statement) => (
                 <li key={statement.id}>
                   Restore{" "}
-                  <Link
-                    className="underline underline-offset-4"
-                    href={`/imports/${statement.id}`}
-                  >
+                  <Link className="underline underline-offset-4" href={`/imports/${statement.id}`}>
                     {statement.statement_label}
                   </Link>{" "}
                   in Imports first.
@@ -614,8 +599,8 @@ export default function TransactionDetailView({
           Suggested tags
         </h3>
         <p className="mt-1 text-sm text-muted">
-          Suggestions come from your active tags and this description. Nothing is applied until
-          you accept it.
+          Suggestions come from your active tags and this description. Nothing is applied until you
+          accept it.
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           {detail.suggested_tags.length === 0 ? (
@@ -693,7 +678,11 @@ export default function TransactionDetailView({
         ) : (
           <button
             className="mt-3 rounded-full border border-line px-4 py-2 text-sm font-bold text-ink disabled:opacity-60"
-            disabled={busy || requiresReload || (transaction.statement_import.is_hidden && transaction.is_hidden_by_user)}
+            disabled={
+              busy ||
+              requiresReload ||
+              (transaction.statement_import.is_hidden && transaction.is_hidden_by_user)
+            }
             onClick={() => setConfirmVisibility(true)}
             type="button"
           >

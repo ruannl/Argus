@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
-using System.Text;
 using argus.Server.Imports;
 
 namespace argus.Server.Tests;
@@ -224,7 +223,7 @@ public sealed class StatementParserProcessTests
     [Fact]
     public async Task PublishedReleaseOutputLaunchesTheRealParserChild()
     {
-        var directory = await PublishedServerDirectory.Value;
+        var directory = await _publishedServerDirectory.Value;
         using var runner = new PdfParserRunner(
             () => new ProcessStartInfo
             {
@@ -472,7 +471,7 @@ public sealed class StatementParserProcessTests
     [Fact]
     public async Task PublishedChildDoesNotWriteSourceCanariesToStandardError()
     {
-        var directory = await PublishedServerDirectory.Value;
+        var directory = await _publishedServerDirectory.Value;
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo
@@ -775,7 +774,7 @@ public sealed class StatementParserProcessTests
         return pdf.Build();
     }
 
-    private static readonly Lazy<Task<string>> PublishedServerDirectory =
+    private static readonly Lazy<Task<string>> _publishedServerDirectory =
         new(PublishServerAsync);
 
     private static async Task<string> PublishServerAsync()

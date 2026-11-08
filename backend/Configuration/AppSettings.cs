@@ -24,8 +24,8 @@ public sealed class AppSettings
 
     public const string DefaultDatabaseUrl = "postgres://postgres@127.0.0.1:5432/argus";
 
-    private static readonly string[] AllowedLogLevels = ["trace", "debug", "info", "warn", "error"];
-    private static readonly string[] AllowedLogFormats = ["pretty", "json"];
+    private static readonly string[] _allowedLogLevels = ["trace", "debug", "info", "warn", "error"];
+    private static readonly string[] _allowedLogFormats = ["pretty", "json"];
 
     public static AppSettings Load()
     {
@@ -80,17 +80,17 @@ public sealed class AppSettings
         RequireMinimumBytes(billingSecret, 32, "BILLING_WEBHOOK_SECRET");
 
         var logLevel = Raw("LOG_LEVEL") ?? "info";
-        if (!AllowedLogLevels.Contains(logLevel))
+        if (!_allowedLogLevels.Contains(logLevel))
         {
             throw new InvalidOperationException(
-                $"{Brand.EnvPrefix}LOG_LEVEL must be one of {string.Join(", ", AllowedLogLevels)}");
+                $"{Brand.EnvPrefix}LOG_LEVEL must be one of {string.Join(", ", _allowedLogLevels)}");
         }
 
         var logFormat = Raw("LOG_FORMAT") ?? "pretty";
-        if (!AllowedLogFormats.Contains(logFormat))
+        if (!_allowedLogFormats.Contains(logFormat))
         {
             throw new InvalidOperationException(
-                $"{Brand.EnvPrefix}LOG_FORMAT must be one of {string.Join(", ", AllowedLogFormats)}");
+                $"{Brand.EnvPrefix}LOG_FORMAT must be one of {string.Join(", ", _allowedLogFormats)}");
         }
 
         if (!int.TryParse(Raw("PORT") ?? "3001", out var port) || port is < 1 or > 65535)

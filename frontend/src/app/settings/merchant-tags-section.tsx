@@ -32,8 +32,8 @@ function MerchantTagRow({ tag }: { tag: MerchantTag }) {
         <div>
           <p className="text-lg font-semibold text-ink">{tag.display_name}</p>
           <p className="mt-1 text-sm text-muted">
-            {tag.transaction_count}{" "}
-            {tag.transaction_count === 1 ? "transaction" : "transactions"} assigned
+            {tag.transaction_count} {tag.transaction_count === 1 ? "transaction" : "transactions"}{" "}
+            assigned
           </p>
         </div>
         <span
@@ -126,8 +126,8 @@ export default function MerchantTagsSection({ tags }: { tags: MerchantTag[] }) {
         Merchant tags
       </h2>
       <p className="mt-3 max-w-2xl text-base leading-7 text-muted">
-        A workspace-wide tag list for shops and services. Tag names are unique regardless of
-        case or surrounding whitespace.
+        A workspace-wide tag list for shops and services. Tag names are unique regardless of case or
+        surrounding whitespace.
       </p>
 
       <form

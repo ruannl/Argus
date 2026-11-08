@@ -40,10 +40,7 @@ export default function AppShell({
     <main className="min-h-screen">
       <header className="border-b border-line bg-surface">
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-3 px-4 py-4 sm:px-6 lg:px-8">
-          <Link
-            className="text-sm font-semibold tracking-[0.16em] text-ink uppercase"
-            href="/home"
-          >
+          <Link className="text-sm font-semibold tracking-[0.16em] text-ink uppercase" href="/home">
             {PRODUCT_NAME}
           </Link>
           <span className="inline-flex rounded-full border border-accent-soft-line bg-accent-soft px-3 py-1 text-xs font-semibold text-accent-soft-ink">

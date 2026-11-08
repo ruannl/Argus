@@ -17,8 +17,7 @@ export default async function LoginPage() {
     try {
       await getCurrentAccount(backendToken);
       backendSessionIsValid = true;
-    } catch {
-    }
+    } catch {}
 
     if (backendSessionIsValid) {
       redirect("/home");

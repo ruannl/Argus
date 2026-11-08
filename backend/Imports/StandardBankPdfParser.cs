@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using UglyToad.PdfPig;
-using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Exceptions;
 
 namespace argus.Server.Imports;
@@ -13,45 +12,45 @@ namespace argus.Server.Imports;
 /// </summary>
 public static class StandardBankPdfParser
 {
-    private static readonly Regex DateAnchor = new(
+    private static readonly Regex _dateAnchor = new(
         @"^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{2}|\d{4})$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly Regex PeriodLine = new(
+    private static readonly Regex _periodLine = new(
         @"^(?:statement\s+period\s*:?\s*|period\s+from\s+)?(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\s*" +
         @"(?:to|until|through|[-–])\s*(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    private static readonly Regex CoverPhrase = new(
+    private static readonly Regex _coverPhrase = new(
         @"^synthetic\s+(?:bank|statement)$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    private static readonly Regex SummaryHeading = new(
+    private static readonly Regex _summaryHeading = new(
         @"^(?:statement\s+summary|account\s+summary|summary)$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    private static readonly Regex FooterPage = new(
+    private static readonly Regex _footerPage = new(
         @"^page\s+(\d+)(?:\s+of\s+(\d+))?$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly Regex FooterContinued = new(
+    private static readonly Regex _footerContinued = new(
         @"^continued\s+on\s+page\s+(\d+)$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly Regex NumericToken = new(
+    private static readonly Regex _numericToken = new(
         @"^\(?-?\d{1,3}(,\d{3})*(\.\d{2})?\)?$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly string[] FlowColumns = ["Payments", "Deposits", "Bank fees"];
+    private static readonly string[] _flowColumns = ["Payments", "Deposits", "Bank fees"];
 
-    private static readonly (string Label, int FlowIndex)[] TotalLabels =
+    private static readonly (string Label, int FlowIndex)[] _totalLabels =
     [
         ("total payments", 0),
         ("total deposits", 1),
         ("total bank fees", 2),
     ];
 
-    private static readonly string[] OpeningBalanceLabels =
+    private static readonly string[] _openingBalanceLabels =
     [
         "opening balance",
         "closing balance brought forward",
@@ -59,7 +58,7 @@ public static class StandardBankPdfParser
         "brought forward",
     ];
 
-    private static readonly string[] ClosingBalanceLabels =
+    private static readonly string[] _closingBalanceLabels =
     [
         "closing balance",
         "closing balance carried forward",
@@ -67,7 +66,7 @@ public static class StandardBankPdfParser
         "carried forward",
     ];
 
-    private static readonly string[] MetadataLabels =
+    private static readonly string[] _metadataLabels =
     [
         "account", "account:", "customer", "customer:", "branch", "branch:",
     ];
@@ -92,7 +91,11 @@ public static class StandardBankPdfParser
     // 842-point page. Y=400 is not a top-of-page role.
     private const double TopRegionBelowPageTop = 120.0;
 
-    public static ParsedStatement Parse(byte[] bytes, DateOnly? start, DateOnly? end, int? century)
+    public static ParsedStatement Parse(
+        byte[] bytes,
+        DateOnly? start,
+        DateOnly? end,
+        int? century)
     {
         if (bytes.Length > ImportLimits.MaxFileBytes)
         {
@@ -229,7 +232,7 @@ public static class StandardBankPdfParser
                     }
 
                     var text = StatementText.CollapseWhitespace(line.Text);
-                    if (CoverPhrase.IsMatch(text) || SummaryHeading.IsMatch(text) ||
+                    if (_coverPhrase.IsMatch(text) || _summaryHeading.IsMatch(text) ||
                         TryConsumePeriodLine(
                             text, ref printedStart, ref printedEnd, ref periodConflict))
                     {
@@ -295,7 +298,7 @@ public static class StandardBankPdfParser
                 if (lineIndex < primary.LineIndex)
                 {
                     var preambleText = StatementText.CollapseWhitespace(line.Text);
-                    if (SummaryHeading.IsMatch(preambleText))
+                    if (_summaryHeading.IsMatch(preambleText))
                     {
                         if (!IsTopOfPage(line, page.Height))
                         {
@@ -306,7 +309,7 @@ public static class StandardBankPdfParser
                         crossPageContinuation = false;
                         continue;
                     }
-                    if (CoverPhrase.IsMatch(preambleText) ||
+                    if (_coverPhrase.IsMatch(preambleText) ||
                         TryConsumePeriodLine(
                             preambleText, ref printedStart, ref printedEnd, ref periodConflict))
                     {
@@ -526,7 +529,7 @@ public static class StandardBankPdfParser
         List<BodyEvent> events,
         List<PdfRowDraft> candidateDrafts)
     {
-        var dateMatch = DateAnchor.Match(dateText);
+        var dateMatch = _dateAnchor.Match(dateText);
         var draft = NewDraft(
             line.SourceLine,
             pageNumber,
@@ -573,7 +576,7 @@ public static class StandardBankPdfParser
 
         var normalized = StatementText.CollapseWhitespace(descriptionText).ToLowerInvariant();
         var expected = -1;
-        foreach (var label in TotalLabels)
+        foreach (var label in _totalLabels)
         {
             if (normalized == label.Label)
             {
@@ -608,8 +611,8 @@ public static class StandardBankPdfParser
     {
         isOpening = false;
         var normalized = StatementText.CollapseWhitespace(descriptionText).ToLowerInvariant();
-        var opening = OpeningBalanceLabels.Contains(normalized, StringComparer.Ordinal);
-        var closing = ClosingBalanceLabels.Contains(normalized, StringComparer.Ordinal);
+        var opening = _openingBalanceLabels.Contains(normalized, StringComparer.Ordinal);
+        var closing = _closingBalanceLabels.Contains(normalized, StringComparer.Ordinal);
         if (!opening && !closing)
         {
             return false;
@@ -617,7 +620,7 @@ public static class StandardBankPdfParser
 
         var tokens = balanceText.Split(
             ' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (tokens.Length != 1 || !NumericToken.IsMatch(tokens[0]))
+        if (tokens.Length != 1 || !_numericToken.IsMatch(tokens[0]))
         {
             return false;
         }
@@ -632,7 +635,7 @@ public static class StandardBankPdfParser
         ref DateOnly? printedEnd,
         ref bool periodConflict)
     {
-        var match = PeriodLine.Match(text);
+        var match = _periodLine.Match(text);
         if (!match.Success)
         {
             return false;
@@ -665,7 +668,7 @@ public static class StandardBankPdfParser
         }
 
         var text = StatementText.CollapseWhitespace(line.Text).ToLowerInvariant();
-        var pageMatch = FooterPage.Match(text);
+        var pageMatch = _footerPage.Match(text);
         if (pageMatch.Success)
         {
             var number = int.Parse(pageMatch.Groups[1].Value, CultureInfo.InvariantCulture);
@@ -684,7 +687,7 @@ public static class StandardBankPdfParser
             return true;
         }
 
-        var continued = FooterContinued.Match(text);
+        var continued = _footerContinued.Match(text);
         if (continued.Success)
         {
             var number = int.Parse(continued.Groups[1].Value, CultureInfo.InvariantCulture);
@@ -709,7 +712,7 @@ public static class StandardBankPdfParser
             return false;
         }
         var label = StatementText.CollapseWhitespace(first.Text).ToLowerInvariant();
-        return MetadataLabels.Contains(label, StringComparer.Ordinal);
+        return _metadataLabels.Contains(label, StringComparer.Ordinal);
     }
 
     private static bool IsSupportedContinuation(
@@ -958,7 +961,12 @@ public static class StandardBankPdfParser
             CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
     }
 
-    private sealed record PdfWord(string Text, double Left, double Right, double Bottom, double Top)
+    private sealed record PdfWord(
+        string Text,
+        double Left,
+        double Right,
+        double Bottom,
+        double Top)
     {
         public double CenterY => (Bottom + Top) / 2.0;
 
@@ -1203,7 +1211,7 @@ public static class StandardBankPdfParser
                 ["description"] = display,
                 ["amount"] = rawAmount,
                 ["flow_column"] = populated.Count == 1
-                    ? FlowColumns[populated[0].index]
+                    ? _flowColumns[populated[0].index]
                     : null,
             };
             return new ParsedStatementRow(

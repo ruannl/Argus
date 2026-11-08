@@ -823,7 +823,12 @@ public sealed class FinanceStore(Db db)
         return new CategoryDeleteOutcome.Success(reassigned, uncategorisedId.Value);
     }
 
-    private sealed record CategoryState(Guid Id, string Kind, bool IsSystem, bool IsArchived, DateTime? ArchivedAt);
+    private sealed record CategoryState(
+        Guid Id,
+        string Kind,
+        bool IsSystem,
+        bool IsArchived,
+        DateTime? ArchivedAt);
 
     private static async Task<CategoryState?> LockCategoryAsync(
         NpgsqlConnection connection,

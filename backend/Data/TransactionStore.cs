@@ -17,7 +17,7 @@ namespace argus.Server.Data;
 /// </summary>
 public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
 {
-    private static readonly JsonSerializerOptions StoredJson = new(JsonSerializerDefaults.Web)
+    private static readonly JsonSerializerOptions _storedJson = new(JsonSerializerDefaults.Web)
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     };
@@ -1544,9 +1544,9 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                     action.AddTagIds,
                     action.RemoveTagIds,
                     action.IsHiddenByUser),
-                StoredJson));
+                _storedJson));
         command.Parameters.AddWithValue(
-            "targets", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(targets, StoredJson));
+            "targets", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(targets, _storedJson));
         command.Parameters.AddWithValue("selected_count", selectedCount);
         command.Parameters.AddWithValue("changed_count", changedCount);
         command.Parameters.AddWithValue("unchanged_count", unchangedCount);
@@ -2079,14 +2079,14 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
 
     private static TransactionAction DeserializeAction(string json)
     {
-        var stored = JsonSerializer.Deserialize<StoredAction>(json, StoredJson)
+        var stored = JsonSerializer.Deserialize<StoredAction>(json, _storedJson)
             ?? throw new TransactionStoreException(TransactionErrorCodes.InvalidRequest);
         return new TransactionAction(
             stored.CategoryId, stored.AddTagIds, stored.RemoveTagIds, stored.IsHiddenByUser);
     }
 
     private static StoredTargets DeserializeTargets(string json) =>
-        JsonSerializer.Deserialize<StoredTargets>(json, StoredJson)
+        JsonSerializer.Deserialize<StoredTargets>(json, _storedJson)
         ?? throw new TransactionStoreException(TransactionErrorCodes.InvalidRequest);
 
     private static string RequestDigest(TransactionSelectionPlan selection, TransactionAction action)

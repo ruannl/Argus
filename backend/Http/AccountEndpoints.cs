@@ -22,7 +22,7 @@ public sealed class AccountApi(
     IMailer mailer,
     ILoggerFactory loggerFactory)
 {
-    private static readonly Lazy<string> DummyPasswordHash = new(() => PasswordHasher.Hash(Tokens.NewToken()));
+    private static readonly Lazy<string> _dummyPasswordHash = new(() => PasswordHasher.Hash(Tokens.NewToken()));
 
     private readonly ILogger _audit = loggerFactory.CreateLogger("audit");
     private readonly ILogger _logger = loggerFactory.CreateLogger("account");
@@ -129,7 +129,7 @@ public sealed class AccountApi(
             request.Password is not null && Encoding.UTF8.GetByteCount(request.Password) > 1024
                 ? "\0"
                 : request.Password ?? string.Empty;
-        var hashToVerify = customer?.PasswordHash ?? DummyPasswordHash.Value;
+        var hashToVerify = customer?.PasswordHash ?? _dummyPasswordHash.Value;
         var passwordMatches = PasswordHasher.Verify(passwordForVerify, hashToVerify);
 
         if (lookupError is not null)

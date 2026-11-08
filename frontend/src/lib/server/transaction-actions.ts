@@ -72,8 +72,7 @@ const ERROR_MESSAGES: Record<TransactionErrorKind, string> = {
   unavailable: "Something went wrong. Please try again later.",
 };
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function isUuid(value: unknown): value is string {
@@ -210,10 +209,7 @@ function validChanges(value: unknown): value is TransactionChanges {
   if (changes.category_id !== undefined && !isUuid(changes.category_id)) {
     return false;
   }
-  if (
-    changes.is_hidden_by_user !== undefined &&
-    typeof changes.is_hidden_by_user !== "boolean"
-  ) {
+  if (changes.is_hidden_by_user !== undefined && typeof changes.is_hidden_by_user !== "boolean") {
     return false;
   }
   const add = changes.add_tag_ids;
@@ -369,9 +365,14 @@ export async function saveTransactionAction(input: {
 export async function prepareTransactionsAction(
   input: TransactionPrepareInput,
 ): Promise<TransactionActionResult<TransactionPrepareResult>> {
-  if (typeof input !== "object" || input === null || !isUuid(input.operation_id) ||
-      !validChanges(input.changes) || typeof input.selection !== "object" ||
-      input.selection === null) {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    !isUuid(input.operation_id) ||
+    !validChanges(input.changes) ||
+    typeof input.selection !== "object" ||
+    input.selection === null
+  ) {
     return failure("invalid_request");
   }
 

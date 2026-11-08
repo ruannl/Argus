@@ -1,15 +1,14 @@
 using System.Net;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging;
 using argus.Server.Data;
 using argus.Server.Imports;
 using argus.Server.Mail;
 using argus.Server.Transactions;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 
 namespace argus.Server.Tests;
 
@@ -172,7 +171,11 @@ public sealed class CapturingLoggerProvider : ILoggerProvider
         }
     }
 
-    internal void Record(string category, LogLevel level, string message, Exception? exception)
+    internal void Record(
+        string category,
+        LogLevel level,
+        string message,
+        Exception? exception)
     {
         lock (_gate)
         {

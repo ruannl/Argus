@@ -213,9 +213,10 @@ describe("account server actions", () => {
   ] as const)("maps password reset %s to its closed copy", async (kind, message) => {
     vi.mocked(resetPassword).mockResolvedValue({ ok: false, kind } as never);
 
-    await expect(
-      resetPasswordAction("a".repeat(64), "a compliant password"),
-    ).resolves.toEqual({ ok: false, message });
+    await expect(resetPasswordAction("a".repeat(64), "a compliant password")).resolves.toEqual({
+      ok: false,
+      message,
+    });
     expect(resetPassword).toHaveBeenCalledWith("a".repeat(64), "a compliant password");
   });
 

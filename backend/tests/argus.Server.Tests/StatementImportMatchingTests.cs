@@ -1,7 +1,7 @@
 using System.Net;
-using Microsoft.Extensions.DependencyInjection;
 using argus.Server.Data;
 using argus.Server.Imports;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace argus.Server.Tests;
 

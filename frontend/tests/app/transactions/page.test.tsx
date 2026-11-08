@@ -159,7 +159,9 @@ describe("transactions page", () => {
 
     render(await renderPage({ page_size: "30" }));
 
-    expect(screen.getByText(/Some transaction filters in the address were invalid/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Some transaction filters in the address were invalid/),
+    ).toBeInTheDocument();
     expect(queryTransactions).not.toHaveBeenCalled();
   });
 

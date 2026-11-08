@@ -11,10 +11,7 @@ vi.mock("@/lib/server/backend-client", () => ({
 
 import { POST } from "@/app/imports/upload/route";
 import { auth } from "@/auth";
-import {
-  inspectImportFile,
-  prepareImportReview,
-} from "@/lib/server/backend-client";
+import { inspectImportFile, prepareImportReview } from "@/lib/server/backend-client";
 
 const origin = "http://frontend.test";
 const accountId = "00000000-0000-0000-0000-000000000001";
@@ -101,11 +98,13 @@ describe("import upload route", () => {
   it("rejects a missing or foreign origin before reading auth", async () => {
     const form = new FormData();
     form.append("options", "{}");
-    const response = await POST(new Request("http://frontend.test/imports/upload?mode=inspect", {
-      method: "POST",
-      body: form,
-      headers: { origin: "http://evil.test" },
-    }));
+    const response = await POST(
+      new Request("http://frontend.test/imports/upload?mode=inspect", {
+        method: "POST",
+        body: form,
+        headers: { origin: "http://evil.test" },
+      }),
+    );
 
     expect(response.status).toBe(403);
     expect(auth).not.toHaveBeenCalled();
@@ -113,7 +112,9 @@ describe("import upload route", () => {
 
   it("rejects an unauthenticated request", async () => {
     vi.mocked(auth).mockResolvedValue(null as never);
-    const response = await POST(uploadRequest({ financial_account_id: accountId, source_kind: "fnb" }));
+    const response = await POST(
+      uploadRequest({ financial_account_id: accountId, source_kind: "fnb" }),
+    );
 
     expect(response.status).toBe(401);
     expect(inspectImportFile).not.toHaveBeenCalled();
@@ -122,11 +123,13 @@ describe("import upload route", () => {
   it("rejects an unknown mode", async () => {
     const form = new FormData();
     form.append("options", "{}");
-    const response = await POST(new Request("http://frontend.test/imports/upload?mode=other", {
-      method: "POST",
-      body: form,
-      headers: { origin },
-    }));
+    const response = await POST(
+      new Request("http://frontend.test/imports/upload?mode=other", {
+        method: "POST",
+        body: form,
+        headers: { origin },
+      }),
+    );
 
     expect(response.status).toBe(400);
   });
@@ -134,10 +137,12 @@ describe("import upload route", () => {
   it("inspects through the server client and returns the backend payload", async () => {
     vi.mocked(inspectImportFile).mockResolvedValue({ ok: true, value: inspectResult() });
 
-    const response = await POST(uploadRequest({
-      financial_account_id: accountId,
-      source_kind: "fnb",
-    }));
+    const response = await POST(
+      uploadRequest({
+        financial_account_id: accountId,
+        source_kind: "fnb",
+      }),
+    );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(inspectResult());
@@ -221,10 +226,12 @@ describe("import upload route", () => {
   it("maps a backend file-too-large failure to 413", async () => {
     vi.mocked(inspectImportFile).mockResolvedValue({ ok: false, kind: "file_too_large" });
 
-    const response = await POST(uploadRequest({
-      financial_account_id: accountId,
-      source_kind: "fnb",
-    }));
+    const response = await POST(
+      uploadRequest({
+        financial_account_id: accountId,
+        source_kind: "fnb",
+      }),
+    );
 
     expect(response.status).toBe(413);
     expect(await response.json()).toEqual({ error: "file_too_large" });

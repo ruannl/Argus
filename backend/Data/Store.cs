@@ -1,5 +1,5 @@
-using Npgsql;
 using argus.Server.Security;
+using Npgsql;
 
 namespace argus.Server.Data;
 

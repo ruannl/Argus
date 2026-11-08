@@ -106,7 +106,7 @@ public static class StatementText
 
 public static class StatementDates
 {
-    private static readonly string[] FullYearFormats =
+    private static readonly string[] _fullYearFormats =
     [
         "yyyy-MM-dd",
         "yyyy/MM/dd",
@@ -118,7 +118,7 @@ public static class StatementDates
         "d MMM yyyy",
     ];
 
-    private static readonly string[] ShortYearFormats =
+    private static readonly string[] _shortYearFormats =
     [
         "dd/MM/yy",
         "MM/dd/yy",
@@ -131,7 +131,7 @@ public static class StatementDates
     ];
 
     public static bool TryParseFullYear(string value, out DateOnly date) =>
-        DateOnly.TryParseExact(value.Trim(), FullYearFormats, CultureInfo.InvariantCulture,
+        DateOnly.TryParseExact(value.Trim(), _fullYearFormats, CultureInfo.InvariantCulture,
             DateTimeStyles.None, out date);
 
     public static bool TryParseFullYearWithFormat(string value, string format, out DateOnly date)
@@ -177,7 +177,7 @@ public static class StatementDates
         month = 0;
         year2 = 0;
         var trimmed = value.Trim();
-        foreach (var format in ShortYearFormats)
+        foreach (var format in _shortYearFormats)
         {
             if (!DateTime.TryParseExact(trimmed, format, CultureInfo.InvariantCulture,
                     DateTimeStyles.None, out var parsed))

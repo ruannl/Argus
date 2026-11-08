@@ -26,11 +26,7 @@ import { redirect } from "next/navigation";
 
 import ReviewPage from "@/app/imports/review/[id]/page";
 import { auth } from "@/auth";
-import {
-  getCurrentAccount,
-  getImportReview,
-  listMerchantTags,
-} from "@/lib/server/backend-client";
+import { getCurrentAccount, getImportReview, listMerchantTags } from "@/lib/server/backend-client";
 
 const account = {
   id: "account-id",
@@ -194,10 +190,12 @@ describe("import review page", () => {
       value: { summary, page: { rows, total: 4, page: 1, page_size: 50 } },
     });
 
-    render(await ReviewPage({
-      params: Promise.resolve({ id: "review-id" }),
-      searchParams: Promise.resolve({}),
-    }));
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
 
     expect(screen.getByRole("heading", { level: 1, name: "Import review" })).toBeInTheDocument();
     expect(screen.getAllByText("Woolworths groceries").length).toBeGreaterThan(0);
@@ -236,10 +234,12 @@ describe("import review page", () => {
       },
     });
 
-    render(await ReviewPage({
-      params: Promise.resolve({ id: "review-id" }),
-      searchParams: Promise.resolve({}),
-    }));
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
 
     expect(
       screen.getByText("Invalid rows must be marked as skipped before committing."),
@@ -250,10 +250,12 @@ describe("import review page", () => {
   it("shows a plain expired-review state", async () => {
     vi.mocked(getImportReview).mockResolvedValue({ ok: false, kind: "review_expired" });
 
-    render(await ReviewPage({
-      params: Promise.resolve({ id: "review-id" }),
-      searchParams: Promise.resolve({}),
-    }));
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
 
     expect(screen.getByRole("heading", { name: "Review unavailable" })).toBeInTheDocument();
     expect(screen.getByText(/expired/i)).toBeInTheDocument();

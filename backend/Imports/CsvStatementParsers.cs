@@ -5,7 +5,7 @@ namespace argus.Server.Imports;
 
 public static class CsvStatementParsers
 {
-    private static readonly string[] DelimiterNames = [",", ";", "\t", "|"];
+    private static readonly string[] _delimiterNames = [",", ";", "\t", "|"];
 
     public static string DecodeUtf8(byte[] bytes, CancellationToken cancellationToken = default)
     {
@@ -296,7 +296,7 @@ public static class CsvStatementParsers
             throw new StatementRejectedException(ParserReasons.FormatConfirmationRequired);
         }
 
-        if (!SupportedDateFormats.Contains(config.DateFormat))
+        if (!_supportedDateFormats.Contains(config.DateFormat))
         {
             throw new StatementRejectedException(ParserReasons.FormatConfirmationRequired);
         }
@@ -641,7 +641,7 @@ public static class CsvStatementParsers
         CancellationToken cancellationToken = default)
     {
         var candidates = new List<GenericCandidate>();
-        foreach (var delimiter in DelimiterNames)
+        foreach (var delimiter in _delimiterNames)
         {
             cancellationToken.ThrowIfCancellationRequested();
             IReadOnlyList<CsvRecord> records;
@@ -809,7 +809,7 @@ public static class CsvStatementParsers
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Take(20)
             .ToList();
-        foreach (var format in PreferredDateFormats)
+        foreach (var format in _preferredDateFormats)
         {
             if (values.Count > 0 && values.All(value =>
                     format.Contains("yy", StringComparison.Ordinal) &&
@@ -1019,7 +1019,7 @@ public static class CsvStatementParsers
         _ => "\u0000",
     };
 
-    private static readonly string[] PreferredDateFormats =
+    private static readonly string[] _preferredDateFormats =
     [
         "yyyy-MM-dd",
         "yyyy/MM/dd",
@@ -1030,7 +1030,7 @@ public static class CsvStatementParsers
         "dd MMM yy",
     ];
 
-    private static readonly HashSet<string> SupportedDateFormats =
+    private static readonly HashSet<string> _supportedDateFormats =
     [
         "yyyy-MM-dd",
         "yyyy/MM/dd",

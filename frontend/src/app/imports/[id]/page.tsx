@@ -4,10 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import AppShell from "@/components/app-shell";
 import WorkspaceExpired from "@/components/workspace-expired";
-import {
-  getCurrentAccount,
-  getImportStatement,
-} from "@/lib/server/backend-client";
+import { getCurrentAccount, getImportStatement } from "@/lib/server/backend-client";
 import type { ImportErrorKind } from "@/lib/server/backend-client";
 import StatementWorkspace from "./statement-workspace";
 

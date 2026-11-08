@@ -18,17 +18,13 @@ describe("landing page", () => {
   it("presents the Argus finance story and tagline", () => {
     render(<Home />);
 
-    expect(
-      screen.getByRole("heading", { level: 1, name: PRODUCT_NAME }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: PRODUCT_NAME })).toBeInTheDocument();
     expect(screen.getByText(PRODUCT_TAGLINE)).toBeInTheDocument();
     expect(screen.getByText(AUDIENCE_OUTCOME_LEAD)).toBeInTheDocument();
     expect(screen.getByText(AUDIENCE_OUTCOME_DETAIL)).toBeInTheDocument();
 
     for (const feature of FEATURE_HIGHLIGHTS) {
-      expect(
-        screen.getByRole("heading", { level: 3, name: feature.heading }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 3, name: feature.heading })).toBeInTheDocument();
     }
 
     for (const step of HOW_IT_WORKS_STEPS) {

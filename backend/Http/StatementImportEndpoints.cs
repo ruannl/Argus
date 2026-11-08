@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text;
-using argus.Server.Configuration;
 using argus.Server.Data;
 using argus.Server.Imports;
 using argus.Server.Security;

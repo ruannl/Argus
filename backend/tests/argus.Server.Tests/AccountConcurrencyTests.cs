@@ -1,8 +1,8 @@
 using System.Net;
 using System.Reflection;
+using argus.Server.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
-using argus.Server.Http;
 
 namespace argus.Server.Tests;
 

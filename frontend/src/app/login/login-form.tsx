@@ -70,7 +70,10 @@ export default function LoginForm() {
       </div>
 
       {state.message ? (
-        <p aria-live="polite" className="rounded-2xl bg-elevated px-5 py-4 text-base leading-7 font-semibold text-ink">
+        <p
+          aria-live="polite"
+          className="rounded-2xl bg-elevated px-5 py-4 text-base leading-7 font-semibold text-ink"
+        >
           {state.message}
         </p>
       ) : null}
@@ -82,7 +85,10 @@ export default function LoginForm() {
         Sign in
       </button>
       <p className="text-center text-sm leading-6 text-muted">
-        <Link className="font-semibold text-ink underline underline-offset-4" href="/forgot-password">
+        <Link
+          className="font-semibold text-ink underline underline-offset-4"
+          href="/forgot-password"
+        >
           Forgot password?
         </Link>
       </p>

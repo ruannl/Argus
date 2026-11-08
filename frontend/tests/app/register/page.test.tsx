@@ -13,7 +13,9 @@ describe("register page", () => {
   it("renders only the email and password fields", () => {
     render(<RegisterPage />);
 
-    expect(screen.getByRole("heading", { level: 1, name: "Create an account" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Create an account" }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toHaveAttribute("autocomplete", "email");
     expect(screen.getByLabelText("Password")).toHaveAttribute("autocomplete", "new-password");
     expect(screen.getByRole("button", { name: "Create account" })).toBeInTheDocument();

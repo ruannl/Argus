@@ -22,7 +22,10 @@ export default function ConfirmControl() {
   if (terminalMessage !== null) {
     return (
       <div className="mt-6 space-y-4">
-        <p aria-live="polite" className="rounded-2xl bg-success-soft px-5 py-4 text-base leading-7 font-semibold text-success-ink">
+        <p
+          aria-live="polite"
+          className="rounded-2xl bg-success-soft px-5 py-4 text-base leading-7 font-semibold text-success-ink"
+        >
           {terminalMessage}
         </p>
         {successful ? (

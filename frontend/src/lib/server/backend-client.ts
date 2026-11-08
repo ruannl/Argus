@@ -45,19 +45,30 @@ function isCurrentAccount(value: unknown): value is CurrentAccount {
   }
   const account = value as Record<string, unknown>;
   const keys = [
-    "id", "email", "email_verified", "subscriber_active",
-    "subscription_started_at", "next_billing_at", "lifetime", "admin",
+    "id",
+    "email",
+    "email_verified",
+    "subscriber_active",
+    "subscription_started_at",
+    "next_billing_at",
+    "lifetime",
+    "admin",
   ];
   if (keys.some((key) => !Object.prototype.hasOwnProperty.call(account, key))) {
     return false;
   }
-  return typeof account.id === "string" && account.id.length > 0 &&
+  return (
+    typeof account.id === "string" &&
+    account.id.length > 0 &&
     typeof account.email === "string" &&
     typeof account.email_verified === "boolean" &&
     typeof account.subscriber_active === "boolean" &&
-    (account.subscription_started_at === null || typeof account.subscription_started_at === "string") &&
+    (account.subscription_started_at === null ||
+      typeof account.subscription_started_at === "string") &&
     (account.next_billing_at === null || typeof account.next_billing_at === "string") &&
-    typeof account.lifetime === "boolean" && typeof account.admin === "boolean";
+    typeof account.lifetime === "boolean" &&
+    typeof account.admin === "boolean"
+  );
 }
 
 export type AcceptedResponse = {
@@ -134,8 +145,7 @@ export type FinanceRequestErrorKind =
   | "unavailable";
 
 export type FinanceRequestResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; kind: FinanceRequestErrorKind };
+  { ok: true; value: T } | { ok: false; kind: FinanceRequestErrorKind };
 
 export type FinancialAccountInput = {
   display_name: string;
@@ -152,11 +162,7 @@ export type CategoryUpdateInput = CategoryInput & {
 };
 
 export type AccountRequestErrorKind =
-  | "invalid_request"
-  | "invalid_token"
-  | "invalid_credentials"
-  | "rate_limited"
-  | "unavailable";
+  "invalid_request" | "invalid_token" | "invalid_credentials" | "rate_limited" | "unavailable";
 
 type NonLoginAccountRequestErrorKind = Exclude<AccountRequestErrorKind, "invalid_credentials">;
 
@@ -202,10 +208,7 @@ async function classifyAccountFailure(response: Response): Promise<AccountReques
       if (response.status === 401 && error === "invalid_credentials") {
         return "invalid_credentials";
       }
-      if (
-        response.status === 400 &&
-        (error === "invalid_request" || error === "invalid_token")
-      ) {
+      if (response.status === 400 && (error === "invalid_request" || error === "invalid_token")) {
         return error;
       }
     }
@@ -285,8 +288,11 @@ export async function getCurrentAccount(sessionToken: string): Promise<CurrentAc
     let confirmedDenial = false;
     try {
       const body: unknown = await response.json();
-      confirmedDenial = typeof body === "object" && body !== null &&
-        "error" in body && body.error === "unauthorized";
+      confirmedDenial =
+        typeof body === "object" &&
+        body !== null &&
+        "error" in body &&
+        body.error === "unauthorized";
     } catch {
       // An unreadable denial does not establish which response the backend sent.
     }
@@ -334,11 +340,7 @@ export async function resetPassword(
   token: string,
   password: string,
 ): Promise<AccountRequestResult<PasswordResetResponse>> {
-  return accountRequest<PasswordResetResponse>(
-    "/v1/password/reset",
-    { token, password },
-    200,
-  );
+  return accountRequest<PasswordResetResponse>("/v1/password/reset", { token, password }, 200);
 }
 
 export async function loginAccount(
@@ -885,9 +887,10 @@ async function classifyTransactionFailure(
   if (response.status === 410) {
     try {
       const body: unknown = await response.json();
-      const error = typeof body === "object" && body !== null && "error" in body
-        ? (body as { error?: unknown }).error
-        : null;
+      const error =
+        typeof body === "object" && body !== null && "error" in body
+          ? (body as { error?: unknown }).error
+          : null;
       if (error === "operation_abandoned" || error === "operation_expired") {
         return { kind: error };
       }
@@ -1095,8 +1098,7 @@ export type ImportErrorKind =
   | "unavailable";
 
 export type ImportRequestResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; kind: ImportErrorKind; existingImportIds?: string[] };
+  { ok: true; value: T } | { ok: false; kind: ImportErrorKind; existingImportIds?: string[] };
 
 export type ImportParserConfig = {
   format?: "fnb" | "standard_bank" | "generic" | null;
@@ -1379,9 +1381,10 @@ async function classifyImportFailure(
   if (response.status === 410) {
     try {
       const body: unknown = await response.json();
-      const error = typeof body === "object" && body !== null && "error" in body
-        ? (body as { error?: unknown }).error
-        : null;
+      const error =
+        typeof body === "object" && body !== null && "error" in body
+          ? (body as { error?: unknown }).error
+          : null;
       if (error === "import_deleted" || error === "review_expired") {
         return { kind: error };
       }
@@ -1605,7 +1608,12 @@ export async function abandonImportReview(
 
 export async function listImportHistory(
   sessionToken: string,
-  options?: { accountId?: string; state?: "all" | "visible" | "hidden"; cursor?: string; limit?: number },
+  options?: {
+    accountId?: string;
+    state?: "all" | "visible" | "hidden";
+    cursor?: string;
+    limit?: number;
+  },
 ): Promise<ImportRequestResult<ImportHistoryPage>> {
   const params = new URLSearchParams();
   if (options?.accountId) params.set("account_id", options.accountId);

@@ -132,8 +132,7 @@ export default function TransactionInlineEditor({
           >
             {assignable.map((category) => (
               <option key={category.id} value={category.id}>
-                {category.display_name} ({category.kind})
-                {category.is_archived ? " — archived" : ""}
+                {category.display_name} ({category.kind}){category.is_archived ? " — archived" : ""}
               </option>
             ))}
           </select>
@@ -169,9 +168,7 @@ export default function TransactionInlineEditor({
                     checked={marked}
                     onChange={() =>
                       setRemoveIds((current) =>
-                        marked
-                          ? current.filter((id) => id !== tag.id)
-                          : [...current, tag.id],
+                        marked ? current.filter((id) => id !== tag.id) : [...current, tag.id],
                       )
                     }
                     type="checkbox"

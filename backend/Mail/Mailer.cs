@@ -1,5 +1,5 @@
-using System.Net.Http.Headers;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using argus.Server.Configuration;
 
@@ -40,7 +40,7 @@ public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> log
     private const int AntiEnumerationPadMs = 750;
     private const int NetworkTimeoutMs = 2000;
 
-    private static readonly HttpClient Client = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private static readonly HttpClient _client = new() { Timeout = Timeout.InfiniteTimeSpan };
 
     public Task SendVerificationAsync(
         string recipient,
@@ -124,7 +124,7 @@ public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> log
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ResendApiKey);
 
-            using var response = await Client.SendAsync(request, timeout.Token);
+            using var response = await _client.SendAsync(request, timeout.Token);
             if (!response.IsSuccessStatusCode)
             {
                 logger.LogWarning(

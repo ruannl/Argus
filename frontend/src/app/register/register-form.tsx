@@ -2,10 +2,7 @@
 
 import { useActionState } from "react";
 
-import {
-  registerAccountAction,
-  resendVerificationAction,
-} from "@/lib/server/account-actions";
+import { registerAccountAction, resendVerificationAction } from "@/lib/server/account-actions";
 
 type FormState = {
   status: "idle" | "success" | "error";
@@ -19,7 +16,11 @@ const initialState: FormState = {
   email: "",
 };
 
-function stateFromActionResult(result: { ok: boolean; message: string; email?: string }): FormState {
+function stateFromActionResult(result: {
+  ok: boolean;
+  message: string;
+  email?: string;
+}): FormState {
   return {
     status: result.ok ? "success" : "error",
     message: result.message,
@@ -42,7 +43,10 @@ export default function RegisterForm() {
   if (registerState.status === "success") {
     return (
       <div className="mt-8 space-y-8">
-        <p aria-live="polite" className="rounded-2xl bg-success-soft px-5 py-4 text-base leading-7 font-semibold text-success-ink">
+        <p
+          aria-live="polite"
+          className="rounded-2xl bg-success-soft px-5 py-4 text-base leading-7 font-semibold text-success-ink"
+        >
           {registerState.message}
         </p>
 
@@ -62,7 +66,10 @@ export default function RegisterForm() {
             />
           </div>
           {resendState.message ? (
-            <p aria-live="polite" className="rounded-2xl bg-elevated px-5 py-4 text-base leading-7 font-semibold text-ink">
+            <p
+              aria-live="polite"
+              className="rounded-2xl bg-elevated px-5 py-4 text-base leading-7 font-semibold text-ink"
+            >
               {resendState.message}
             </p>
           ) : null}
@@ -111,7 +118,10 @@ export default function RegisterForm() {
       </div>
 
       {registerState.message ? (
-        <p aria-live="polite" className="rounded-2xl bg-elevated px-5 py-4 text-base leading-7 font-semibold text-ink">
+        <p
+          aria-live="polite"
+          className="rounded-2xl bg-elevated px-5 py-4 text-base leading-7 font-semibold text-ink"
+        >
           {registerState.message}
         </p>
       ) : null}

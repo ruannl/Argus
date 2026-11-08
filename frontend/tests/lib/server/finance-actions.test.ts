@@ -107,9 +107,7 @@ describe("finance server actions", () => {
     signedIn();
     vi.mocked(createFinancialAccount).mockResolvedValue({ ok: true, value: account });
 
-    const result = await createAccountAction(
-      form({ display_name: "Cheque", institution: "FNB" }),
-    );
+    const result = await createAccountAction(form({ display_name: "Cheque", institution: "FNB" }));
 
     expect(createFinancialAccount).toHaveBeenCalledWith("backend-token", {
       display_name: "Cheque",
@@ -246,9 +244,7 @@ describe("finance server actions", () => {
   it("rejects an invalid category kind without calling the backend", async () => {
     signedIn();
 
-    const result = await createCategoryAction(
-      form({ display_name: "Coffee", kind: "Bogus" }),
-    );
+    const result = await createCategoryAction(form({ display_name: "Coffee", kind: "Bogus" }));
 
     expect(result).toEqual({
       ok: false,

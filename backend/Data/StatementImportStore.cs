@@ -200,7 +200,7 @@ public static class ImportErrorCodes
 /// </summary>
 public sealed class StatementImportStore
 {
-    private static readonly JsonSerializerOptions StorageJson = new()
+    private static readonly JsonSerializerOptions _storageJson = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -599,8 +599,8 @@ public sealed class StatementImportStore
         }
 
         var overrideFlag = statementOverride ?? summary.StatementOverride;
-        var oldRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(rows, StorageJson));
-        var newRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(updatedRows, StorageJson));
+        var oldRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(rows, _storageJson));
+        var newRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(updatedRows, _storageJson));
         var payloadBytes = Math.Max(0, summary.PayloadBytes + newRowsJson - oldRowsJson);
         var (openReviews, usedPayload) = await QuotaUsageExcludingAsync(
             connection, transaction, customerId, reviewId, cancellationToken);
@@ -708,8 +708,8 @@ public sealed class StatementImportStore
                 connection, transaction, refreshedRow, cancellationToken);
         }
 
-        var oldRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(existingRows, StorageJson));
-        var newRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(refreshed, StorageJson));
+        var oldRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(existingRows, _storageJson));
+        var newRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(refreshed, _storageJson));
         var payloadBytes = Math.Max(0, summary.PayloadBytes + newRowsJson - oldRowsJson);
         var (openReviews, usedPayload) = await QuotaUsageExcludingAsync(
             connection, transaction, customerId, reviewId, cancellationToken);
@@ -977,7 +977,11 @@ public sealed class StatementImportStore
         // treated as a new occurrence.
         var canonicalByKey = new Dictionary<string, (DateOnly Date, long Cents, string Description)>(
             StringComparer.Ordinal);
-        void CheckCanonical(string key, DateOnly date, long cents, string description)
+        void CheckCanonical(
+            string key,
+            DateOnly date,
+            long cents,
+            string description)
         {
             if (canonicalByKey.TryGetValue(key, out var first))
             {
@@ -1596,28 +1600,28 @@ public sealed class StatementImportStore
                 reader.GetInt32(1),
                 reader.IsDBNull(2) ? null : reader.GetInt32(2),
                 reader.GetInt32(3),
-                JsonSerializer.Deserialize<Dictionary<string, string?>>(reader.GetString(4), StorageJson)
+                JsonSerializer.Deserialize<Dictionary<string, string?>>(reader.GetString(4), _storageJson)
                     ?? new Dictionary<string, string?>(),
                 reader.IsDBNull(5) ? null : reader.GetFieldValue<DateOnly>(5),
                 reader.GetString(6),
                 reader.GetString(7),
                 reader.IsDBNull(8) ? null : reader.GetInt64(8),
-                JsonSerializer.Deserialize<string[]>(reader.GetString(9), StorageJson) ?? [],
-                JsonSerializer.Deserialize<string[]>(reader.GetString(10), StorageJson) ?? [],
+                JsonSerializer.Deserialize<string[]>(reader.GetString(9), _storageJson) ?? [],
+                JsonSerializer.Deserialize<string[]>(reader.GetString(10), _storageJson) ?? [],
                 reader.IsDBNull(11) ? null : reader.GetString(11),
                 reader.IsDBNull(12) ? null : reader.GetString(12),
                 reader.GetString(13),
-                JsonSerializer.Deserialize<string[]>(reader.GetString(14), StorageJson) ?? [],
-                JsonSerializer.Deserialize<Guid[]>(reader.GetString(15), StorageJson) ?? [],
-                JsonSerializer.Deserialize<Guid[]>(reader.GetString(16), StorageJson) ?? [],
-                JsonSerializer.Deserialize<ImportNearCandidateRecord[]>(reader.GetString(17), StorageJson) ?? [],
+                JsonSerializer.Deserialize<string[]>(reader.GetString(14), _storageJson) ?? [],
+                JsonSerializer.Deserialize<Guid[]>(reader.GetString(15), _storageJson) ?? [],
+                JsonSerializer.Deserialize<Guid[]>(reader.GetString(16), _storageJson) ?? [],
+                JsonSerializer.Deserialize<ImportNearCandidateRecord[]>(reader.GetString(17), _storageJson) ?? [],
                 reader.GetInt32(18),
                 reader.IsDBNull(19) ? null : reader.GetString(19),
                 reader.GetString(20),
                 reader.GetBoolean(21),
                 reader.GetBoolean(22),
-                JsonSerializer.Deserialize<Guid[]>(reader.GetString(23), StorageJson) ?? [],
-                JsonSerializer.Deserialize<Guid[]>(reader.GetString(24), StorageJson) ?? []));
+                JsonSerializer.Deserialize<Guid[]>(reader.GetString(23), _storageJson) ?? [],
+                JsonSerializer.Deserialize<Guid[]>(reader.GetString(24), _storageJson) ?? []));
         }
         return rows;
     }
@@ -1679,7 +1683,7 @@ public sealed class StatementImportStore
             insert.Parameters.AddWithValue("financial_account_id", accountId);
             insert.Parameters.AddWithValue("source_kind", sourceKind);
             insert.Parameters.AddWithValue("parser_config", NpgsqlDbType.Jsonb,
-                JsonSerializer.Serialize(config, StorageJson));
+                JsonSerializer.Serialize(config, _storageJson));
             insert.Parameters.AddWithValue("start_date", startDate);
             insert.Parameters.AddWithValue("end_date", endDate);
             insert.Parameters.AddWithValue("expires_at", expiresAt);
@@ -1725,7 +1729,7 @@ public sealed class StatementImportStore
                     copy.Write(row.SourcePage.Value, NpgsqlDbType.Integer);
                 }
                 copy.Write(row.SourceRowNumber, NpgsqlDbType.Integer);
-                copy.Write(JsonSerializer.Serialize(row.RawValues, StorageJson), NpgsqlDbType.Jsonb);
+                copy.Write(JsonSerializer.Serialize(row.RawValues, _storageJson), NpgsqlDbType.Jsonb);
                 if (row.TransactionDate is null)
                 {
                     copy.WriteNull();
@@ -1760,13 +1764,13 @@ public sealed class StatementImportStore
                 {
                     copy.Write(row.SourceIdValue, NpgsqlDbType.Text);
                 }
-                copy.Write(JsonSerializer.Serialize(row.ValidationCodes, StorageJson), NpgsqlDbType.Jsonb);
-                copy.Write(JsonSerializer.Serialize(row.Warnings, StorageJson), NpgsqlDbType.Jsonb);
+                copy.Write(JsonSerializer.Serialize(row.ValidationCodes, _storageJson), NpgsqlDbType.Jsonb);
+                copy.Write(JsonSerializer.Serialize(row.Warnings, _storageJson), NpgsqlDbType.Jsonb);
                 copy.Write(row.DuplicateState, NpgsqlDbType.Text);
-                copy.Write(JsonSerializer.Serialize(row.DuplicateReasons, StorageJson), NpgsqlDbType.Jsonb);
-                copy.Write(JsonSerializer.Serialize(row.MatchingTransactionIds, StorageJson), NpgsqlDbType.Jsonb);
-                copy.Write(JsonSerializer.Serialize(row.MatchingImportIds, StorageJson), NpgsqlDbType.Jsonb);
-                copy.Write(JsonSerializer.Serialize(row.NearCandidates, StorageJson), NpgsqlDbType.Jsonb);
+                copy.Write(JsonSerializer.Serialize(row.DuplicateReasons, _storageJson), NpgsqlDbType.Jsonb);
+                copy.Write(JsonSerializer.Serialize(row.MatchingTransactionIds, _storageJson), NpgsqlDbType.Jsonb);
+                copy.Write(JsonSerializer.Serialize(row.MatchingImportIds, _storageJson), NpgsqlDbType.Jsonb);
+                copy.Write(JsonSerializer.Serialize(row.NearCandidates, _storageJson), NpgsqlDbType.Jsonb);
                 copy.Write(row.NearCandidateTotal, NpgsqlDbType.Integer);
                 if (row.WithinFileGroup is null)
                 {
@@ -1779,8 +1783,8 @@ public sealed class StatementImportStore
                 copy.Write(row.WithinFileState, NpgsqlDbType.Text);
                 copy.Write(row.Skip, NpgsqlDbType.Boolean);
                 copy.Write(row.Override, NpgsqlDbType.Boolean);
-                copy.Write(JsonSerializer.Serialize(row.SuggestedTagIds, StorageJson), NpgsqlDbType.Jsonb);
-                copy.Write(JsonSerializer.Serialize(row.SelectedTagIds, StorageJson), NpgsqlDbType.Jsonb);
+                copy.Write(JsonSerializer.Serialize(row.SuggestedTagIds, _storageJson), NpgsqlDbType.Jsonb);
+                copy.Write(JsonSerializer.Serialize(row.SelectedTagIds, _storageJson), NpgsqlDbType.Jsonb);
                 copy.Write(now, NpgsqlDbType.TimestampTz);
                 copy.Write(now, NpgsqlDbType.TimestampTz);
             }
@@ -1842,7 +1846,7 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("override", overrideValue);
         command.Parameters.AddWithValue("within_file_state", withinFileState);
         command.Parameters.AddWithValue("selected_tag_ids", NpgsqlDbType.Jsonb,
-            JsonSerializer.Serialize(selectedTagIds, StorageJson));
+            JsonSerializer.Serialize(selectedTagIds, _storageJson));
         command.Parameters.AddWithValue("row_id", rowId);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -1872,13 +1876,13 @@ public sealed class StatementImportStore
             """;
         command.Parameters.AddWithValue("duplicate_state", row.DuplicateState);
         command.Parameters.AddWithValue("duplicate_reasons", NpgsqlDbType.Jsonb,
-            JsonSerializer.Serialize(row.DuplicateReasons, StorageJson));
+            JsonSerializer.Serialize(row.DuplicateReasons, _storageJson));
         command.Parameters.AddWithValue("matching_transaction_ids", NpgsqlDbType.Jsonb,
-            JsonSerializer.Serialize(row.MatchingTransactionIds, StorageJson));
+            JsonSerializer.Serialize(row.MatchingTransactionIds, _storageJson));
         command.Parameters.AddWithValue("matching_import_ids", NpgsqlDbType.Jsonb,
-            JsonSerializer.Serialize(row.MatchingImportIds, StorageJson));
+            JsonSerializer.Serialize(row.MatchingImportIds, _storageJson));
         command.Parameters.AddWithValue("near_candidates", NpgsqlDbType.Jsonb,
-            JsonSerializer.Serialize(row.NearCandidates, StorageJson));
+            JsonSerializer.Serialize(row.NearCandidates, _storageJson));
         command.Parameters.AddWithValue("near_candidate_total", row.NearCandidateTotal);
         command.Parameters.AddWithValue("within_file_group",
             NpgsqlDbType.Text, (object?)row.WithinFileGroup ?? DBNull.Value);
@@ -1886,7 +1890,7 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("override", row.Override);
         command.Parameters.AddWithValue(
             "suggested_tag_ids", NpgsqlDbType.Jsonb,
-            JsonSerializer.Serialize(row.SuggestedTagIds, StorageJson));
+            JsonSerializer.Serialize(row.SuggestedTagIds, _storageJson));
         command.Parameters.AddWithValue("row_id", row.RowId);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -2118,18 +2122,18 @@ public sealed class StatementImportStore
         ParserConfig config,
         IReadOnlyList<ImportReviewRowRecord>? rows = null)
     {
-        long bytes = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(config, StorageJson));
+        long bytes = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(config, _storageJson));
         foreach (var row in parsed.Rows)
         {
             bytes += Encoding.UTF8.GetByteCount(row.Description);
             bytes += Encoding.UTF8.GetByteCount(row.NormalizedDescription);
-            bytes += JsonSerializer.Serialize(row.RawValues, StorageJson).Length;
-            bytes += JsonSerializer.Serialize(row.ValidationCodes, StorageJson).Length;
-            bytes += JsonSerializer.Serialize(row.Warnings, StorageJson).Length;
+            bytes += JsonSerializer.Serialize(row.RawValues, _storageJson).Length;
+            bytes += JsonSerializer.Serialize(row.ValidationCodes, _storageJson).Length;
+            bytes += JsonSerializer.Serialize(row.Warnings, _storageJson).Length;
         }
         if (rows is not null)
         {
-            bytes += Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(rows, StorageJson));
+            bytes += Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(rows, _storageJson));
         }
         return bytes;
     }
@@ -2318,7 +2322,7 @@ public sealed class StatementImportStore
                 .ToArray(),
             exact_count = counts.ExactOverrides,
             statement_override = review.StatementOverride,
-        }, StorageJson);
+        }, _storageJson);
         var createdAt = DateTime.UtcNow;
 
         await using (var insertStatement = connection.CreateCommand())
@@ -2471,7 +2475,7 @@ public sealed class StatementImportStore
             possible_duplicate_count = counts.PossibleDuplicates,
             exact_override_count = counts.ExactOverrides,
             statement_override_count = review.StatementOverride ? 1 : 0,
-        }, StorageJson);
+        }, _storageJson);
         await using (var receipt = connection.CreateCommand())
         {
             receipt.Transaction = transaction;
@@ -2817,7 +2821,7 @@ public sealed class StatementImportStore
             statement_import_id = statementId,
             deleted = true,
             deleted_transaction_count = count,
-        }, StorageJson);
+        }, _storageJson);
         if (receipt is null)
         {
             await using var insert = connection.CreateCommand();

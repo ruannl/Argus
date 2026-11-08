@@ -14,7 +14,7 @@ public sealed class HibpScreener(ILogger<HibpScreener> logger) : IPwnedScreener
     private const string Endpoint = "https://api.pwnedpasswords.com/range/";
     private const int NetworkTimeoutMs = 2000;
 
-    private static readonly HttpClient Client = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private static readonly HttpClient _client = new() { Timeout = Timeout.InfiniteTimeSpan };
 
     public async Task<bool?> IsPwnedAsync(string password, CancellationToken cancellationToken = default)
     {
@@ -27,7 +27,7 @@ public sealed class HibpScreener(ILogger<HibpScreener> logger) : IPwnedScreener
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(NetworkTimeoutMs);
 
-            using var response = await Client.GetAsync(Endpoint + prefix, timeout.Token);
+            using var response = await _client.GetAsync(Endpoint + prefix, timeout.Token);
             if (!response.IsSuccessStatusCode)
             {
                 logger.LogWarning("pwned.check_unavailable status={Status}", (int)response.StatusCode);

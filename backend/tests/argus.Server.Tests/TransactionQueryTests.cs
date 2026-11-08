@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
-using Xunit.Abstractions;
 using argus.Server.Finance;
+using Xunit.Abstractions;
 
 namespace argus.Server.Tests;
 

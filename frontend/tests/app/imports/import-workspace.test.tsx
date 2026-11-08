@@ -78,19 +78,23 @@ describe("import workspace", () => {
     const inspectBodies: Record<string, unknown>[] = [];
     const prepareBodies: Record<string, unknown>[] = [];
     let inspectCount = 0;
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      const options = JSON.parse(
-        String((init?.body as FormData).get("options")),
-      ) as Record<string, unknown>;
-      const mode = new URL(url, "http://localhost").searchParams.get("mode");
-      if (mode === "prepare") {
-        prepareBodies.push(options);
-        return jsonResponse({ summary: { id: "review-id" }, page: { rows: [] } });
-      }
-      inspectBodies.push(options);
-      inspectCount += 1;
-      return jsonResponse(inspectResult(inspectCount === 1 ? "1" : "2"));
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const options = JSON.parse(String((init?.body as FormData).get("options"))) as Record<
+          string,
+          unknown
+        >;
+        const mode = new URL(url, "http://localhost").searchParams.get("mode");
+        if (mode === "prepare") {
+          prepareBodies.push(options);
+          return jsonResponse({ summary: { id: "review-id" }, page: { rows: [] } });
+        }
+        inspectBodies.push(options);
+        inspectCount += 1;
+        return jsonResponse(inspectResult(inspectCount === 1 ? "1" : "2"));
+      }),
+    );
 
     const user = userEvent.setup();
     const { container } = render(
@@ -118,8 +122,9 @@ describe("import workspace", () => {
     await user.selectOptions(screen.getByLabelText("Statement format"), "generic_csv");
     await user.click(screen.getByRole("button", { name: "Inspect statement" }));
     await waitFor(() => {
-      expect(screen.getByText("Inspection complete. Confirm the mapping, ZAR, and statement dates."))
-        .toBeInTheDocument();
+      expect(
+        screen.getByText("Inspection complete. Confirm the mapping, ZAR, and statement dates."),
+      ).toBeInTheDocument();
     });
 
     const headerLine = screen.getByLabelText("Header line");

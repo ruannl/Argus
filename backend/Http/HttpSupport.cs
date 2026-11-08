@@ -109,7 +109,7 @@ public sealed record UpdateMerchantTagRequest(string? DisplayName);
 
 public static class JsonBody
 {
-    private static readonly JsonSerializerOptions Options = new()
+    private static readonly JsonSerializerOptions _options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         PropertyNameCaseInsensitive = false,
@@ -210,7 +210,7 @@ public static class JsonBody
         }
         try
         {
-            var value = JsonSerializer.Deserialize<T>(body, Options);
+            var value = JsonSerializer.Deserialize<T>(body, _options);
             return value is null
                 ? new ParseResult<T>(default, false, false)
                 : new ParseResult<T>(value, true, false);
@@ -244,7 +244,7 @@ public static class JsonBody
             {
                 return new ParseResult<T>(default, false, false);
             }
-            var value = JsonSerializer.Deserialize<T>(body, Options);
+            var value = JsonSerializer.Deserialize<T>(body, _options);
             return value is null
                 ? new ParseResult<T>(default, false, false)
                 : new ParseResult<T>(value, true, false);

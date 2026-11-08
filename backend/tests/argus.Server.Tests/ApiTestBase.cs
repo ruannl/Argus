@@ -1,7 +1,7 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using System.Diagnostics;
 using Npgsql;
 
 namespace argus.Server.Tests;

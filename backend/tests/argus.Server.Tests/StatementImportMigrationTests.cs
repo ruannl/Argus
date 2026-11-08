@@ -1,6 +1,6 @@
-using Npgsql;
 using argus.Server.Data;
 using argus.Server.Imports;
+using Npgsql;
 
 namespace argus.Server.Tests;
 

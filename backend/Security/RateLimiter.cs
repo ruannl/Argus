@@ -7,7 +7,7 @@ namespace argus.Server.Security;
 /// </summary>
 public sealed class RateLimiter
 {
-    private static readonly TimeSpan Window = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan _window = TimeSpan.FromMinutes(15);
     private const int SweepThreshold = 1024;
 
     private readonly object _gate = new();
@@ -58,7 +58,7 @@ public sealed class RateLimiter
                 _buckets[bucket] = timestamps;
             }
 
-            while (timestamps.Count > 0 && now - timestamps.Peek() > Window)
+            while (timestamps.Count > 0 && now - timestamps.Peek() > _window)
             {
                 timestamps.Dequeue();
             }
@@ -76,7 +76,7 @@ public sealed class RateLimiter
     private void Sweep(DateTime now)
     {
         var stale = _buckets
-            .Where(entry => entry.Value.Count == 0 || now - entry.Value.Peek() > Window)
+            .Where(entry => entry.Value.Count == 0 || now - entry.Value.Peek() > _window)
             .Select(entry => entry.Key)
             .ToList();
         foreach (var key in stale)
