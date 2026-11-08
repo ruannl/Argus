@@ -118,13 +118,15 @@ operator approval.
 
 ## Verification evidence (corrected baseline, 2026-11-07)
 
-The following historical battery ran after the Plan 3 implementation was corrected and the
-in-scope whole-tree review findings were addressed (W2, M1–M3, M5 and the M6
-evidence record). The whole-tree review's W1 (pre-existing login/password-reset
-race), M4 (shared account preflight) and L1 (import expiry policy) are outside
-this correction scope and require Architect disposition; this runbook does not
-claim they are fixed. The local tree is committed locally; no push, pull
-request, deployment or repeat review was authorized.
+The following historical battery ran after the Plan 3 implementation was
+corrected and the in-scope whole-tree review findings were addressed (W2,
+M1–M3, M5 and the M6 evidence record). The whole-tree review's W1 (pre-existing
+login/password-reset race), M4 (shared account preflight) and L1 (import expiry
+policy) were outside that correction's scope. They were subsequently corrected
+in Plan 3 revision 3 and Plan 2 revision 6 and merged in PR #3 at 63815ee;
+PR #5 at 1b80a66 fixed the expiry-wait instability. The operator accepted
+Plan 3 as Validated on 2026-11-08. This runbook does not re-label the historical
+battery as evidence for the merged tree. No deployment occurred.
 
 - Backend: `dotnet format argus.Server.csproj --verify-no-changes` and the test
   project equivalent are clean. The full isolation suite passed **298 tests**
@@ -267,8 +269,10 @@ test observes a credential-row wait and verifies no session or success-counter
 effect. All three tests passed. The Phase 5 account/finance/billing filter
 passed **33/33**; both backend format checks and Release build passed with zero
 warnings. This is real HTTP/PostgreSQL test evidence, not a live development
-service observation. The combined full battery remains pending until the other
-revision-3 corrections are complete.
+service observation. The combined full battery subsequently completed; the
+revision-3 corrections merged in PR #3 at 63815ee and the operator accepted
+Plan 3 as Validated on 2026-11-08. The focused result above remains focused
+evidence, not the combined run.
 
 ## Revision 3: transaction account preflight (M4)
 
@@ -306,7 +310,9 @@ transaction tests timing out. Those tests passed when rerun separately. A third,
 monitored full run passed **308/308**, and a fourth full run repeated
 **308/308** on 2026-11-08. A later isolated run of the existing three-variant
 transaction expiry-wait test failed one variant, so repeated full-suite passes
-do not establish that the test is stable.
+did not establish that the test was stable at that time. PR #5 at 1b80a66
+subsequently fixed the expiry-wait instability; Thread #7 is resolved. The
+historical observation above remains as recorded.
 
 During investigation, a bounded clock probe observed the host and PostgreSQL
 wall clocks move backward by about **1.37 seconds** while the host monotonic

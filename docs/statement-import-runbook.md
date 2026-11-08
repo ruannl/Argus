@@ -466,8 +466,10 @@ and exact-tolerance bypasses), CPDF-R2 (colon-attached metadata), CPDF-R3
 CPDF-N5 (closing-balance suffix placement), CPDF-N6 (Phase 2 test-shape gaps)
 and CPDF-N7 (wording) remain. The corrected baseline is not accepted. The
 residual findings and the separate real-statement blockers are tracked in
-follow-up Thread #6. No further review was requested; publication and Threads
-#4/#5 remain blocked.
+follow-up Thread #6. No further PDF review was requested. The separate CSV-only
+Plan 2 implementation was published through PR #1 at 78a43e4; Thread #4 is
+operator-accepted and Thread #5 is unblocked for Plan 4 planning. PDF remains
+disabled/deferred to Thread #6. No deployment occurred.
 
 ## Workspace handoff
 
