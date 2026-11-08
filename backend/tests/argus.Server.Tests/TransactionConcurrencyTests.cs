@@ -468,21 +468,20 @@ public sealed class TransactionConcurrencyTests(KitFactory factory) : Transactio
         return (int)(await pid.ExecuteScalarAsync())!;
     }
 
+    // Waits on the database wall clock instead of a client monotonic timer.
+    // Hosts running this suite step their clock backward periodically (NTP or
+    // VM time sync), which can end a fixed client bound before the database
+    // clock reaches the expiry. pg_sleep_until re-checks the database clock
+    // and sleeps longer after a backward step. The one-second margin covers
+    // the gap between this wait returning and the blocked request re-checking
+    // expiry.
     private static async Task WaitForDatabaseTimeAsync(NpgsqlConnection observer, DateTime expiresAt)
     {
-        var watch = Stopwatch.StartNew();
-        while (watch.Elapsed < TimeSpan.FromSeconds(4))
-        {
-            await using var command = observer.CreateCommand();
-            command.CommandText = "SELECT clock_timestamp() >= @expiry";
-            command.Parameters.AddWithValue("expiry", expiresAt);
-            if ((bool)(await command.ExecuteScalarAsync())!)
-            {
-                return;
-            }
-            await Task.Delay(25);
-        }
-        Assert.Fail("The coherent test confirmation did not expire during the bounded wait.");
+        await using var command = observer.CreateCommand();
+        command.CommandText = "SELECT pg_sleep_until(@expiry)";
+        command.CommandTimeout = 60;
+        command.Parameters.AddWithValue("expiry", expiresAt.AddSeconds(1));
+        await command.ExecuteNonQueryAsync();
     }
 
     [Fact]
