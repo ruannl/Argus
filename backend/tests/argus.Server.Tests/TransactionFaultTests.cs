@@ -62,6 +62,10 @@ public sealed class TransactionFaultTests
     private static async Task<JsonElement> BodyAsync(HttpResponseMessage response) =>
         JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
 
+    /// <summary>
+    /// The caller must start the test host first (CreateClient) so migrations
+    /// exist on a fresh database before these tables are truncated.
+    /// </summary>
     private static async Task ResetAsync(KitFactory factory)
     {
         var db = factory.CreateDb();
@@ -258,8 +262,8 @@ public sealed class TransactionFaultTests
     public async Task ApplyFaultLeavesNoDurableEffect(string faultPoint)
     {
         using var factory = new KitFactory(null, new StepFaultInjector(faultPoint));
-        await ResetAsync(factory);
         using var client = factory.CreateClient();
+        await ResetAsync(factory);
         var session = await NewSessionAsync(factory, client, $"fault-{Guid.NewGuid():N}@example.test");
         var workspace = await SeedWorkspaceAsync(factory, client, session);
         var operationId = Guid.NewGuid();
@@ -290,8 +294,8 @@ public sealed class TransactionFaultTests
     public async Task FaultAfterReceiptWriteRollsBackAllMembersAndTheReceipt()
     {
         using var factory = new KitFactory(null, new StepFaultInjector(TransactionFaultPoints.AfterReceiptWrite));
-        await ResetAsync(factory);
         using var client = factory.CreateClient();
+        await ResetAsync(factory);
         var session = await NewSessionAsync(factory, client, $"receipt-fault-{Guid.NewGuid():N}@example.test");
         var workspace = await SeedWorkspaceAsync(factory, client, session);
         var secondRowId = Guid.NewGuid();
@@ -378,8 +382,8 @@ public sealed class TransactionFaultTests
     {
         const string canary = "synthetic-db-private-913712";
         using var factory = new KitFactory(null, new DatabaseErrorInjector(canary));
-        await ResetAsync(factory);
         using var client = factory.CreateClient();
+        await ResetAsync(factory);
         var session = await NewSessionAsync(factory, client, $"db-error-{Guid.NewGuid():N}@example.test");
         var workspace = await SeedWorkspaceAsync(factory, client, session);
         var operationId = Guid.NewGuid();
@@ -413,8 +417,8 @@ public sealed class TransactionFaultTests
                    null,
                    new StepFaultInjector(TransactionFaultPoints.AfterCommit)))
         {
-            await ResetAsync(firstFactory);
             using var firstClient = firstFactory.CreateClient();
+            await ResetAsync(firstFactory);
             session = await NewSessionAsync(firstFactory, firstClient, email);
             workspace = await SeedWorkspaceAsync(firstFactory, firstClient, session);
             prepared = await PrepareAsync(firstClient, session, workspace, operationId);
