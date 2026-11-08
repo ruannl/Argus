@@ -52,9 +52,8 @@ public sealed record TransactionFilter(string? Search,
 
     public string Canonical()
     {
-        var search = Search is null
-            ? string.Empty
-            : Convert.ToBase64String(Encoding.UTF8.GetBytes(Search));
+        string search = Search is null ? string.Empty : Convert.ToBase64String(Encoding.UTF8.GetBytes(Search));
+
         return string.Join(
             '|',
             $"search={search}",
@@ -89,9 +88,7 @@ public enum MerchantTagFilterKind
     Untagged,
 }
 
-public sealed record TransactionAccountRef(Guid Id,
-                                           string DisplayName,
-                                           bool IsArchived);
+public sealed record TransactionAccountRef(Guid Id, string DisplayName, bool IsArchived);
 
 public sealed record TransactionCategoryRef(Guid Id,
                                             string DisplayName,
@@ -99,9 +96,7 @@ public sealed record TransactionCategoryRef(Guid Id,
                                             bool IsSystem,
                                             bool IsArchived);
 
-public sealed record TransactionTagRef(Guid Id,
-                                       string DisplayName,
-                                       bool IsArchived);
+public sealed record TransactionTagRef(Guid Id, string DisplayName, bool IsArchived);
 
 public sealed record TransactionStatementRef(Guid Id,
                                              string StatementLabel,
@@ -167,41 +162,36 @@ public sealed record TransactionAction(Guid? CategoryId,
         $"hidden={IsHiddenByUser?.ToString() ?? string.Empty}");
 }
 
-public sealed record TransactionSelectionMember(Guid Id,
-                                                int ExpectedVersion);
+public sealed record TransactionSelectionMember(Guid Id, int ExpectedVersion);
 
-public sealed record TransactionSelectionPlan(string Mode,
-                                              TransactionSelectionMember[] ExplicitMembers,
-                                              TransactionFilter? Filters);
+public sealed record TransactionSelectionPlan(string Mode, TransactionSelectionMember[] ExplicitMembers, TransactionFilter? Filters);
 
 public static class TransactionRequestParser
 {
-    public static bool TryParseQuery(TransactionQueryRequest request,
-                                     out TransactionQueryPlan plan,
-                                     out string error)
+    public static bool TryParseQuery(TransactionQueryRequest request, out TransactionQueryPlan plan, out string error)
     {
         plan = new TransactionQueryPlan(TransactionFilter.Default, 1, 25, "date", "desc");
         error = TransactionErrorCodes.InvalidRequest;
 
-        var page = request.Page ?? 1;
+        int page = request.Page ?? 1;
         if (page < 1)
         {
             return false;
         }
 
-        var pageSize = request.PageSize ?? TransactionLimits.DefaultPageSize;
+        int pageSize = request.PageSize ?? TransactionLimits.DefaultPageSize;
         if (!TransactionLimits.PageSizes.Contains(pageSize))
         {
             return false;
         }
 
-        var sortBy = request.SortBy ?? "date";
+        string sortBy = request.SortBy ?? "date";
         if (sortBy is not ("date" or "amount" or "description"))
         {
             return false;
         }
 
-        var sortDirection = request.SortDirection ?? "desc";
+        string sortDirection = request.SortDirection ?? "desc";
         if (sortDirection is not ("asc" or "desc"))
         {
             return false;
@@ -214,11 +204,11 @@ public static class TransactionRequestParser
 
         plan = new TransactionQueryPlan(filter, page, pageSize, sortBy, sortDirection);
         error = string.Empty;
+
         return true;
     }
 
-    public static bool TryParseFilter(TransactionFiltersRequest? request,
-                                      out TransactionFilter filter)
+    public static bool TryParseFilter(TransactionFiltersRequest? request, out TransactionFilter filter)
     {
         filter = TransactionFilter.Default;
         if (request is null)
@@ -229,10 +219,10 @@ public static class TransactionRequestParser
         string? search = null;
         if (request.Search is not null)
         {
-            var trimmed = request.Search.Trim();
+            string trimmed = request.Search.Trim();
             if (!string.IsNullOrEmpty(trimmed))
             {
-                var scalars = 0;
+                int scalars = 0;
                 foreach (var _ in trimmed.EnumerateRunes())
                 {
                     scalars++;
@@ -245,18 +235,18 @@ public static class TransactionRequestParser
             }
         }
 
-        if (!TryParseDate(request.StartDate, out var startDate) ||
-            !TryParseDate(request.EndDate, out var endDate))
+        if (!TryParseDate(request.StartDate, out var startDate) || !TryParseDate(request.EndDate, out var endDate))
         {
             return false;
         }
+
         if (startDate is not null && endDate is not null && startDate > endDate)
         {
             return false;
         }
 
         Guid? merchantTagId = null;
-        var untagged = false;
+        bool untagged = false;
         if (request.MerchantTag is not null)
         {
             if (string.Equals(request.MerchantTag, "untagged", StringComparison.Ordinal))
@@ -273,11 +263,11 @@ public static class TransactionRequestParser
             }
         }
 
-        if (request.CategoryKind is not null &&
-            request.CategoryKind is not ("Income" or "Expense" or "Transfer" or "Excluded" or "Uncategorised"))
+        if (request.CategoryKind is not null && request.CategoryKind is not ("Income" or "Expense" or "Transfer" or "Excluded" or "Uncategorised"))
         {
             return false;
         }
+
         if (request.Direction is not null && request.Direction is not ("in" or "out" or "zero"))
         {
             return false;
@@ -295,37 +285,24 @@ public static class TransactionRequestParser
             return false;
         }
 
-        if (request.FinancialAccountId == Guid.Empty ||
-            request.StatementImportId == Guid.Empty ||
-            request.CategoryId == Guid.Empty ||
-            merchantTagId == Guid.Empty)
+        if (request.FinancialAccountId == Guid.Empty || request.StatementImportId == Guid.Empty || request.CategoryId == Guid.Empty || merchantTagId == Guid.Empty)
         {
             return false;
         }
 
-        filter = new TransactionFilter(
-            search,
-            startDate,
-            endDate,
-            request.FinancialAccountId,
-            request.StatementImportId,
-            request.CategoryId,
-            merchantTagId,
-            untagged,
-            request.CategoryKind,
-            request.Direction,
-            visibility.Value);
+        filter = new TransactionFilter(search, startDate, endDate, request.FinancialAccountId, request.StatementImportId, request.CategoryId, merchantTagId, untagged, request.CategoryKind, request.Direction, visibility.Value);
+
         return true;
     }
 
-    public static bool TryParseAction(TransactionChangesRequest? request,
-                                      out TransactionAction action)
+    public static bool TryParseAction(TransactionChangesRequest? request, out TransactionAction action)
     {
         action = new TransactionAction(null, [], [], null);
         if (request is null)
         {
             return false;
         }
+
         if (request.CategoryId == Guid.Empty)
         {
             return false;
@@ -333,11 +310,11 @@ public static class TransactionRequestParser
 
         var add = request.AddTagIds ?? [];
         var remove = request.RemoveTagIds ?? [];
-        if (add.Length > TransactionLimits.MaxTagIdsPerRequest ||
-            remove.Length > TransactionLimits.MaxTagIdsPerRequest)
+        if (add.Length > TransactionLimits.MaxTagIdsPerRequest || remove.Length > TransactionLimits.MaxTagIdsPerRequest)
         {
             return false;
         }
+
         if (add.Any(id => id == Guid.Empty) || remove.Any(id => id == Guid.Empty))
         {
             return false;
@@ -349,28 +326,23 @@ public static class TransactionRequestParser
         {
             return false;
         }
+
         if (addSet.Overlaps(removeSet))
         {
             return false;
         }
 
-        action = new TransactionAction(
-            request.CategoryId,
-            addSet.Order().ToArray(),
-            removeSet.Order().ToArray(),
-            request.IsHiddenByUser);
+        action = new TransactionAction(request.CategoryId, addSet.Order().ToArray(), removeSet.Order().ToArray(), request.IsHiddenByUser);
+
         return !action.IsEmpty;
     }
 
-    public static bool TryParseSelection(TransactionSelectionRequest? request,
-                                         out TransactionSelectionPlan plan)
+    public static bool TryParseSelection(TransactionSelectionRequest? request, out TransactionSelectionPlan plan)
     {
         plan = new TransactionSelectionPlan("explicit", [], null);
         if (request?.Mode == "explicit")
         {
-            if (request.Filters is not null || request.Transactions is null ||
-                request.Transactions.Length == 0 ||
-                request.Transactions.Length > TransactionLimits.MaxExplicitSelection)
+            if (request.Filters is not null || request.Transactions is null || request.Transactions.Length == 0 || request.Transactions.Length > TransactionLimits.MaxExplicitSelection)
             {
                 return false;
             }
@@ -383,10 +355,12 @@ public static class TransactionRequestParser
                 {
                     return false;
                 }
+
                 if (item.Id.Value == Guid.Empty || !seen.Add(item.Id.Value))
                 {
                     return false;
                 }
+
                 members.Add(new TransactionSelectionMember(item.Id.Value, item.ExpectedVersion.Value));
             }
 
@@ -396,11 +370,11 @@ public static class TransactionRequestParser
 
         if (request?.Mode == "all_matching")
         {
-            if (request.Transactions is not null ||
-                !TryParseFilter(request.Filters, out var filter))
+            if (request.Transactions is not null || !TryParseFilter(request.Filters, out var filter))
             {
                 return false;
             }
+
             plan = new TransactionSelectionPlan("all_matching", [], filter);
             return true;
         }
@@ -408,24 +382,21 @@ public static class TransactionRequestParser
         return false;
     }
 
-    public static bool TryParseDate(string? value,
-                                    out DateOnly? date)
+    public static bool TryParseDate(string? value, out DateOnly? date)
     {
         date = null;
         if (value is null)
         {
             return true;
         }
-        if (!DateOnly.TryParseExact(
-                value,
-                "yyyy-MM-dd",
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.None,
-                out var parsed))
+
+        if (!DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
         {
             return false;
         }
+
         date = parsed;
+
         return true;
     }
 
@@ -464,24 +435,15 @@ public sealed record TransactionChangesRequest(Guid? CategoryId,
                                                Guid[]? RemoveTagIds,
                                                bool? IsHiddenByUser);
 
-public sealed record TransactionSelectionItem(Guid? Id,
-                                              int? ExpectedVersion);
+public sealed record TransactionSelectionItem(Guid? Id, int? ExpectedVersion);
 
-public sealed record TransactionSelectionRequest(string? Mode,
-                                                 TransactionSelectionItem[]? Transactions,
-                                                 TransactionFiltersRequest? Filters);
+public sealed record TransactionSelectionRequest(string? Mode, TransactionSelectionItem[]? Transactions, TransactionFiltersRequest? Filters);
 
-public sealed record TransactionPatchRequest(int? ExpectedVersion,
-                                             TransactionChangesRequest? Changes,
-                                             bool? Confirm);
+public sealed record TransactionPatchRequest(int? ExpectedVersion, TransactionChangesRequest? Changes, bool? Confirm);
 
-public sealed record TransactionPrepareRequest(Guid? OperationId,
-                                               TransactionSelectionRequest? Selection,
-                                               TransactionChangesRequest? Changes);
+public sealed record TransactionPrepareRequest(Guid? OperationId, TransactionSelectionRequest? Selection, TransactionChangesRequest? Changes);
 
-public sealed record TransactionApplyRequest(string? ConfirmationHash,
-                                             int? ExpectedSelectedCount,
-                                             bool? Confirm);
+public sealed record TransactionApplyRequest(string? ConfirmationHash, int? ExpectedSelectedCount, bool? Confirm);
 
 public sealed record EmptyBodyRequest();
 
@@ -506,8 +468,7 @@ public sealed record TransactionOperationSummaryResponse(Guid OperationId,
                                                          string? TerminalAt,
                                                          TransactionOperationActionResponse? Action);
 
-public sealed record TransactionOperationPrepareResponse(TransactionOperationSummaryResponse Operation,
-                                                         bool Created);
+public sealed record TransactionOperationPrepareResponse(TransactionOperationSummaryResponse Operation, bool Created);
 
 public sealed record TransactionOperationApplyResponse(Guid OperationId,
                                                        string Status,
@@ -519,8 +480,7 @@ public sealed record TransactionOperationApplyResponse(Guid OperationId,
 
 public sealed class TransactionStoreException : Exception
 {
-    public TransactionStoreException(string code,
-                                     IReadOnlyDictionary<string, object?>? details = null)
+    public TransactionStoreException(string code, IReadOnlyDictionary<string, object?>? details = null)
         : base(code)
     {
         Code = code;

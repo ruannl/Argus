@@ -81,8 +81,7 @@ public sealed record ImportReviewPage(IReadOnlyList<ImportReviewRowRecord> Rows,
                                       int Page,
                                       int PageSize);
 
-public sealed record ImportReviewDetail(ImportReviewSummaryRecord Summary,
-                                        ImportReviewPage Page);
+public sealed record ImportReviewDetail(ImportReviewSummaryRecord Summary, ImportReviewPage Page);
 
 public sealed record ImportOpenReviewSummary(Guid Id,
                                              Guid FinancialAccountId,
@@ -116,8 +115,7 @@ public sealed record ImportStatementSummary(Guid Id,
                                             DateTime CreatedAt,
                                             DateTime UpdatedAt);
 
-public sealed record ImportTagRecord(Guid Id,
-                                     string DisplayName);
+public sealed record ImportTagRecord(Guid Id, string DisplayName);
 
 public sealed record ImportStatementRowRecord(Guid Id,
                                               int SourceRowNumber,
@@ -135,17 +133,13 @@ public sealed record ImportStatementDetail(ImportStatementSummary Summary,
                                            int PageSize,
                                            long ExpectedTransactionCount);
 
-public sealed record ImportHistoryPage(IReadOnlyList<ImportStatementSummary> Items,
-                                       string? NextCursor);
+public sealed record ImportHistoryPage(IReadOnlyList<ImportStatementSummary> Items, string? NextCursor);
 
-public sealed record ImportDeleteResult(bool Deleted,
-                                        long DeletedTransactionCount);
+public sealed record ImportDeleteResult(bool Deleted, long DeletedTransactionCount);
 
-public sealed record ImportCommitResult(ImportStatementSummary Summary,
-                                        bool Replayed);
+public sealed record ImportCommitResult(ImportStatementSummary Summary, bool Replayed);
 
-public sealed record ImportAbandonResult(bool Committed,
-                                         ImportCommitResult? Commit);
+public sealed record ImportAbandonResult(bool Committed, ImportCommitResult? Commit);
 
 public sealed record ImportDecision(Guid RowId,
                                     bool? Skip,
@@ -202,20 +196,17 @@ public sealed class StatementImportStore
     private readonly FinanceStore _financeStore;
     private readonly IImportFaultInjector _faults;
 
-    public StatementImportStore(Db db,
-                                FinanceStore financeStore,
-                                IImportFaultInjector faults)
+    public StatementImportStore(Db db, FinanceStore financeStore, IImportFaultInjector faults)
     {
         _db = db;
         _financeStore = financeStore;
         _faults = faults;
     }
 
-    public async Task<ImportAccountRecord?> GetAccountAsync(Guid customerId,
-                                                            Guid accountId,
-                                                            CancellationToken cancellationToken = default)
+    public async Task<ImportAccountRecord?> GetAccountAsync(Guid customerId, Guid accountId, CancellationToken cancellationToken = default)
     {
         await using var connection = await _db.OpenAsync(cancellationToken);
+
         return await GetAccountAsync(connection, null, customerId, accountId, false, cancellationToken);
     }
 
@@ -241,7 +232,7 @@ public sealed class StatementImportStore
         // enters that order while holding a customer-row lock.
         await _financeStore.EnsureCategoriesSeededAsync(customerId, cancellationToken);
 
-        var estimatedPayloadBytes = EstimatePayload(parsed, config);
+        long estimatedPayloadBytes = EstimatePayload(parsed, config);
         var reviewId = Guid.NewGuid();
         var now = DateTime.UtcNow;
         var expiresAt = now.AddHours(ImportLimits.ReviewLifetimeHours);
@@ -250,11 +241,9 @@ public sealed class StatementImportStore
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
         await LockQuotaAsync(connection, transaction, customerId, cancellationToken);
-        var usedPayloadBytes = await EnforceQuotaAsync(
-            connection, transaction, customerId, estimatedPayloadBytes, cancellationToken);
+        long usedPayloadBytes = await EnforceQuotaAsync(connection, transaction, customerId, estimatedPayloadBytes, cancellationToken);
 
-        var account = await GetAccountAsync(
-            connection, transaction, customerId, accountId, true, cancellationToken);
+        var account = await GetAccountAsync(connection, transaction, customerId, accountId, true, cancellationToken);
         if (account is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
@@ -268,18 +257,16 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
 
-        var snapshot = await ComputeDuplicateSnapshotAsync(
-            connection, transaction, customerId, accountId, parsed.Rows, null, cancellationToken);
+        var snapshot = await ComputeDuplicateSnapshotAsync(connection, transaction, customerId, accountId, parsed.Rows, null, cancellationToken);
         var rows = snapshot.Rows;
-        var payloadBytes = EstimatePayload(parsed, config, rows);
+        long payloadBytes = EstimatePayload(parsed, config, rows);
         if (usedPayloadBytes + payloadBytes > ImportLimits.MaxOpenReviewPayloadBytes)
         {
             throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
         }
         var counts = CountRows(rows);
-        var summaryHash = ComputeSummaryHash(reviewId, 1, rows, counts, statementOverride: false);
-        var statementFingerprint = StatementIdentity.ComputeStatementFingerprint(
-            parsed.Rows, startDate, endDate);
+        string summaryHash = ComputeSummaryHash(reviewId, 1, rows, counts, statementOverride: false);
+        string statementFingerprint = StatementIdentity.ComputeStatementFingerprint(parsed.Rows, startDate, endDate);
 
         await InsertReviewAsync(
             connection,
@@ -328,13 +315,12 @@ public sealed class StatementImportStore
             payloadBytes,
             now,
             now);
-        var page = new ImportReviewPage(rows.Take(ImportLimits.MaxPageSize).ToArray(),
-            rows.Count, 1, ImportLimits.MaxPageSize);
+        var page = new ImportReviewPage(rows.Take(ImportLimits.MaxPageSize).ToArray(), rows.Count, 1, ImportLimits.MaxPageSize);
+
         return new ImportReviewDetail(summary, page);
     }
 
-    public async Task<IReadOnlyList<ImportOpenReviewSummary>> ListOpenReviewsAsync(Guid customerId,
-                                                                                   CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ImportOpenReviewSummary>> ListOpenReviewsAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
         await using var connection = await _db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -365,6 +351,7 @@ public sealed class StatementImportStore
                 reader.GetInt32(10),
                 reader.GetFieldValue<DateTime>(11)));
         }
+
         return items;
     }
 
@@ -393,7 +380,8 @@ public sealed class StatementImportStore
         }
 
         var rows = await ReadReviewRowsAsync(connection, null, reviewId, page, pageSize, cancellationToken);
-        var total = await CountReviewRowsAsync(connection, null, reviewId, cancellationToken);
+        int total = await CountReviewRowsAsync(connection, null, reviewId, cancellationToken);
+
         return new ImportReviewDetail(summary, new ImportReviewPage(rows, total, page, pageSize));
     }
 
@@ -423,16 +411,14 @@ public sealed class StatementImportStore
         }
         await LockQuotaAsync(connection, transaction, customerId, cancellationToken);
         await LockAccountAsync(connection, transaction, customerId, accountId.Value, cancellationToken);
-        var summary = await ReadReviewHeaderAsync(
-            connection, transaction, customerId, reviewId, true, cancellationToken);
+        var summary = await ReadReviewHeaderAsync(connection, transaction, customerId, reviewId, true, cancellationToken);
         if (summary is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
         EnsureEditable(summary, expectedVersion);
 
-        var rows = (await ReadReviewRowsAsync(
-            connection, transaction, reviewId, 1, int.MaxValue, cancellationToken)).ToList();
+        var rows = (await ReadReviewRowsAsync(connection, transaction, reviewId, 1, int.MaxValue, cancellationToken)).ToList();
         var byId = rows.ToDictionary(row => row.RowId);
         foreach (var decision in decisions)
         {
@@ -443,22 +429,18 @@ public sealed class StatementImportStore
 
             if (decision.WithinFileAction is not null)
             {
-                if (decision.WithinFileGroup is null ||
-                    decision.WithinFileAction is not ("keep_all" or "skip_all"))
+                if (decision.WithinFileGroup is null || decision.WithinFileAction is not ("keep_all" or "skip_all"))
                 {
                     throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
                 }
-                var state = decision.WithinFileAction == "keep_all" ? "keep" : "skip";
-                var skip = decision.WithinFileAction == "skip_all";
-                var groupRows = byId.Values
-                    .Where(row => row.WithinFileGroup == decision.WithinFileGroup)
-                    .ToList();
+                string state = decision.WithinFileAction == "keep_all" ? "keep" : "skip";
+                bool skip = decision.WithinFileAction == "skip_all";
+                var groupRows = byId.Values.Where(row => row.WithinFileGroup == decision.WithinFileGroup).ToList();
                 if (groupRows.Count == 0)
                 {
                     throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
                 }
-                await SetWithinFileGroupAsync(
-                    connection, transaction, reviewId, decision.WithinFileGroup, state, skip, cancellationToken);
+                await SetWithinFileGroupAsync(connection, transaction, reviewId, decision.WithinFileGroup, state, skip, cancellationToken);
                 foreach (var groupRow in groupRows)
                 {
                     byId[groupRow.RowId] = groupRow with
@@ -471,8 +453,8 @@ public sealed class StatementImportStore
                 continue;
             }
 
-            var skipValue = decision.Skip ?? row.Skip;
-            var overrideValue = decision.Override ?? row.Override;
+            bool skipValue = decision.Skip ?? row.Skip;
+            bool overrideValue = decision.Override ?? row.Override;
             if (skipValue && overrideValue)
             {
                 throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
@@ -482,11 +464,10 @@ public sealed class StatementImportStore
                 throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
             }
 
-            var withinFileState = row.WithinFileState;
+            string withinFileState = row.WithinFileState;
             if (decision.WithinFileState is not null)
             {
-                if (row.WithinFileGroup is null ||
-                    decision.WithinFileState is not ("keep" or "skip"))
+                if (row.WithinFileGroup is null || decision.WithinFileState is not ("keep" or "skip"))
                 {
                     throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
                 }
@@ -494,30 +475,18 @@ public sealed class StatementImportStore
                 skipValue = decision.WithinFileState == "skip";
             }
 
-            var selectedTagIds = decision.SelectedTagIds is null
-                ? row.SelectedTagIds
-                : decision.SelectedTagIds.Distinct().ToArray();
+            var selectedTagIds = decision.SelectedTagIds is null ? row.SelectedTagIds : decision.SelectedTagIds.Distinct().ToArray();
             if (selectedTagIds.Length > 100)
             {
                 throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
             }
             var newlySelected = selectedTagIds.Except(row.SelectedTagIds).ToArray();
-            if (newlySelected.Length > 0 &&
-                !await TagsAvailableAsync(
-                    connection, transaction, customerId, newlySelected, cancellationToken))
+            if (newlySelected.Length > 0 && !await TagsAvailableAsync(connection, transaction, customerId, newlySelected, cancellationToken))
             {
                 throw new ImportStoreException(ImportErrorCodes.TagUnavailable);
             }
 
-            await UpdateRowDecisionsAsync(
-                connection,
-                transaction,
-                row.RowId,
-                skipValue,
-                overrideValue,
-                withinFileState,
-                selectedTagIds,
-                cancellationToken);
+            await UpdateRowDecisionsAsync(connection, transaction, row.RowId, skipValue, overrideValue, withinFileState, selectedTagIds, cancellationToken);
 
             byId[row.RowId] = row with
             {
@@ -529,16 +498,8 @@ public sealed class StatementImportStore
         }
 
         var decidedRows = byId.Values.OrderBy(row => row.SourceRowNumber).ThenBy(row => row.RowId).ToArray();
-        var decisionMap = decidedRows.ToDictionary(
-            row => row.RowId, row => new RowDecision(row.Skip, row.Override));
-        var snapshot = await ComputeDuplicateSnapshotAsync(
-            connection,
-            transaction,
-            customerId,
-            accountId.Value,
-            decidedRows.Select(ToParsedRow).ToArray(),
-            decisionMap,
-            cancellationToken);
+        var decisionMap = decidedRows.ToDictionary(row => row.RowId, row => new RowDecision(row.Skip, row.Override));
+        var snapshot = await ComputeDuplicateSnapshotAsync(connection, transaction, customerId, accountId.Value, decidedRows.Select(ToParsedRow).ToArray(), decisionMap, cancellationToken);
         var freshById = snapshot.Rows.ToDictionary(row => row.RowId);
         var updatedRows = new List<ImportReviewRowRecord>(decidedRows.Length);
         foreach (var oldRow in decidedRows)
@@ -565,12 +526,7 @@ public sealed class StatementImportStore
             }
             else
             {
-                var withinState = fresh.WithinFileGroup is null
-                    ? "none"
-                    : oldRow.WithinFileGroup == fresh.WithinFileGroup &&
-                      oldRow.WithinFileState is "keep" or "skip"
-                        ? oldRow.WithinFileState
-                        : fresh.WithinFileState;
+                string withinState = fresh.WithinFileGroup is null ? "none" : oldRow.WithinFileGroup == fresh.WithinFileGroup && oldRow.WithinFileState is "keep" or "skip" ? oldRow.WithinFileState : fresh.WithinFileState;
                 merged = fresh with
                 {
                     Skip = false,
@@ -580,26 +536,22 @@ public sealed class StatementImportStore
                 };
             }
             updatedRows.Add(merged);
-            await UpdateDuplicateSnapshotAsync(
-                connection, transaction, merged, cancellationToken);
+            await UpdateDuplicateSnapshotAsync(connection, transaction, merged, cancellationToken);
         }
 
-        var overrideFlag = statementOverride ?? summary.StatementOverride;
-        var oldRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(rows, _storageJson));
-        var newRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(updatedRows, _storageJson));
-        var payloadBytes = Math.Max(0, summary.PayloadBytes + newRowsJson - oldRowsJson);
-        var (openReviews, usedPayload) = await QuotaUsageExcludingAsync(
-            connection, transaction, customerId, reviewId, cancellationToken);
-        if (openReviews >= ImportLimits.MaxOpenReviewsPerCustomer ||
-            usedPayload + payloadBytes > ImportLimits.MaxOpenReviewPayloadBytes)
+        bool overrideFlag = statementOverride ?? summary.StatementOverride;
+        int oldRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(rows, _storageJson));
+        int newRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(updatedRows, _storageJson));
+        long payloadBytes = Math.Max(0, summary.PayloadBytes + newRowsJson - oldRowsJson);
+        var (openReviews, usedPayload) = await QuotaUsageExcludingAsync(connection, transaction, customerId, reviewId, cancellationToken);
+        if (openReviews >= ImportLimits.MaxOpenReviewsPerCustomer || usedPayload + payloadBytes > ImportLimits.MaxOpenReviewPayloadBytes)
         {
             throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
         }
         var counts = CountRows(updatedRows);
-        var version = summary.Version + 1;
-        var hash = ComputeSummaryHash(reviewId, version, updatedRows, counts, overrideFlag);
-        await UpdateReviewSummaryAsync(
-            connection, transaction, reviewId, version, counts, hash, overrideFlag, payloadBytes, cancellationToken);
+        int version = summary.Version + 1;
+        string hash = ComputeSummaryHash(reviewId, version, updatedRows, counts, overrideFlag);
+        await UpdateReviewSummaryAsync(connection, transaction, reviewId, version, counts, hash, overrideFlag, payloadBytes, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return summary with
@@ -635,23 +587,18 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
         await LockQuotaAsync(connection, transaction, customerId, cancellationToken);
-        var account = await LockAccountAsync(
-            connection, transaction, customerId, accountId.Value, cancellationToken);
-        var summary = await ReadReviewHeaderAsync(
-            connection, transaction, customerId, reviewId, true, cancellationToken);
+        var account = await LockAccountAsync(connection, transaction, customerId, accountId.Value, cancellationToken);
+        var summary = await ReadReviewHeaderAsync(connection, transaction, customerId, reviewId, true, cancellationToken);
         if (summary is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
         EnsureEditable(summary, expectedVersion);
 
-        var existingRows = await ReadReviewRowsAsync(
-            connection, transaction, reviewId, 1, int.MaxValue, cancellationToken);
-        var decisionMap = existingRows.ToDictionary(
-            row => row.RowId, row => new RowDecision(row.Skip, row.Override));
+        var existingRows = await ReadReviewRowsAsync(connection, transaction, reviewId, 1, int.MaxValue, cancellationToken);
+        var decisionMap = existingRows.ToDictionary(row => row.RowId, row => new RowDecision(row.Skip, row.Override));
         var parsedRows = existingRows.Select(ToParsedRow).ToArray();
-        var snapshot = await ComputeDuplicateSnapshotAsync(
-            connection, transaction, customerId, accountId.Value, parsedRows, decisionMap, cancellationToken);
+        var snapshot = await ComputeDuplicateSnapshotAsync(connection, transaction, customerId, accountId.Value, parsedRows, decisionMap, cancellationToken);
         var freshById = snapshot.Rows.ToDictionary(row => row.RowId);
         var refreshed = new List<ImportReviewRowRecord>(existingRows.Count);
         foreach (var oldRow in existingRows)
@@ -667,19 +614,14 @@ public sealed class StatementImportStore
             }
             else if (oldRow.Override)
             {
-                var stillSuppressed = fresh.DuplicateState is "suppressed" or "suppressed_within_file";
+                bool stillSuppressed = fresh.DuplicateState is "suppressed" or "suppressed_within_file";
                 refreshedRow = stillSuppressed
                     ? oldRow
                     : fresh with { Skip = false, Override = false, SelectedTagIds = oldRow.SelectedTagIds };
             }
             else
             {
-                var withinState = fresh.WithinFileGroup is null
-                    ? "none"
-                    : oldRow.WithinFileGroup == fresh.WithinFileGroup &&
-                      oldRow.WithinFileState is "keep" or "skip"
-                        ? oldRow.WithinFileState
-                        : fresh.WithinFileState;
+                string withinState = fresh.WithinFileGroup is null ? "none" : oldRow.WithinFileGroup == fresh.WithinFileGroup && oldRow.WithinFileState is "keep" or "skip" ? oldRow.WithinFileState : fresh.WithinFileState;
                 refreshedRow = fresh with
                 {
                     Skip = false,
@@ -689,27 +631,22 @@ public sealed class StatementImportStore
                 };
             }
             refreshed.Add(refreshedRow);
-            await UpdateDuplicateSnapshotAsync(
-                connection, transaction, refreshedRow, cancellationToken);
+            await UpdateDuplicateSnapshotAsync(connection, transaction, refreshedRow, cancellationToken);
         }
 
-        var oldRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(existingRows, _storageJson));
-        var newRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(refreshed, _storageJson));
-        var payloadBytes = Math.Max(0, summary.PayloadBytes + newRowsJson - oldRowsJson);
-        var (openReviews, usedPayload) = await QuotaUsageExcludingAsync(
-            connection, transaction, customerId, reviewId, cancellationToken);
-        if (openReviews >= ImportLimits.MaxOpenReviewsPerCustomer ||
-            usedPayload + payloadBytes > ImportLimits.MaxOpenReviewPayloadBytes)
+        int oldRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(existingRows, _storageJson));
+        int newRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(refreshed, _storageJson));
+        long payloadBytes = Math.Max(0, summary.PayloadBytes + newRowsJson - oldRowsJson);
+        var (openReviews, usedPayload) = await QuotaUsageExcludingAsync(connection, transaction, customerId, reviewId, cancellationToken);
+        if (openReviews >= ImportLimits.MaxOpenReviewsPerCustomer || usedPayload + payloadBytes > ImportLimits.MaxOpenReviewPayloadBytes)
         {
             throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
         }
         var counts = CountRows(refreshed);
-        var version = summary.Version + 1;
-        var hash = ComputeSummaryHash(reviewId, version, refreshed, counts, summary.StatementOverride);
-        await UpdateReviewSummaryAsync(
-            connection, transaction, reviewId, version, counts, hash, summary.StatementOverride, payloadBytes, cancellationToken);
-        await UpdateReviewAccountVersionAsync(
-            connection, transaction, reviewId, account.ImportVersion, cancellationToken);
+        int version = summary.Version + 1;
+        string hash = ComputeSummaryHash(reviewId, version, refreshed, counts, summary.StatementOverride);
+        await UpdateReviewSummaryAsync(connection, transaction, reviewId, version, counts, hash, summary.StatementOverride, payloadBytes, cancellationToken);
+        await UpdateReviewAccountVersionAsync(connection, transaction, reviewId, account.ImportVersion, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return summary with
@@ -743,18 +680,15 @@ public sealed class StatementImportStore
             connection, transaction, customerId, reviewId, cancellationToken);
         if (receiptAccountId is not null)
         {
-            await LockAccountAsync(
-                connection, transaction, customerId, receiptAccountId.Value, cancellationToken);
-            var terminal = await ReadReceiptAsync(
-                connection, transaction, customerId, reviewId, true, cancellationToken);
+            await LockAccountAsync(connection, transaction, customerId, receiptAccountId.Value, cancellationToken);
+            var terminal = await ReadReceiptAsync(connection, transaction, customerId, reviewId, true, cancellationToken);
             if (terminal is not null)
             {
                 if (terminal.State == "Deleted")
                 {
                     throw new ImportStoreException(ImportErrorCodes.ImportDeleted);
                 }
-                var statement = await ReadStatementSummaryAsync(
-                    connection, transaction, customerId, terminal.StatementImportId!.Value, cancellationToken);
+                var statement = await ReadStatementSummaryAsync(connection, transaction, customerId, terminal.StatementImportId!.Value, cancellationToken);
                 if (statement is not null)
                 {
                     await transaction.CommitAsync(cancellationToken);
@@ -766,28 +700,22 @@ public sealed class StatementImportStore
         var accountId = await ReviewAccountIdAsync(connection, transaction, customerId, reviewId, cancellationToken);
         if (accountId is null)
         {
-            var lateReceiptAccount = await ReceiptAccountIdAsync(
-                connection, transaction, customerId, reviewId, cancellationToken);
+            var lateReceiptAccount = await ReceiptAccountIdAsync(connection, transaction, customerId, reviewId, cancellationToken);
             if (lateReceiptAccount is not null)
             {
-                await LockAccountAsync(
-                    connection, transaction, customerId, lateReceiptAccount.Value, cancellationToken);
-                var lateReceipt = await ReadReceiptAsync(
-                    connection, transaction, customerId, reviewId, true, cancellationToken);
+                await LockAccountAsync(connection, transaction, customerId, lateReceiptAccount.Value, cancellationToken);
+                var lateReceipt = await ReadReceiptAsync(connection, transaction, customerId, reviewId, true, cancellationToken);
                 if (lateReceipt is not null)
                 {
                     if (lateReceipt.State == "Deleted")
                     {
                         throw new ImportStoreException(ImportErrorCodes.ImportDeleted);
                     }
-                    var lateStatement = await ReadStatementSummaryAsync(
-                        connection, transaction, customerId,
-                        lateReceipt.StatementImportId!.Value, cancellationToken);
+                    var lateStatement = await ReadStatementSummaryAsync(connection, transaction, customerId, lateReceipt.StatementImportId!.Value, cancellationToken);
                     if (lateStatement is not null)
                     {
                         await transaction.CommitAsync(cancellationToken);
-                        return new ImportAbandonResult(
-                            true, new ImportCommitResult(lateStatement, true));
+                        return new ImportAbandonResult(true, new ImportCommitResult(lateStatement, true));
                     }
                 }
             }
@@ -795,16 +723,14 @@ public sealed class StatementImportStore
         }
         await LockAccountAsync(connection, transaction, customerId, accountId.Value, cancellationToken);
 
-        var racedReceipt = await ReadReceiptAsync(
-            connection, transaction, customerId, reviewId, false, cancellationToken);
+        var racedReceipt = await ReadReceiptAsync(connection, transaction, customerId, reviewId, false, cancellationToken);
         if (racedReceipt is not null)
         {
             if (racedReceipt.State == "Deleted")
             {
                 throw new ImportStoreException(ImportErrorCodes.ImportDeleted);
             }
-            var statement = await ReadStatementSummaryAsync(
-                connection, transaction, customerId, racedReceipt.StatementImportId!.Value, cancellationToken);
+            var statement = await ReadStatementSummaryAsync(connection, transaction, customerId, racedReceipt.StatementImportId!.Value, cancellationToken);
             if (statement is not null)
             {
                 await transaction.CommitAsync(cancellationToken);
@@ -812,8 +738,7 @@ public sealed class StatementImportStore
             }
         }
 
-        var summary = await ReadReviewHeaderAsync(
-            connection, transaction, customerId, reviewId, true, cancellationToken);
+        var summary = await ReadReviewHeaderAsync(connection, transaction, customerId, reviewId, true, cancellationToken);
         if (summary is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
@@ -866,6 +791,7 @@ public sealed class StatementImportStore
         }
 
         await transaction.CommitAsync(cancellationToken);
+
         return new ImportAbandonResult(false, null);
     }
 
@@ -879,18 +805,12 @@ public sealed class StatementImportStore
                                                                         IReadOnlyDictionary<Guid, RowDecision>? decisions,
                                                                         CancellationToken cancellationToken)
     {
-        var incoming = parsedRows
-            .Select((row, index) => ToIncoming(row, index))
-            .Where(row => row is not null)
-            .Select(row => row!)
-            .ToList();
+        var incoming = parsedRows.Select((row, index) => ToIncoming(row, index)).Where(row => row is not null).Select(row => row!).ToList();
 
-        var identityKeys = incoming.Select(row => row.IdentityKey).Distinct(StringComparer.Ordinal).ToArray();
-        var namespaces = incoming.Where(row => row.Namespace is not null)
-            .Select(row => row.Namespace!).Distinct(StringComparer.Ordinal).ToArray();
-        var ids = incoming.Where(row => row.Value is not null)
-            .Select(row => row.Value!).Distinct(StringComparer.Ordinal).ToArray();
-        var amounts = incoming.Select(row => row.Cents / 100m).Distinct().ToArray();
+        string[] identityKeys = incoming.Select(row => row.IdentityKey).Distinct(StringComparer.Ordinal).ToArray();
+        string[] namespaces = incoming.Where(row => row.Namespace is not null).Select(row => row.Namespace!).Distinct(StringComparer.Ordinal).ToArray();
+        string[] ids = incoming.Where(row => row.Value is not null).Select(row => row.Value!).Distinct(StringComparer.Ordinal).ToArray();
+        decimal[] amounts = incoming.Select(row => row.Cents / 100m).Distinct().ToArray();
         var minDate = incoming.Count == 0 ? DateOnly.MinValue : incoming.Min(row => row.Date).AddDays(-3);
         var maxDate = incoming.Count == 0 ? DateOnly.MinValue : incoming.Max(row => row.Date).AddDays(3);
 
@@ -914,10 +834,8 @@ public sealed class StatementImportStore
                          "t.source_id_namespace = ANY(@namespaces) AND t.source_id_value = ANY(@values)",
                          command =>
                          {
-                             command.Parameters.AddWithValue(
-                                 "namespaces", NpgsqlDbType.Array | NpgsqlDbType.Text, namespaces);
-                             command.Parameters.AddWithValue(
-                                 "values", NpgsqlDbType.Array | NpgsqlDbType.Text, ids);
+                             command.Parameters.AddWithValue("namespaces", NpgsqlDbType.Array | NpgsqlDbType.Text, namespaces);
+                             command.Parameters.AddWithValue("values", NpgsqlDbType.Array | NpgsqlDbType.Text, ids);
                          },
                          cancellationToken))
             {
@@ -931,8 +849,7 @@ public sealed class StatementImportStore
                          "t.amount = ANY(@amounts) AND t.transaction_date BETWEEN @min_date AND @max_date",
                          command =>
                          {
-                             command.Parameters.AddWithValue(
-                                 "amounts", NpgsqlDbType.Array | NpgsqlDbType.Numeric, amounts);
+                             command.Parameters.AddWithValue("amounts", NpgsqlDbType.Array | NpgsqlDbType.Numeric, amounts);
                              command.Parameters.AddWithValue("min_date", minDate);
                              command.Parameters.AddWithValue("max_date", maxDate);
                          },
@@ -946,8 +863,7 @@ public sealed class StatementImportStore
         foreach (var group in existingList.GroupBy(row => row.IdentityKey, StringComparer.Ordinal))
         {
             var first = group.First();
-            if (group.Any(row => row.Date != first.Date || row.Cents != first.Cents ||
-                                 row.NormalizedDescription != first.NormalizedDescription))
+            if (group.Any(row => row.Date != first.Date || row.Cents != first.Cents || row.NormalizedDescription != first.NormalizedDescription))
             {
                 throw new ImportStoreException(ImportErrorCodes.IdentityConflict);
             }
@@ -967,8 +883,7 @@ public sealed class StatementImportStore
         {
             if (canonicalByKey.TryGetValue(key, out var first))
             {
-                if (first.Date != date || first.Cents != cents ||
-                    !string.Equals(first.Description, description, StringComparison.Ordinal))
+                if (first.Date != date || first.Cents != cents || !string.Equals(first.Description, description, StringComparison.Ordinal))
                 {
                     throw new ImportStoreException(ImportErrorCodes.IdentityConflict);
                 }
@@ -984,49 +899,30 @@ public sealed class StatementImportStore
         {
             CheckCanonical(row.IdentityKey, row.Date, row.Cents, row.NormalizedDescription);
         }
-        var existingByIdentity = existingList
-            .GroupBy(row => row.IdentityKey)
-            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
-        var existingByStable = existingList
-            .Where(row => row.Namespace is not null && row.Value is not null)
-            .GroupBy(row => (row.Namespace!, row.Value!))
-            .ToDictionary(group => group.Key, group => group.ToList());
-        var existingByAmount = existingList
-            .GroupBy(row => row.Cents)
-            .ToDictionary(group => group.Key, group => group.ToList());
+        var existingByIdentity = existingList.GroupBy(row => row.IdentityKey).ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+        var existingByStable = existingList.Where(row => row.Namespace is not null && row.Value is not null).GroupBy(row => (row.Namespace!, row.Value!)).ToDictionary(group => group.Key, group => group.ToList());
+        var existingByAmount = existingList.GroupBy(row => row.Cents).ToDictionary(group => group.Key, group => group.ToList());
 
-        var snapshots = parsedRows
-            .Select(row => new MutableSnapshot(row))
-            .ToArray();
-        var comparisons = 0;
+        var snapshots = parsedRows.Select(row => new MutableSnapshot(row)).ToArray();
+        int comparisons = 0;
 
         foreach (var group in incoming.GroupBy(row => row.IdentityKey, StringComparer.Ordinal))
         {
             var incomingGroup = group.OrderBy(row => row.SourceRowNumber).ThenBy(row => row.RowId).ToList();
             var firstIncoming = incomingGroup[0];
-            if (incomingGroup.Any(row => row.Date != firstIncoming.Date ||
-                                         row.Cents != firstIncoming.Cents ||
-                                         row.NormalizedDescription != firstIncoming.NormalizedDescription))
+            if (incomingGroup.Any(row => row.Date != firstIncoming.Date || row.Cents != firstIncoming.Cents || row.NormalizedDescription != firstIncoming.NormalizedDescription))
             {
                 throw new ImportStoreException(ImportErrorCodes.IdentityConflict);
             }
-            var groupDecisions = incomingGroup
-                .Select(row => decisions?.GetValueOrDefault(row.RowId) ?? new RowDecision(false, false))
-                .ToArray();
-            var nonSkipped = incomingGroup
-                .Where((_, index) => !groupDecisions[index].Skip)
-                .ToList();
-            var matchable = incomingGroup
-                .Where((_, index) => !groupDecisions[index].Skip && !groupDecisions[index].Override)
-                .ToList();
+            var groupDecisions = incomingGroup.Select(row => decisions?.GetValueOrDefault(row.RowId) ?? new RowDecision(false, false)).ToArray();
+            var nonSkipped = incomingGroup.Where((_, index) => !groupDecisions[index].Skip).ToList();
+            var matchable = incomingGroup.Where((_, index) => !groupDecisions[index].Skip && !groupDecisions[index].Override).ToList();
             var existingGroup = existingByIdentity.GetValueOrDefault(group.Key) ?? [];
-            var withinFile = nonSkipped.Count > 1;
+            bool withinFile = nonSkipped.Count > 1;
             var pairs = MatchOccurrences(matchable, existingGroup, cancellationToken);
             foreach (var pair in pairs)
             {
-                if (pair.Incoming.Date != pair.Existing.Date ||
-                    pair.Incoming.Cents != pair.Existing.Cents ||
-                    pair.Incoming.NormalizedDescription != pair.Existing.NormalizedDescription)
+                if (pair.Incoming.Date != pair.Existing.Date || pair.Incoming.Cents != pair.Existing.Cents || pair.Incoming.NormalizedDescription != pair.Existing.NormalizedDescription)
                 {
                     throw new ImportStoreException(ImportErrorCodes.IdentityConflict);
                 }
@@ -1059,27 +955,22 @@ public sealed class StatementImportStore
                 {
                     continue;
                 }
+
                 if (!existingByStable.TryGetValue((incomingRow.Namespace, incomingRow.Value), out var stableMatches))
                 {
                     continue;
                 }
+
                 foreach (var match in stableMatches)
                 {
                     if (match.IdentityKey == incomingRow.IdentityKey)
                     {
                         continue;
                     }
+
                     var snapshot = snapshots[incomingRow.Index];
                     snapshot.Reasons.Add("stable_id_changed");
-                    snapshot.NearCandidates.Add(new Candidate(
-                        match.Id.ToString(),
-                        "existing",
-                        match.StatementImportId.ToString(),
-                        match.Date,
-                        match.Cents,
-                        match.Description,
-                        0,
-                        ["stable_id_changed"]));
+                    snapshot.NearCandidates.Add(new Candidate(match.Id.ToString(), "existing", match.StatementImportId.ToString(), match.Date, match.Cents, match.Description, 0, ["stable_id_changed"]));
                 }
             }
         }
@@ -1094,35 +985,25 @@ public sealed class StatementImportStore
             {
                 foreach (var candidate in sameAmount)
                 {
-                    if (Math.Abs(candidate.Date.DayNumber - incomingRow.Date.DayNumber) > 3 ||
-                        candidate.IdentityKey == incomingRow.IdentityKey)
+                    if (Math.Abs(candidate.Date.DayNumber - incomingRow.Date.DayNumber) > 3 || candidate.IdentityKey == incomingRow.IdentityKey)
                     {
                         continue;
                     }
+
                     if (++comparisons > 250_000)
                     {
                         throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
                     }
-                    var similarity = Jaccard(incomingRow.NormalizedDescription, candidate.NormalizedDescription);
+                    double similarity = Jaccard(incomingRow.NormalizedDescription, candidate.NormalizedDescription);
                     if (similarity >= 0.5)
                     {
-                        snapshots[incomingRow.Index].NearCandidates.Add(new Candidate(
-                            candidate.Id.ToString(),
-                            "existing",
-                            candidate.StatementImportId.ToString(),
-                            candidate.Date,
-                            candidate.Cents,
-                            candidate.Description,
-                            similarity,
-                            ["near_match"]));
+                        snapshots[incomingRow.Index].NearCandidates.Add(new Candidate(candidate.Id.ToString(), "existing", candidate.StatementImportId.ToString(), candidate.Date, candidate.Cents, candidate.Description, similarity, ["near_match"]));
                     }
                 }
             }
         }
 
-        var incomingByAmount = incoming
-            .GroupBy(row => row.Cents)
-            .ToDictionary(group => group.Key, group => group.ToList());
+        var incomingByAmount = incoming.GroupBy(row => row.Cents).ToDictionary(group => group.Key, group => group.ToList());
         foreach (var first in incoming)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -1130,29 +1011,26 @@ public sealed class StatementImportStore
             {
                 continue;
             }
+
             foreach (var second in sameAmount)
             {
-                if (second.Index <= first.Index ||
-                    first.IdentityKey == second.IdentityKey ||
-                    Math.Abs(first.Date.DayNumber - second.Date.DayNumber) > 3)
+                if (second.Index <= first.Index || first.IdentityKey == second.IdentityKey || Math.Abs(first.Date.DayNumber - second.Date.DayNumber) > 3)
                 {
                     continue;
                 }
+
                 if (++comparisons > 250_000)
                 {
                     throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
                 }
-                var similarity = Jaccard(first.NormalizedDescription, second.NormalizedDescription);
+                double similarity = Jaccard(first.NormalizedDescription, second.NormalizedDescription);
                 if (similarity < 0.5)
                 {
                     continue;
                 }
-                snapshots[first.Index].NearCandidates.Add(new Candidate(
-                    second.RowId.ToString(), "review", null, second.Date, second.Cents,
-                    second.Description, similarity, ["near_match"]));
-                snapshots[second.Index].NearCandidates.Add(new Candidate(
-                    first.RowId.ToString(), "review", null, first.Date, first.Cents,
-                    first.Description, similarity, ["near_match"]));
+
+                snapshots[first.Index].NearCandidates.Add(new Candidate(second.RowId.ToString(), "review", null, second.Date, second.Cents, second.Description, similarity, ["near_match"]));
+                snapshots[second.Index].NearCandidates.Add(new Candidate(first.RowId.ToString(), "review", null, first.Date, first.Cents, first.Description, similarity, ["near_match"]));
             }
         }
 
@@ -1164,8 +1042,7 @@ public sealed class StatementImportStore
             }
         }
 
-        var activeTags = await LoadActiveTagsAsync(
-            connection, transaction, customerId, cancellationToken);
+        var activeTags = await LoadActiveTagsAsync(connection, transaction, customerId, cancellationToken);
         foreach (var snapshot in snapshots)
         {
             foreach (var tagId in TagSuggestions.Match(snapshot.Row.NormalizedDescription, activeTags))
@@ -1224,13 +1101,13 @@ public sealed class StatementImportStore
         return new DuplicateSnapshot(rows);
     }
 
-    private static IncomingRow? ToIncoming(ParsedStatementRow row,
-                                           int index)
+    private static IncomingRow? ToIncoming(ParsedStatementRow row, int index)
     {
         if (row.TransactionDate is null || row.AmountCents is null)
         {
             return null;
         }
+
         return new IncomingRow(
             index,
             row.RowId,
@@ -1260,21 +1137,17 @@ public sealed class StatementImportStore
         row.SourceIdNamespace,
         row.SourceIdValue);
 
-    private static List<(IncomingRow Incoming, ExistingRow Existing)> MatchOccurrences(IReadOnlyList<IncomingRow> incoming,
-                                                                                       IReadOnlyList<ExistingRow> existing,
-                                                                                       CancellationToken cancellationToken)
+    private static List<(IncomingRow Incoming, ExistingRow Existing)> MatchOccurrences(IReadOnlyList<IncomingRow> incoming, IReadOnlyList<ExistingRow> existing, CancellationToken cancellationToken)
     {
         if (incoming.Count == 0 || existing.Count == 0)
         {
             return [];
         }
-        if (incoming.All(row => row.Namespace is null) &&
-            existing.All(row => row.Namespace is null))
+
+        if (incoming.All(row => row.Namespace is null) && existing.All(row => row.Namespace is null))
         {
-            var count = Math.Min(incoming.Count, existing.Count);
-            return Enumerable.Range(0, count)
-                .Select(index => (incoming[index], existing[index]))
-                .ToList();
+            int count = Math.Min(incoming.Count, existing.Count);
+            return Enumerable.Range(0, count).Select(index => (incoming[index], existing[index])).ToList();
         }
 
         var remainingIncoming = incoming.ToList();
@@ -1288,98 +1161,80 @@ public sealed class StatementImportStore
             {
                 throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
             }
-            var adjacency = remainingIncoming
-                .Select(row => remainingExisting
-                    .Select((candidate, index) => (candidate, index))
-                    .Where(pair => eligible(row, pair.candidate))
-                    .Select(pair => pair.index)
-                    .ToList())
-                .ToList();
-            var product = adjacency.Sum(list => list.Count);
+            var adjacency = remainingIncoming.Select(row => remainingExisting.Select((candidate, index) => (candidate, index)).Where(pair => eligible(row, pair.candidate)).Select(pair => pair.index).ToList()).ToList();
+            int product = adjacency.Sum(list => list.Count);
             if (product > 5_000_000)
             {
                 throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
             }
-            var matchExisting = Enumerable.Repeat(-1, remainingExisting.Count).ToArray();
-            bool TryMatch(int incomingIndex,
-                          bool[] seen)
+            int[] matchExisting = Enumerable.Repeat(-1, remainingExisting.Count).ToArray();
+            bool TryMatch(int incomingIndex, bool[] seen)
             {
-                foreach (var existingIndex in adjacency[incomingIndex])
+                foreach (int existingIndex in adjacency[incomingIndex])
                 {
                     if (seen[existingIndex])
                     {
                         continue;
                     }
+
                     seen[existingIndex] = true;
-                    if (matchExisting[existingIndex] == -1 ||
-                        TryMatch(matchExisting[existingIndex], seen))
+                    if (matchExisting[existingIndex] == -1 || TryMatch(matchExisting[existingIndex], seen))
                     {
                         matchExisting[existingIndex] = incomingIndex;
                         return true;
                     }
                 }
+
                 return false;
             }
 
-            for (var index = 0; index < remainingIncoming.Count; index++)
+            for (int index = 0; index < remainingIncoming.Count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _ = TryMatch(index, new bool[remainingExisting.Count]);
             }
 
             var matchedIncoming = new HashSet<int>();
-            for (var existingIndex = 0; existingIndex < matchExisting.Length; existingIndex++)
+            for (int existingIndex = 0; existingIndex < matchExisting.Length; existingIndex++)
             {
-                var incomingIndex = matchExisting[existingIndex];
+                int incomingIndex = matchExisting[existingIndex];
                 if (incomingIndex < 0)
                 {
                     continue;
                 }
+
                 matched.Add((remainingIncoming[incomingIndex], remainingExisting[existingIndex]));
                 matchedIncoming.Add(incomingIndex);
             }
-            remainingIncoming = remainingIncoming
-                .Where((_, index) => !matchedIncoming.Contains(index))
-                .ToList();
-            var matchedExisting = matchExisting
-                .Select((incomingIndex, index) => (incomingIndex, index))
-                .Where(pair => pair.incomingIndex >= 0)
-                .Select(pair => pair.index)
-                .ToHashSet();
-            remainingExisting = remainingExisting
-                .Where((_, index) => !matchedExisting.Contains(index))
-                .ToList();
+            remainingIncoming = remainingIncoming.Where((_, index) => !matchedIncoming.Contains(index)).ToList();
+            var matchedExisting = matchExisting.Select((incomingIndex, index) => (incomingIndex, index)).Where(pair => pair.incomingIndex >= 0).Select(pair => pair.index).ToHashSet();
+            remainingExisting = remainingExisting.Where((_, index) => !matchedExisting.Contains(index)).ToList();
         }
 
-        RunStage((row, candidate) =>
-            row.Namespace is not null &&
-            candidate.Namespace == row.Namespace &&
-            candidate.Value == row.Value);
-        RunStage((row, candidate) =>
-            row.Namespace is not null &&
-            (candidate.Namespace is null ||
-             candidate.Namespace != row.Namespace ||
-             candidate.Value == row.Value));
+        RunStage((row, candidate) => row.Namespace is not null && candidate.Namespace == row.Namespace && candidate.Value == row.Value);
+        RunStage((row, candidate) => row.Namespace is not null && (candidate.Namespace is null || candidate.Namespace != row.Namespace || candidate.Value == row.Value));
         RunStage((row, _) => row.Namespace is null);
 
         return matched;
     }
 
-    private static double Jaccard(string left,
-                                  string right)
+    private static double Jaccard(string left, string right)
     {
         if (left.Length == 0 && right.Length == 0)
         {
             return 1;
         }
+
         if (left.Length == 0 || right.Length == 0)
         {
             return 0;
         }
+
         var leftTokens = left.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
         var rightTokens = right.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
-        var intersection = leftTokens.Count(token => rightTokens.Contains(token));
-        var union = leftTokens.Count + rightTokens.Count - intersection;
+        int intersection = leftTokens.Count(token => rightTokens.Contains(token));
+        int union = leftTokens.Count + rightTokens.Count - intersection;
+
         return union == 0 ? 0 : (double)intersection / union;
     }
 
@@ -1403,14 +1258,8 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("account_id", accountId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        return await reader.ReadAsync(cancellationToken)
-            ? new ImportAccountRecord(
-                reader.GetGuid(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetBoolean(3),
-                reader.GetInt64(4))
-            : null;
+
+        return await reader.ReadAsync(cancellationToken) ? new ImportAccountRecord(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetBoolean(3), reader.GetInt64(4)) : null;
     }
 
     private static async Task<ImportAccountRecord> LockAccountAsync(NpgsqlConnection connection,
@@ -1420,6 +1269,7 @@ public sealed class StatementImportStore
                                                                     CancellationToken cancellationToken)
     {
         var account = await GetAccountAsync(connection, transaction, customerId, accountId, true, cancellationToken);
+
         return account ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
     }
 
@@ -1431,15 +1281,13 @@ public sealed class StatementImportStore
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
-            insert.CommandText =
-                "INSERT INTO import_quota_locks (customer_id) VALUES (@customer_id) ON CONFLICT DO NOTHING";
+            insert.CommandText = "INSERT INTO import_quota_locks (customer_id) VALUES (@customer_id) ON CONFLICT DO NOTHING";
             insert.Parameters.AddWithValue("customer_id", customerId);
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText =
-            "SELECT 1 FROM import_quota_locks WHERE customer_id = @customer_id FOR UPDATE";
+        command.CommandText = "SELECT 1 FROM import_quota_locks WHERE customer_id = @customer_id FOR UPDATE";
         command.Parameters.AddWithValue("customer_id", customerId);
         await command.ExecuteScalarAsync(cancellationToken);
     }
@@ -1460,13 +1308,13 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("customer_id", customerId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         await reader.ReadAsync(cancellationToken);
-        var open = reader.GetInt64(0);
-        var used = reader.GetInt64(1);
-        if (open >= ImportLimits.MaxOpenReviewsPerCustomer ||
-            used + payloadBytes > ImportLimits.MaxOpenReviewPayloadBytes)
+        long open = reader.GetInt64(0);
+        long used = reader.GetInt64(1);
+        if (open >= ImportLimits.MaxOpenReviewsPerCustomer || used + payloadBytes > ImportLimits.MaxOpenReviewPayloadBytes)
         {
             throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
         }
+
         return used;
     }
 
@@ -1478,10 +1326,10 @@ public sealed class StatementImportStore
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText =
-            "SELECT financial_account_id FROM import_reviews WHERE customer_id = @customer_id AND id = @id";
+        command.CommandText = "SELECT financial_account_id FROM import_reviews WHERE customer_id = @customer_id AND id = @id";
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("id", reviewId);
+
         return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
     }
 
@@ -1516,6 +1364,7 @@ public sealed class StatementImportStore
         {
             return null;
         }
+
         return new ImportReviewSummaryRecord(
             reader.GetGuid(0),
             reader.GetGuid(1),
@@ -1600,6 +1449,7 @@ public sealed class StatementImportStore
                 JsonSerializer.Deserialize<Guid[]>(reader.GetString(23), _storageJson) ?? [],
                 JsonSerializer.Deserialize<Guid[]>(reader.GetString(24), _storageJson) ?? []));
         }
+
         return rows;
     }
 
@@ -1612,6 +1462,7 @@ public sealed class StatementImportStore
         command.Transaction = transaction;
         command.CommandText = "SELECT COUNT(*) FROM import_review_rows WHERE review_id = @review_id";
         command.Parameters.AddWithValue("review_id", reviewId);
+
         return (int)(long)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
@@ -1657,8 +1508,7 @@ public sealed class StatementImportStore
             insert.Parameters.AddWithValue("customer_id", customerId);
             insert.Parameters.AddWithValue("financial_account_id", accountId);
             insert.Parameters.AddWithValue("source_kind", sourceKind);
-            insert.Parameters.AddWithValue("parser_config", NpgsqlDbType.Jsonb,
-                JsonSerializer.Serialize(config, _storageJson));
+            insert.Parameters.AddWithValue("parser_config", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(config, _storageJson));
             insert.Parameters.AddWithValue("start_date", startDate);
             insert.Parameters.AddWithValue("end_date", endDate);
             insert.Parameters.AddWithValue("expires_at", expiresAt);
@@ -1818,8 +1668,7 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("skip", skip);
         command.Parameters.AddWithValue("override", overrideValue);
         command.Parameters.AddWithValue("within_file_state", withinFileState);
-        command.Parameters.AddWithValue("selected_tag_ids", NpgsqlDbType.Jsonb,
-            JsonSerializer.Serialize(selectedTagIds, _storageJson));
+        command.Parameters.AddWithValue("selected_tag_ids", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(selectedTagIds, _storageJson));
         command.Parameters.AddWithValue("row_id", rowId);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -1847,22 +1696,15 @@ public sealed class StatementImportStore
             WHERE row_id = @row_id
             """;
         command.Parameters.AddWithValue("duplicate_state", row.DuplicateState);
-        command.Parameters.AddWithValue("duplicate_reasons", NpgsqlDbType.Jsonb,
-            JsonSerializer.Serialize(row.DuplicateReasons, _storageJson));
-        command.Parameters.AddWithValue("matching_transaction_ids", NpgsqlDbType.Jsonb,
-            JsonSerializer.Serialize(row.MatchingTransactionIds, _storageJson));
-        command.Parameters.AddWithValue("matching_import_ids", NpgsqlDbType.Jsonb,
-            JsonSerializer.Serialize(row.MatchingImportIds, _storageJson));
-        command.Parameters.AddWithValue("near_candidates", NpgsqlDbType.Jsonb,
-            JsonSerializer.Serialize(row.NearCandidates, _storageJson));
+        command.Parameters.AddWithValue("duplicate_reasons", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(row.DuplicateReasons, _storageJson));
+        command.Parameters.AddWithValue("matching_transaction_ids", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(row.MatchingTransactionIds, _storageJson));
+        command.Parameters.AddWithValue("matching_import_ids", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(row.MatchingImportIds, _storageJson));
+        command.Parameters.AddWithValue("near_candidates", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(row.NearCandidates, _storageJson));
         command.Parameters.AddWithValue("near_candidate_total", row.NearCandidateTotal);
-        command.Parameters.AddWithValue("within_file_group",
-            NpgsqlDbType.Text, (object?)row.WithinFileGroup ?? DBNull.Value);
+        command.Parameters.AddWithValue("within_file_group", NpgsqlDbType.Text, (object?)row.WithinFileGroup ?? DBNull.Value);
         command.Parameters.AddWithValue("within_file_state", row.WithinFileState);
         command.Parameters.AddWithValue("override", row.Override);
-        command.Parameters.AddWithValue(
-            "suggested_tag_ids", NpgsqlDbType.Jsonb,
-            JsonSerializer.Serialize(row.SuggestedTagIds, _storageJson));
+        command.Parameters.AddWithValue("suggested_tag_ids", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(row.SuggestedTagIds, _storageJson));
         command.Parameters.AddWithValue("row_id", row.RowId);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -1887,6 +1729,7 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("review_id", reviewId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         await reader.ReadAsync(cancellationToken);
+
         return (reader.GetInt64(0), reader.GetInt64(1));
     }
 
@@ -1941,8 +1784,7 @@ public sealed class StatementImportStore
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText =
-            "UPDATE import_reviews SET account_import_version = @version WHERE id = @id";
+        command.CommandText = "UPDATE import_reviews SET account_import_version = @version WHERE id = @id";
         command.Parameters.AddWithValue("version", accountImportVersion);
         command.Parameters.AddWithValue("id", reviewId);
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -1990,11 +1832,11 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
         }
+
         return rows;
     }
 
-    private static void EnsureEditable(ImportReviewSummaryRecord summary,
-                                       int expectedVersion)
+    private static void EnsureEditable(ImportReviewSummaryRecord summary, int expectedVersion)
     {
         if (summary.Status == "Expired" || summary.ExpiresAt <= DateTime.UtcNow)
         {
@@ -2012,17 +1854,18 @@ public sealed class StatementImportStore
 
     private static RowCounts CountRows(IReadOnlyList<ImportReviewRowRecord> rows)
     {
-        var imported = 0;
-        var suppressed = 0;
-        var possibleDuplicates = 0;
-        var exactOverrides = 0;
+        int imported = 0;
+        int suppressed = 0;
+        int possibleDuplicates = 0;
+        int exactOverrides = 0;
         foreach (var row in rows)
         {
-            var isSuppressed = row.DuplicateState is "suppressed" or "suppressed_within_file";
+            bool isSuppressed = row.DuplicateState is "suppressed" or "suppressed_within_file";
             if (row.Skip)
             {
                 continue;
             }
+
             if (isSuppressed && !row.Override)
             {
                 suppressed++;
@@ -2041,8 +1884,9 @@ public sealed class StatementImportStore
                 possibleDuplicates++;
             }
         }
-        var total = rows.Count;
-        var skipped = total - imported - suppressed;
+        int total = rows.Count;
+        int skipped = total - imported - suppressed;
+
         return new RowCounts(total, imported, suppressed, skipped, possibleDuplicates, exactOverrides);
     }
 
@@ -2055,7 +1899,7 @@ public sealed class StatementImportStore
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         void Add(string value)
         {
-            var bytes = Encoding.UTF8.GetBytes(value);
+            byte[] bytes = Encoding.UTF8.GetBytes(value);
             Span<byte> length = stackalloc byte[4];
             System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(length, bytes.Length);
             hash.AppendData(length);
@@ -2082,12 +1926,11 @@ public sealed class StatementImportStore
             Add(string.Join(',', row.DuplicateReasons.Order(StringComparer.Ordinal)));
             Add(string.Join(',', row.SelectedTagIds.Order()));
         }
+
         return Convert.ToHexStringLower(hash.GetHashAndReset());
     }
 
-    private static long EstimatePayload(ParsedStatement parsed,
-                                        ParserConfig config,
-                                        IReadOnlyList<ImportReviewRowRecord>? rows = null)
+    private static long EstimatePayload(ParsedStatement parsed, ParserConfig config, IReadOnlyList<ImportReviewRowRecord>? rows = null)
     {
         long bytes = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(config, _storageJson));
         foreach (var row in parsed.Rows)
@@ -2102,6 +1945,7 @@ public sealed class StatementImportStore
         {
             bytes += Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(rows, _storageJson));
         }
+
         return bytes;
     }
 
@@ -2122,7 +1966,7 @@ public sealed class StatementImportStore
         }
 
         await _financeStore.EnsureCategoriesSeededAsync(customerId, cancellationToken);
-        var requestDigest = Digest($"commit-v1|{expectedVersion}|{confirmedSummaryHash}");
+        string requestDigest = Digest($"commit-v1|{expectedVersion}|{confirmedSummaryHash}");
 
         await using var connection = await _db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -2134,33 +1978,26 @@ public sealed class StatementImportStore
             connection, transaction, customerId, reviewId, cancellationToken);
         if (receiptAccountId is not null)
         {
-            _ = await LockAccountAsync(
-                connection, transaction, customerId, receiptAccountId.Value, cancellationToken);
-            var replay = await ReplayReceiptAsync(
-                connection, transaction, customerId, reviewId, requestDigest, cancellationToken);
+            _ = await LockAccountAsync(connection, transaction, customerId, receiptAccountId.Value, cancellationToken);
+            var replay = await ReplayReceiptAsync(connection, transaction, customerId, reviewId, requestDigest, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return replay;
         }
 
-        var accountId = await ReviewAccountIdAsync(
-            connection, transaction, customerId, reviewId, cancellationToken);
+        var accountId = await ReviewAccountIdAsync(connection, transaction, customerId, reviewId, cancellationToken);
         if (accountId is null)
         {
-            var lateReceiptAccount = await ReceiptAccountIdAsync(
-                connection, transaction, customerId, reviewId, cancellationToken);
+            var lateReceiptAccount = await ReceiptAccountIdAsync(connection, transaction, customerId, reviewId, cancellationToken);
             if (lateReceiptAccount is not null)
             {
-                _ = await LockAccountAsync(
-                    connection, transaction, customerId, lateReceiptAccount.Value, cancellationToken);
-                var replay = await ReplayReceiptAsync(
-                    connection, transaction, customerId, reviewId, requestDigest, cancellationToken);
+                _ = await LockAccountAsync(connection, transaction, customerId, lateReceiptAccount.Value, cancellationToken);
+                var replay = await ReplayReceiptAsync(connection, transaction, customerId, reviewId, requestDigest, cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
                 return replay;
             }
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
-        var account = await LockAccountAsync(
-            connection, transaction, customerId, accountId.Value, cancellationToken);
+        var account = await LockAccountAsync(connection, transaction, customerId, accountId.Value, cancellationToken);
 
         // Re-check under the account lock in case a receipt appeared while this
         // request waited for the account.
@@ -2168,14 +2005,12 @@ public sealed class StatementImportStore
             connection, transaction, customerId, reviewId, false, cancellationToken);
         if (racedReceipt is not null)
         {
-            var replay = await ReplayReceiptAsync(
-                connection, transaction, customerId, reviewId, requestDigest, cancellationToken);
+            var replay = await ReplayReceiptAsync(connection, transaction, customerId, reviewId, requestDigest, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return replay;
         }
 
-        var review = await ReadReviewHeaderAsync(
-            connection, transaction, customerId, reviewId, true, cancellationToken);
+        var review = await ReadReviewHeaderAsync(connection, transaction, customerId, reviewId, true, cancellationToken);
         if (review is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
@@ -2206,8 +2041,7 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
 
-        var rows = await ReadReviewRowsAsync(
-            connection, transaction, reviewId, 1, int.MaxValue, cancellationToken);
+        var rows = await ReadReviewRowsAsync(connection, transaction, reviewId, 1, int.MaxValue, cancellationToken);
         if (rows.Any(row => row.ValidationCodes.Length > 0 && !row.Skip))
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRows);
@@ -2220,16 +2054,12 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
-        var validRows = rows
-            .Where(row => row.TransactionDate is not null && row.AmountCents is not null)
-            .ToList();
+        var validRows = rows.Where(row => row.TransactionDate is not null && row.AmountCents is not null).ToList();
         if (validRows.Count == 0 || validRows.All(row => row.Skip))
         {
             throw new ImportStoreException(ImportErrorCodes.NoIncludedRows);
         }
-        var included = rows
-            .Where(row => !row.Skip && (row.DuplicateState is not ("suppressed" or "suppressed_within_file") || row.Override))
-            .ToList();
+        var included = rows.Where(row => !row.Skip && (row.DuplicateState is not ("suppressed" or "suppressed_within_file") || row.Override)).ToList();
         if (included.Any(row => row.TransactionDate is null || row.AmountCents is null))
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRows);
@@ -2246,40 +2076,30 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.VersionConflict);
         }
 
-        var categoryId = await FindSystemCategoryAsync(
-            connection, transaction, customerId, cancellationToken);
+        var categoryId = await FindSystemCategoryAsync(connection, transaction, customerId, cancellationToken);
         if (categoryId is null)
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
 
-        var tagIds = included
-            .SelectMany(row => row.SelectedTagIds)
-            .Distinct()
-            .OrderBy(id => id)
-            .ToArray();
-        if (tagIds.Length > 0 && !await TagsAvailableAsync(
-                connection, transaction, customerId, tagIds, cancellationToken))
+        var tagIds = included.SelectMany(row => row.SelectedTagIds).Distinct().OrderBy(id => id).ToArray();
+        if (tagIds.Length > 0 && !await TagsAvailableAsync(connection, transaction, customerId, tagIds, cancellationToken))
         {
             throw new ImportStoreException(ImportErrorCodes.TagUnavailable);
         }
         _faults.OnStep("tags_validated");
         await ThrowIfCommitExpiredAsync(connection, transaction, review.ExpiresAt, cancellationToken);
 
-        var fingerprintMatches = await FingerprintMatchesAsync(
-            connection, transaction, customerId, accountId.Value,
-            review.StatementFingerprint, cancellationToken);
+        var fingerprintMatches = await FingerprintMatchesAsync(connection, transaction, customerId, accountId.Value, review.StatementFingerprint, cancellationToken);
         if (fingerprintMatches.Count > 0 && !review.StatementOverride)
         {
             throw new StatementRepeatException(fingerprintMatches);
         }
-        var fingerprintOccurrence = await NextFingerprintOccurrenceAsync(
-            connection, transaction, customerId, accountId.Value,
-            review.StatementFingerprint, cancellationToken);
+        int fingerprintOccurrence = await NextFingerprintOccurrenceAsync(connection, transaction, customerId, accountId.Value, review.StatementFingerprint, cancellationToken);
 
         var statementId = Guid.NewGuid();
-        var label = BuildStatementLabel(review);
-        var overrideSummary = JsonSerializer.Serialize(new
+        string label = BuildStatementLabel(review);
+        string overrideSummary = JsonSerializer.Serialize(new
         {
             exact_row_ids = rows
                 .Where(row => row.DuplicateState is "suppressed" or "suppressed_within_file")
@@ -2325,28 +2145,19 @@ public sealed class StatementImportStore
             insertStatement.Parameters.AddWithValue("suppressed_count", counts.Suppressed);
             insertStatement.Parameters.AddWithValue("skipped_count", counts.Skipped);
             insertStatement.Parameters.AddWithValue("fingerprint_occurrence", fingerprintOccurrence);
-            insertStatement.Parameters.AddWithValue(
-                "duplicate_policy_version", ImportLimits.DuplicatePolicyVersion);
-            insertStatement.Parameters.AddWithValue(
-                "possible_duplicate_count", counts.PossibleDuplicates);
+            insertStatement.Parameters.AddWithValue("duplicate_policy_version", ImportLimits.DuplicatePolicyVersion);
+            insertStatement.Parameters.AddWithValue("possible_duplicate_count", counts.PossibleDuplicates);
             insertStatement.Parameters.AddWithValue("exact_override_count", counts.ExactOverrides);
-            insertStatement.Parameters.AddWithValue(
-                "statement_override_count", review.StatementOverride ? 1 : 0);
-            insertStatement.Parameters.AddWithValue(
-                "override_summary", NpgsqlDbType.Jsonb, overrideSummary);
+            insertStatement.Parameters.AddWithValue("statement_override_count", review.StatementOverride ? 1 : 0);
+            insertStatement.Parameters.AddWithValue("override_summary", NpgsqlDbType.Jsonb, overrideSummary);
             insertStatement.Parameters.AddWithValue("created_at", createdAt);
             await insertStatement.ExecuteNonQueryAsync(cancellationToken);
         }
         _faults.OnStep("statement_inserted");
 
-        var identityKeys = included
-            .Select(ComputeIdentityKey)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-        var maxOccurrences = await MaxOccurrencesAsync(
-            connection, transaction, customerId, accountId.Value, identityKeys, cancellationToken);
-        var nextOccurrence = maxOccurrences.ToDictionary(
-            pair => pair.Key, pair => pair.Value + 1, StringComparer.Ordinal);
+        string[] identityKeys = included.Select(ComputeIdentityKey).Distinct(StringComparer.Ordinal).ToArray();
+        var maxOccurrences = await MaxOccurrencesAsync(connection, transaction, customerId, accountId.Value, identityKeys, cancellationToken);
+        var nextOccurrence = maxOccurrences.ToDictionary(pair => pair.Key, pair => pair.Value + 1, StringComparer.Ordinal);
         var transactionTags = new List<(Guid TransactionId, Guid[] TagIds)>(included.Count);
         await using (var copy = await connection.BeginBinaryImportAsync(
             "COPY transactions (" +
@@ -2358,8 +2169,8 @@ public sealed class StatementImportStore
         {
             foreach (var row in included)
             {
-                var identityKey = ComputeIdentityKey(row);
-                var occurrence = nextOccurrence.GetValueOrDefault(identityKey, 1);
+                string identityKey = ComputeIdentityKey(row);
+                int occurrence = nextOccurrence.GetValueOrDefault(identityKey, 1);
                 nextOccurrence[identityKey] = occurrence + 1;
                 var transactionId = Guid.NewGuid();
                 transactionTags.Add((transactionId, row.SelectedTagIds));
@@ -2411,14 +2222,10 @@ public sealed class StatementImportStore
         }
         _faults.OnStep("transactions_inserted");
 
-        var links = transactionTags
-            .SelectMany(pair => pair.TagIds.Select(tagId => (pair.TransactionId, TagId: tagId)))
-            .ToArray();
+        var links = transactionTags.SelectMany(pair => pair.TagIds.Select(tagId => (pair.TransactionId, TagId: tagId))).ToArray();
         if (links.Length > 0)
         {
-            await using var copy = await connection.BeginBinaryImportAsync(
-                "COPY transaction_merchant_tags (customer_id, transaction_id, merchant_tag_id, assigned_at) " +
-                "FROM STDIN (FORMAT BINARY)", cancellationToken);
+            await using var copy = await connection.BeginBinaryImportAsync("COPY transaction_merchant_tags (customer_id, transaction_id, merchant_tag_id, assigned_at) " + "FROM STDIN (FORMAT BINARY)", cancellationToken);
             foreach (var (transactionId, tagId) in links)
             {
                 await copy.StartRowAsync(cancellationToken);
@@ -2431,7 +2238,7 @@ public sealed class StatementImportStore
         }
         _faults.OnStep("tag_links_inserted");
 
-        var resultJson = JsonSerializer.Serialize(new
+        string resultJson = JsonSerializer.Serialize(new
         {
             statement_import_id = statementId,
             total_rows = counts.TotalRows,
@@ -2470,8 +2277,7 @@ public sealed class StatementImportStore
         await using (var bump = connection.CreateCommand())
         {
             bump.Transaction = transaction;
-            bump.CommandText =
-                "UPDATE financial_accounts SET import_version = import_version + 1, updated_at = NOW() WHERE customer_id = @customer_id AND id = @id";
+            bump.CommandText = "UPDATE financial_accounts SET import_version = import_version + 1, updated_at = NOW() WHERE customer_id = @customer_id AND id = @id";
             bump.Parameters.AddWithValue("customer_id", customerId);
             bump.Parameters.AddWithValue("id", accountId.Value);
             await bump.ExecuteNonQueryAsync(cancellationToken);
@@ -2487,13 +2293,12 @@ public sealed class StatementImportStore
             await purge.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        var summary = await ReadStatementSummaryAsync(
-            connection, transaction, customerId, statementId, cancellationToken)
-            ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
+        var summary = await ReadStatementSummaryAsync(connection, transaction, customerId, statementId, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
         _faults.OnStep("before_commit");
         await ThrowIfCommitExpiredAsync(connection, transaction, review.ExpiresAt, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         _faults.OnStep("after_commit_before_response");
+
         return new ImportCommitResult(summary, false);
     }
 
@@ -2519,9 +2324,7 @@ public sealed class StatementImportStore
                                                               string requestDigest,
                                                               CancellationToken cancellationToken)
     {
-        var receipt = await ReadReceiptAsync(
-            connection, transaction, customerId, reviewId, true, cancellationToken)
-            ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
+        var receipt = await ReadReceiptAsync(connection, transaction, customerId, reviewId, true, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
         if (receipt.State == "Deleted")
         {
             throw new ImportStoreException(ImportErrorCodes.ImportDeleted);
@@ -2530,9 +2333,8 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.IdempotencyConflict);
         }
-        var summary = await ReadStatementSummaryAsync(
-            connection, transaction, customerId, receipt.StatementImportId!.Value, cancellationToken)
-            ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
+        var summary = await ReadStatementSummaryAsync(connection, transaction, customerId, receipt.StatementImportId!.Value, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
+
         return new ImportCommitResult(summary, true);
     }
 
@@ -2577,13 +2379,10 @@ public sealed class StatementImportStore
             LIMIT @limit_plus
             """;
         command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("account_id", NpgsqlDbType.Uuid,
-            (object?)accountId ?? DBNull.Value);
+        command.Parameters.AddWithValue("account_id", NpgsqlDbType.Uuid, (object?)accountId ?? DBNull.Value);
         command.Parameters.AddWithValue("state", state);
-        command.Parameters.AddWithValue("cursor_created", NpgsqlDbType.TimestampTz,
-            (object?)cursorCreated ?? DBNull.Value);
-        command.Parameters.AddWithValue("cursor_id", NpgsqlDbType.Uuid,
-            (object?)cursorId ?? DBNull.Value);
+        command.Parameters.AddWithValue("cursor_created", NpgsqlDbType.TimestampTz, (object?)cursorCreated ?? DBNull.Value);
+        command.Parameters.AddWithValue("cursor_id", NpgsqlDbType.Uuid, (object?)cursorId ?? DBNull.Value);
         command.Parameters.AddWithValue("limit_plus", limit + 1);
         var items = new List<ImportStatementSummary>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -2595,9 +2394,10 @@ public sealed class StatementImportStore
         {
             return new ImportHistoryPage(items, null);
         }
+
         items.RemoveAt(items.Count - 1);
-        return new ImportHistoryPage(
-            items, EncodeCursor(items[^1].CreatedAt, items[^1].Id));
+
+        return new ImportHistoryPage(items, EncodeCursor(items[^1].CreatedAt, items[^1].Id));
     }
 
     public async Task<ImportStatementDetail> GetStatementAsync(Guid customerId,
@@ -2617,13 +2417,11 @@ public sealed class StatementImportStore
 
         await using (var count = connection.CreateCommand())
         {
-            count.CommandText =
-                "SELECT COUNT(*) FROM transactions WHERE customer_id = @customer_id AND statement_import_id = @id";
+            count.CommandText = "SELECT COUNT(*) FROM transactions WHERE customer_id = @customer_id AND statement_import_id = @id";
             count.Parameters.AddWithValue("customer_id", customerId);
             count.Parameters.AddWithValue("id", statementId);
-            var expectedTransactionCount = (long)(await count.ExecuteScalarAsync(cancellationToken))!;
-            var rows = await ReadStatementRowsAsync(
-                connection, null, customerId, statementId, page, pageSize, cancellationToken);
+            long expectedTransactionCount = (long)(await count.ExecuteScalarAsync(cancellationToken))!;
+            var rows = await ReadStatementRowsAsync(connection, null, customerId, statementId, page, pageSize, cancellationToken);
             return new ImportStatementDetail(summary, rows, page, pageSize, expectedTransactionCount);
         }
     }
@@ -2642,15 +2440,13 @@ public sealed class StatementImportStore
         }
         await using var connection = await _db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        var accountId = await StatementAccountIdAsync(
-            connection, transaction, customerId, statementId, cancellationToken);
+        var accountId = await StatementAccountIdAsync(connection, transaction, customerId, statementId, cancellationToken);
         if (accountId is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
         await LockAccountAsync(connection, transaction, customerId, accountId.Value, cancellationToken);
-        var summary = await LockStatementAsync(
-            connection, transaction, customerId, statementId, cancellationToken);
+        var summary = await LockStatementAsync(connection, transaction, customerId, statementId, cancellationToken);
         if (summary is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
@@ -2659,8 +2455,7 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.VersionConflict);
         }
-        var count = await StatementTransactionCountAsync(
-            connection, transaction, customerId, statementId, cancellationToken);
+        long count = await StatementTransactionCountAsync(connection, transaction, customerId, statementId, cancellationToken);
         if (count != expectedTransactionCount)
         {
             throw new ImportStoreException(ImportErrorCodes.VersionConflict);
@@ -2698,10 +2493,9 @@ public sealed class StatementImportStore
             touch.Parameters.AddWithValue("id", statementId);
             await touch.ExecuteNonQueryAsync(cancellationToken);
         }
-        var updated = await ReadStatementSummaryAsync(
-            connection, transaction, customerId, statementId, cancellationToken)
-            ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
+        var updated = await ReadStatementSummaryAsync(connection, transaction, customerId, statementId, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
         await transaction.CommitAsync(cancellationToken);
+
         return updated;
     }
 
@@ -2716,28 +2510,22 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
-        var deletionDigest = Digest(
-            $"delete-v1|{expectedVersion}|{expectedTransactionCount}|true");
+        string deletionDigest = Digest($"delete-v1|{expectedVersion}|{expectedTransactionCount}|true");
 
         await using var connection = await _db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
-        var accountId = await StatementAccountIdAsync(
-            connection, transaction, customerId, statementId, cancellationToken);
+        var accountId = await StatementAccountIdAsync(connection, transaction, customerId, statementId, cancellationToken);
         if (accountId is not null)
         {
             await LockAccountAsync(connection, transaction, customerId, accountId.Value, cancellationToken);
         }
 
-        var statement = await LockStatementAsync(
-            connection, transaction, customerId, statementId, cancellationToken);
+        var statement = await LockStatementAsync(connection, transaction, customerId, statementId, cancellationToken);
         if (statement is null)
         {
-            var tombstone = await ReadDeletionReceiptAsync(
-                connection, transaction, customerId, statementId, cancellationToken);
-            if (tombstone is not null &&
-                tombstone.DeletionDigest == deletionDigest &&
-                tombstone.DeletionExpectedCount == expectedTransactionCount)
+            var tombstone = await ReadDeletionReceiptAsync(connection, transaction, customerId, statementId, cancellationToken);
+            if (tombstone is not null && tombstone.DeletionDigest == deletionDigest && tombstone.DeletionExpectedCount == expectedTransactionCount)
             {
                 await transaction.CommitAsync(cancellationToken);
                 return new ImportDeleteResult(true, expectedTransactionCount);
@@ -2748,8 +2536,7 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.VersionConflict);
         }
-        var count = await StatementTransactionCountAsync(
-            connection, transaction, customerId, statementId, cancellationToken);
+        long count = await StatementTransactionCountAsync(connection, transaction, customerId, statementId, cancellationToken);
         if (count != expectedTransactionCount)
         {
             throw new ImportStoreException(ImportErrorCodes.VersionConflict);
@@ -2758,8 +2545,7 @@ public sealed class StatementImportStore
         await using (var deleteTransactions = connection.CreateCommand())
         {
             deleteTransactions.Transaction = transaction;
-            deleteTransactions.CommandText =
-                "DELETE FROM transactions WHERE customer_id = @customer_id AND statement_import_id = @id";
+            deleteTransactions.CommandText = "DELETE FROM transactions WHERE customer_id = @customer_id AND statement_import_id = @id";
             deleteTransactions.Parameters.AddWithValue("customer_id", customerId);
             deleteTransactions.Parameters.AddWithValue("id", statementId);
             await deleteTransactions.ExecuteNonQueryAsync(cancellationToken);
@@ -2767,21 +2553,14 @@ public sealed class StatementImportStore
         await using (var deleteStatement = connection.CreateCommand())
         {
             deleteStatement.Transaction = transaction;
-            deleteStatement.CommandText =
-                "DELETE FROM statement_imports WHERE customer_id = @customer_id AND id = @id";
+            deleteStatement.CommandText = "DELETE FROM statement_imports WHERE customer_id = @customer_id AND id = @id";
             deleteStatement.Parameters.AddWithValue("customer_id", customerId);
             deleteStatement.Parameters.AddWithValue("id", statementId);
             await deleteStatement.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        var receipt = await ReadReceiptByStatementAsync(
-            connection, transaction, customerId, statementId, cancellationToken);
-        var resultJson = JsonSerializer.Serialize(new
-        {
-            statement_import_id = statementId,
-            deleted = true,
-            deleted_transaction_count = count,
-        }, _storageJson);
+        var receipt = await ReadReceiptByStatementAsync(connection, transaction, customerId, statementId, cancellationToken);
+        string resultJson = JsonSerializer.Serialize(new { statement_import_id = statementId, deleted = true, deleted_transaction_count = count, }, _storageJson);
         if (receipt is null)
         {
             await using var insert = connection.CreateCommand();
@@ -2831,14 +2610,14 @@ public sealed class StatementImportStore
         await using (var bump = connection.CreateCommand())
         {
             bump.Transaction = transaction;
-            bump.CommandText =
-                "UPDATE financial_accounts SET import_version = import_version + 1, updated_at = NOW() WHERE customer_id = @customer_id AND id = @id";
+            bump.CommandText = "UPDATE financial_accounts SET import_version = import_version + 1, updated_at = NOW() WHERE customer_id = @customer_id AND id = @id";
             bump.Parameters.AddWithValue("customer_id", customerId);
             bump.Parameters.AddWithValue("id", statement.FinancialAccountId);
             await bump.ExecuteNonQueryAsync(cancellationToken);
         }
 
         await transaction.CommitAsync(cancellationToken);
+
         return new ImportDeleteResult(true, count);
     }
 
@@ -2930,9 +2709,7 @@ public sealed class StatementImportStore
     /// receipt both establish ownership; anything else must return the same
     /// 404 as an unknown operation.
     /// </summary>
-    private async Task<bool> OwnedOperationExistsAsync(Guid customerId,
-                                                       Guid operationId,
-                                                       CancellationToken cancellationToken)
+    private async Task<bool> OwnedOperationExistsAsync(Guid customerId, Guid operationId, CancellationToken cancellationToken)
     {
         await using var connection = await _db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -2947,6 +2724,7 @@ public sealed class StatementImportStore
             """;
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("operation_id", operationId);
+
         return (bool)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
@@ -2964,6 +2742,7 @@ public sealed class StatementImportStore
             """;
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("operation_id", operationId);
+
         return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
     }
 
@@ -2986,6 +2765,7 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("operation_id", operationId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
         return await reader.ReadAsync(cancellationToken)
             ? new ReceiptRecord(
                 reader.GetGuid(0),
@@ -3019,6 +2799,7 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("statement_import_id", statementId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
         return await reader.ReadAsync(cancellationToken)
             ? new ReceiptRecord(
                 reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2), reader.GetGuid(3),
@@ -3048,6 +2829,7 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("statement_import_id", statementId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
         return await reader.ReadAsync(cancellationToken)
             ? new ReceiptRecord(
                 reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2), reader.GetGuid(3),
@@ -3066,10 +2848,10 @@ public sealed class StatementImportStore
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText =
-            "SELECT financial_account_id FROM statement_imports WHERE customer_id = @customer_id AND id = @id";
+        command.CommandText = "SELECT financial_account_id FROM statement_imports WHERE customer_id = @customer_id AND id = @id";
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("id", statementId);
+
         return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
     }
 
@@ -3099,6 +2881,7 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("id", statementId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
         return await reader.ReadAsync(cancellationToken) ? MapStatementSummary(reader) : null;
     }
 
@@ -3110,10 +2893,10 @@ public sealed class StatementImportStore
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText =
-            "SELECT COUNT(*) FROM transactions WHERE customer_id = @customer_id AND statement_import_id = @id";
+        command.CommandText = "SELECT COUNT(*) FROM transactions WHERE customer_id = @customer_id AND statement_import_id = @id";
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("id", statementId);
+
         return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
@@ -3142,6 +2925,7 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("id", statementId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
         return await reader.ReadAsync(cancellationToken) ? MapStatementSummary(reader) : null;
     }
 
@@ -3195,15 +2979,7 @@ public sealed class StatementImportStore
         {
             while (await reader.ReadAsync(cancellationToken))
             {
-                rows.Add((
-                    reader.GetGuid(0),
-                    reader.GetInt32(1),
-                    reader.IsDBNull(2) ? null : reader.GetInt32(2),
-                    reader.GetFieldValue<DateOnly>(3),
-                    reader.GetString(4),
-                    reader.GetInt64(5),
-                    reader.GetBoolean(6),
-                    reader.GetBoolean(7)));
+                rows.Add((reader.GetGuid(0), reader.GetInt32(1), reader.IsDBNull(2) ? null : reader.GetInt32(2), reader.GetFieldValue<DateOnly>(3), reader.GetString(4), reader.GetInt64(5), reader.GetBoolean(6), reader.GetBoolean(7)));
             }
         }
         if (rows.Count == 0)
@@ -3223,8 +2999,7 @@ public sealed class StatementImportStore
                 ORDER BY m.display_name, m.id
                 """;
             tagCommand.Parameters.AddWithValue("customer_id", customerId);
-            tagCommand.Parameters.AddWithValue(
-                "ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, rows.Select(row => row.Id).ToArray());
+            tagCommand.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, rows.Select(row => row.Id).ToArray());
             await using var reader = await tagCommand.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -3237,16 +3012,7 @@ public sealed class StatementImportStore
             }
         }
 
-        return rows.Select(row => new ImportStatementRowRecord(
-            row.Id,
-            row.SourceRowNumber,
-            row.SourcePage,
-            row.Date,
-            row.Description,
-            row.Cents,
-            row.Hidden,
-            row.EffectiveHidden,
-            tags.GetValueOrDefault(row.Id) ?? [])).ToArray();
+        return rows.Select(row => new ImportStatementRowRecord(row.Id, row.SourceRowNumber, row.SourcePage, row.Date, row.Description, row.Cents, row.Hidden, row.EffectiveHidden, tags.GetValueOrDefault(row.Id) ?? [])).ToArray();
     }
 
     private static async Task<IReadOnlyList<(Guid Id, string[] Tokens)>> LoadActiveTagsAsync(NpgsqlConnection connection,
@@ -3267,10 +3033,9 @@ public sealed class StatementImportStore
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            tags.Add((
-                reader.GetGuid(0),
-                reader.GetString(1).Split(' ', StringSplitOptions.RemoveEmptyEntries)));
+            tags.Add((reader.GetGuid(0), reader.GetString(1).Split(' ', StringSplitOptions.RemoveEmptyEntries)));
         }
+
         return tags;
     }
 
@@ -3281,9 +3046,9 @@ public sealed class StatementImportStore
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText =
-            "SELECT id FROM categories WHERE customer_id = @customer_id AND is_system = TRUE";
+        command.CommandText = "SELECT id FROM categories WHERE customer_id = @customer_id AND is_system = TRUE";
         command.Parameters.AddWithValue("customer_id", customerId);
+
         return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
     }
 
@@ -3303,12 +3068,13 @@ public sealed class StatementImportStore
             """;
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, tagIds);
-        var available = 0;
+        int available = 0;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             available++;
         }
+
         return available == tagIds.Length;
     }
 
@@ -3336,6 +3102,7 @@ public sealed class StatementImportStore
         {
             ids.Add(reader.GetGuid(0));
         }
+
         return ids;
     }
 
@@ -3357,6 +3124,7 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("account_id", accountId);
         command.Parameters.AddWithValue("fingerprint", fingerprint);
+
         return (int)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
@@ -3372,6 +3140,7 @@ public sealed class StatementImportStore
         {
             return result;
         }
+
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
@@ -3389,6 +3158,7 @@ public sealed class StatementImportStore
         {
             result[reader.GetString(0)] = reader.GetInt32(1);
         }
+
         return result;
     }
 
@@ -3402,8 +3172,7 @@ public sealed class StatementImportStore
     private static string Digest(string value) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
-    private static string EncodeCursor(DateTime createdAt,
-                                       Guid id) =>
+    private static string EncodeCursor(DateTime createdAt, Guid id) =>
         Convert.ToBase64String(Encoding.UTF8.GetBytes($"{createdAt:O}|{id}"))
             .TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
@@ -3411,17 +3180,15 @@ public sealed class StatementImportStore
     {
         try
         {
-            var padded = cursor.Replace('-', '+').Replace('_', '/');
+            string padded = cursor.Replace('-', '+').Replace('_', '/');
             padded += new string('=', (4 - padded.Length % 4) % 4);
-            var text = Encoding.UTF8.GetString(Convert.FromBase64String(padded));
-            var separator = text.IndexOf('|');
-            if (separator <= 0 ||
-                !DateTime.TryParse(text[..separator], CultureInfo.InvariantCulture,
-                    DateTimeStyles.RoundtripKind, out var createdAt) ||
-                !Guid.TryParse(text[(separator + 1)..], out var id))
+            string text = Encoding.UTF8.GetString(Convert.FromBase64String(padded));
+            int separator = text.IndexOf('|');
+            if (separator <= 0 || !DateTime.TryParse(text[..separator], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var createdAt) || !Guid.TryParse(text[(separator + 1)..], out var id))
             {
                 return (null, null);
             }
+
             return (createdAt, id);
         }
         catch
@@ -3439,8 +3206,7 @@ public sealed class StatementImportStore
 
     private sealed record DuplicateSnapshot(IReadOnlyList<ImportReviewRowRecord> Rows);
 
-    private sealed record RowDecision(bool Skip,
-                                      bool Override);
+    private sealed record RowDecision(bool Skip, bool Override);
 
     private sealed record IncomingRow(int Index,
                                       Guid RowId,

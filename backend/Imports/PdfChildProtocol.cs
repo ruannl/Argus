@@ -30,9 +30,7 @@ public sealed record PdfChildStatement(string Format,
                                        string[] RequiredConfirmations,
                                        string[] Warnings);
 
-public sealed record PdfChildResponse(bool Ok,
-                                      string? Reason,
-                                      PdfChildStatement? Statement);
+public sealed record PdfChildResponse(bool Ok, string? Reason, PdfChildStatement? Statement);
 
 public static class PdfChildProtocol
 {

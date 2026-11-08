@@ -16,14 +16,13 @@ public sealed class HibpScreener(ILogger<HibpScreener> logger) : IPwnedScreener
 
     private static readonly HttpClient _client = new() { Timeout = Timeout.InfiniteTimeSpan };
 
-    public async Task<bool?> IsPwnedAsync(string password,
-                                          CancellationToken cancellationToken = default)
+    public async Task<bool?> IsPwnedAsync(string password, CancellationToken cancellationToken = default)
     {
         try
         {
-            var hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(password)));
-            var prefix = hash[..5];
-            var suffix = hash[5..];
+            string hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(password)));
+            string prefix = hash[..5];
+            string suffix = hash[5..];
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(NetworkTimeoutMs);
@@ -35,10 +34,10 @@ public sealed class HibpScreener(ILogger<HibpScreener> logger) : IPwnedScreener
                 return null;
             }
 
-            var body = await response.Content.ReadAsStringAsync(timeout.Token);
-            foreach (var line in body.Split('\n'))
+            string body = await response.Content.ReadAsStringAsync(timeout.Token);
+            foreach (string line in body.Split('\n'))
             {
-                var separator = line.IndexOf(':');
+                int separator = line.IndexOf(':');
                 if (separator > 0 && line[..separator].Trim().Equals(suffix, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;

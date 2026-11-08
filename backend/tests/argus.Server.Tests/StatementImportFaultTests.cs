@@ -16,8 +16,8 @@ public sealed class StatementImportFaultTests
     [InlineData("before_commit")]
     public async Task FaultBeforeCommitLeavesNoDurableEffectsAndRetrySucceeds(string step)
     {
-        var injector = new FaultInjector();
-        using var factory = new KitFactory(injector);
+        FaultInjector injector = new FaultInjector();
+        using KitFactory factory = new KitFactory(injector);
         using var client = factory.CreateClient();
         await ResetAsync(factory);
         var session = await NewSessionAsync(factory, client);
@@ -34,8 +34,7 @@ public sealed class StatementImportFaultTests
                 JsonSerializer.Serialize(new { display_name = "Woolworths" }), session));
             Assert.Equal(HttpStatusCode.Created, tagResponse.StatusCode);
             var tagId = (await BodyAsync(tagResponse)).GetProperty("id").GetGuid();
-            var rowId = review.GetProperty("page").GetProperty("rows")[0]
-                .GetProperty("row_id").GetGuid();
+            var rowId = review.GetProperty("page").GetProperty("rows")[0].GetProperty("row_id").GetGuid();
             var patch = await client.SendAsync(Request(
                 HttpMethod.Patch,
                 $"/v1/finance/imports/reviews/{reviewId}",
@@ -68,16 +67,15 @@ public sealed class StatementImportFaultTests
         Assert.Equal(1L, await CountAsync(factory, "statement_imports"));
         Assert.Equal(3L, await CountAsync(factory, "transactions"));
         Assert.Equal(1L, await CountAsync(factory, "import_commit_receipts"));
-        Assert.Equal(step == "tag_links_inserted" ? 1L : 0L,
-            await CountAsync(factory, "transaction_merchant_tags"));
+        Assert.Equal(step == "tag_links_inserted" ? 1L : 0L, await CountAsync(factory, "transaction_merchant_tags"));
         Assert.Equal(0L, await CountAsync(factory, "import_reviews"));
     }
 
     [Fact]
     public async Task FaultAfterCommitBeforeResponseReplaysTheSameReceipt()
     {
-        var injector = new FaultInjector();
-        using var factory = new KitFactory(injector);
+        FaultInjector injector = new FaultInjector();
+        using KitFactory factory = new KitFactory(injector);
         using var client = factory.CreateClient();
         await ResetAsync(factory);
         var session = await NewSessionAsync(factory, client);
@@ -109,11 +107,10 @@ public sealed class StatementImportFaultTests
     [InlineData("before_commit", "suppressed")]
     [InlineData("tags_validated", "no_tags")]
     [InlineData("tags_validated", "suppressed")]
-    public async Task ExpiryAtCommitSeamsRollsBackEveryEffect(string pauseStep,
-                                                              string scenario)
+    public async Task ExpiryAtCommitSeamsRollsBackEveryEffect(string pauseStep, string scenario)
     {
-        using var injector = new PausingFaultInjector();
-        using var factory = new KitFactory(injector);
+        using PausingFaultInjector injector = new PausingFaultInjector();
+        using KitFactory factory = new KitFactory(injector);
         using var client = factory.CreateClient();
         await ResetAsync(factory);
         var session = await NewSessionAsync(factory, client);
@@ -131,8 +128,7 @@ public sealed class StatementImportFaultTests
         var reviewId = review.GetProperty("summary").GetProperty("id").GetGuid();
         if (scenario == "tagged")
         {
-            var tag = await client.SendAsync(Request(HttpMethod.Post, "/v1/finance/merchant-tags",
-                JsonSerializer.Serialize(new { display_name = "Expiry tag" }), session));
+            var tag = await client.SendAsync(Request(HttpMethod.Post, "/v1/finance/merchant-tags", JsonSerializer.Serialize(new { display_name = "Expiry tag" }), session));
             Assert.Equal(HttpStatusCode.Created, tag.StatusCode);
             var tagId = (await BodyAsync(tag)).GetProperty("id").GetGuid();
             var rowId = review.GetProperty("page").GetProperty("rows")[0].GetProperty("row_id").GetGuid();
@@ -200,7 +196,7 @@ public sealed class StatementImportFaultTests
     [Fact]
     public async Task CommittedReceiptReplaysAfterOriginalDeadlineInNewHost()
     {
-        using var factory = new KitFactory();
+        using KitFactory factory = new KitFactory();
         using var client = factory.CreateClient();
         await ResetAsync(factory);
         var session = await NewSessionAsync(factory, client);
@@ -218,7 +214,7 @@ public sealed class StatementImportFaultTests
         await using var observer = await factory.CreateDb().OpenAsync();
         await ImportExpiryTestHelpers.WaitForDeadlineAsync(observer, deadline);
 
-        using var newFactory = new KitFactory();
+        using KitFactory newFactory = new KitFactory();
         using var newClient = newFactory.CreateClient();
         var replay = await CommitAsync(newClient, session, reviewId, review);
         Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
@@ -229,8 +225,7 @@ public sealed class StatementImportFaultTests
         Assert.Equal(afterCommit, await ImportSnapshotAsync(factory, accountId));
     }
 
-    private static async Task<string> ImportSnapshotAsync(KitFactory factory,
-                                                          Guid accountId)
+    private static async Task<string> ImportSnapshotAsync(KitFactory factory, Guid accountId)
     {
         await using var connection = await factory.CreateDb().OpenAsync();
         await using var command = connection.CreateCommand();
@@ -246,6 +241,7 @@ public sealed class StatementImportFaultTests
             )::text
             """;
         command.Parameters.AddWithValue("account", accountId);
+
         return (string)(await command.ExecuteScalarAsync())!;
     }
 
@@ -264,31 +260,27 @@ public sealed class StatementImportFaultTests
         factory.LogCapture.Clear();
     }
 
-    private static async Task<string> NewSessionAsync(KitFactory factory,
-                                                      HttpClient client)
+    private static async Task<string> NewSessionAsync(KitFactory factory, HttpClient client)
     {
         var email = $"fault-{Guid.NewGuid():N}@example.test";
         var password = TestEnvironment.GoodPassword;
-        var register = await client.SendAsync(Request(HttpMethod.Post, "/v1/register",
-            JsonSerializer.Serialize(new { email, password })));
+        var register = await client.SendAsync(Request(HttpMethod.Post, "/v1/register", JsonSerializer.Serialize(new { email, password })));
         Assert.Equal(HttpStatusCode.Accepted, register.StatusCode);
         var verification = factory.Mailer.LastToken("verification", email);
         Assert.NotNull(verification);
-        var verify = await client.SendAsync(Request(HttpMethod.Post, "/v1/verify",
-            JsonSerializer.Serialize(new { token = verification })));
+        var verify = await client.SendAsync(Request(HttpMethod.Post, "/v1/verify", JsonSerializer.Serialize(new { token = verification })));
         Assert.Equal(HttpStatusCode.OK, verify.StatusCode);
-        var login = await client.SendAsync(Request(HttpMethod.Post, "/v1/login",
-            JsonSerializer.Serialize(new { email, password })));
+        var login = await client.SendAsync(Request(HttpMethod.Post, "/v1/login", JsonSerializer.Serialize(new { email, password })));
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+
         return (await BodyAsync(login)).GetProperty("token").GetString()!;
     }
 
-    private static async Task<Guid> CreateAccountAsync(HttpClient client,
-                                                       string session)
+    private static async Task<Guid> CreateAccountAsync(HttpClient client, string session)
     {
-        var response = await client.SendAsync(Request(HttpMethod.Post, "/v1/finance/accounts",
-            JsonSerializer.Serialize(new { display_name = "Cheque" }), session));
+        var response = await client.SendAsync(Request(HttpMethod.Post, "/v1/finance/accounts", JsonSerializer.Serialize(new { display_name = "Cheque" }), session));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
         return (await BodyAsync(response)).GetProperty("id").GetGuid();
     }
 
@@ -297,22 +289,15 @@ public sealed class StatementImportFaultTests
                                                         Guid accountId,
                                                         byte[] file)
     {
-        var options = JsonSerializer.Serialize(new
-        {
-            financial_account_id = accountId,
-            source_kind = "fnb",
-            start_date = "2024-01-01",
-            end_date = "2024-01-31",
-            currency = "ZAR",
-            confirm_zar = true,
-        });
-        var content = new MultipartFormDataContent();
+        var options = JsonSerializer.Serialize(new { financial_account_id = accountId, source_kind = "fnb", start_date = "2024-01-01", end_date = "2024-01-31", currency = "ZAR", confirm_zar = true, });
+        MultipartFormDataContent content = new MultipartFormDataContent();
         content.Add(new StringContent(options, Encoding.UTF8, "application/json"), "options");
         content.Add(new ByteArrayContent(file), "file", "statement.bin");
         var request = Request(HttpMethod.Post, "/v1/finance/imports/reviews", null, session);
         request.Content = content;
         var response = await client.SendAsync(request);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
         return await BodyAsync(response);
     }
 
@@ -322,13 +307,9 @@ public sealed class StatementImportFaultTests
                                                          JsonElement review)
     {
         var summary = review.TryGetProperty("summary", out var nested) ? nested : review;
-        var body = JsonSerializer.Serialize(new
-        {
-            expected_review_version = summary.GetProperty("version").GetInt32(),
-            confirmed_summary_hash = summary.GetProperty("summary_hash").GetString(),
-        });
-        return client.SendAsync(Request(
-            HttpMethod.Post, $"/v1/finance/imports/reviews/{reviewId}/commit", body, session));
+        var body = JsonSerializer.Serialize(new { expected_review_version = summary.GetProperty("version").GetInt32(), confirmed_summary_hash = summary.GetProperty("summary_hash").GetString(), });
+
+        return client.SendAsync(Request(HttpMethod.Post, $"/v1/finance/imports/reviews/{reviewId}/commit", body, session));
     }
 
     private static HttpRequestMessage Request(HttpMethod method,
@@ -336,7 +317,7 @@ public sealed class StatementImportFaultTests
                                               string? json,
                                               string? session = null)
     {
-        var request = new HttpRequestMessage(method, path);
+        HttpRequestMessage request = new HttpRequestMessage(method, path);
         request.Headers.Add(Brand.ApplicationSecretHeader, TestEnvironment.ApiSecret);
         if (session is not null)
         {
@@ -346,19 +327,20 @@ public sealed class StatementImportFaultTests
         {
             request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         }
+
         return request;
     }
 
     private static async Task<JsonElement> BodyAsync(HttpResponseMessage response) =>
         JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
 
-    private static async Task<long> CountAsync(KitFactory factory,
-                                               string table)
+    private static async Task<long> CountAsync(KitFactory factory, string table)
     {
         var db = factory.CreateDb();
         await using var connection = await db.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = $"SELECT COUNT(*) FROM {table}";
+
         return (long)(await command.ExecuteScalarAsync())!;
     }
 

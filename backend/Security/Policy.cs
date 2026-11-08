@@ -16,18 +16,18 @@ public sealed class Policy
     public Policy()
     {
         var assembly = Assembly.GetExecutingAssembly();
-        using var stream = assembly.GetManifestResourceStream("argus.Server.data.common-passwords.txt")
-            ?? throw new InvalidOperationException("embedded common-passwords.txt is missing");
+        using var stream = assembly.GetManifestResourceStream("argus.Server.data.common-passwords.txt") ?? throw new InvalidOperationException("embedded common-passwords.txt is missing");
         using var reader = new StreamReader(stream);
 
         _commonPasswords = new HashSet<string>(StringComparer.Ordinal);
         while (reader.ReadLine() is { } line)
         {
-            var trimmed = line.Trim();
+            string trimmed = line.Trim();
             if (trimmed.Length == 0 || trimmed.StartsWith('#'))
             {
                 continue;
             }
+
             _commonPasswords.Add(trimmed.ToLowerInvariant());
         }
     }
@@ -40,16 +40,19 @@ public sealed class Policy
         {
             return null;
         }
-        var canonical = email.Trim().ToLowerInvariant();
+
+        string canonical = email.Trim().ToLowerInvariant();
         if (Encoding.UTF8.GetByteCount(canonical) > 320)
         {
             return null;
         }
-        var at = canonical.IndexOf('@');
+
+        int at = canonical.IndexOf('@');
         if (at <= 0 || at == canonical.Length - 1)
         {
             return null;
         }
+
         return canonical;
     }
 
@@ -59,14 +62,17 @@ public sealed class Policy
         {
             return false;
         }
+
         if (password.EnumerateRunes().Count() < 12)
         {
             return false;
         }
+
         if (Encoding.UTF8.GetByteCount(password) > 1024)
         {
             return false;
         }
+
         return !_commonPasswords.Contains(password.ToLowerInvariant());
     }
 }

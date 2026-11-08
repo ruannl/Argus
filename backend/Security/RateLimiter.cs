@@ -42,8 +42,7 @@ public sealed class RateLimiter
 
     public bool CheckResetConsume(string tokenHash) => Check($"reset_consume:{tokenHash}", 10);
 
-    private bool Check(string bucket,
-                       int limit)
+    private bool Check(string bucket, int limit)
     {
         var now = DateTime.UtcNow;
         lock (_gate)
@@ -76,11 +75,8 @@ public sealed class RateLimiter
 
     private void Sweep(DateTime now)
     {
-        var stale = _buckets
-            .Where(entry => entry.Value.Count == 0 || now - entry.Value.Peek() > _window)
-            .Select(entry => entry.Key)
-            .ToList();
-        foreach (var key in stale)
+        var stale = _buckets.Where(entry => entry.Value.Count == 0 || now - entry.Value.Peek() > _window).Select(entry => entry.Key).ToList();
+        foreach (string? key in stale)
         {
             _buckets.Remove(key);
         }

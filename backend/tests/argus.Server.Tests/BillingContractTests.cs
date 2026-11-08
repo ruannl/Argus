@@ -14,10 +14,9 @@ public sealed class BillingContractTests(KitFactory factory) : ApiTestBase(facto
                     Encoding.UTF8.GetBytes(payload)))
             .ToLowerInvariant();
 
-    private static HttpRequestMessage Webhook(string payload,
-                                              string? signature)
+    private static HttpRequestMessage Webhook(string payload, string? signature)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/billing/webhook")
+        HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "/v1/billing/webhook")
         {
             Content = new StringContent(payload, Encoding.UTF8, "application/json"),
         };
@@ -25,6 +24,7 @@ public sealed class BillingContractTests(KitFactory factory) : ApiTestBase(facto
         {
             request.Headers.Add("X-Billing-Webhook-Signature", signature);
         }
+
         return request;
     }
 
@@ -36,6 +36,7 @@ public sealed class BillingContractTests(KitFactory factory) : ApiTestBase(facto
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT id FROM customers WHERE canonical_email = @email";
         command.Parameters.AddWithValue("email", email);
+
         return (Guid)(await command.ExecuteScalarAsync())!;
     }
 
@@ -70,8 +71,7 @@ public sealed class BillingContractTests(KitFactory factory) : ApiTestBase(facto
         var session = await LoginAsync(email);
         var future = DateTime.UtcNow.AddDays(30);
 
-        var activatedPayload =
-            $"{{\"type\":\"subscription.activated\",\"customer_id\":\"{customerId}\",\"next_billing_at\":\"{future:yyyy-MM-dd'T'HH:mm:ss'Z'}\"}}";
+        var activatedPayload = $"{{\"type\":\"subscription.activated\",\"customer_id\":\"{customerId}\",\"next_billing_at\":\"{future:yyyy-MM-dd'T'HH:mm:ss'Z'}\"}}";
         var activated = await SendAsync(Webhook(activatedPayload, Sign(activatedPayload)));
         Assert.Equal(HttpStatusCode.OK, activated.StatusCode);
 
@@ -95,9 +95,9 @@ public sealed class BillingContractTests(KitFactory factory) : ApiTestBase(facto
 
     private async Task<string> LoginAsync(string email)
     {
-        var login = await SendAsync(
-            Post("/v1/login", Json(new { email, password = TestEnvironment.GoodPassword })));
+        var login = await SendAsync(Post("/v1/login", Json(new { email, password = TestEnvironment.GoodPassword })));
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+
         return (await BodyAsync(login)).GetProperty("token").GetString()!;
     }
 }

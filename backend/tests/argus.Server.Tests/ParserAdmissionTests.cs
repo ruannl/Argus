@@ -9,25 +9,21 @@ public sealed class ParserAdmissionTests
 
     private static async Task AssertBusyAsync(ParserAdmission admission)
     {
-        var exception = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            admission.RunAsync(_ => Task.FromResult(0), CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<StatementRejectedException>(() => admission.RunAsync(_ => Task.FromResult(0), CancellationToken.None));
         Assert.Equal(ParserReasons.ImportBusy, exception.Reason);
     }
 
-    private static async Task AssertAdmittedAsync(ParserAdmission admission,
-                                                  int expected)
+    private static async Task AssertAdmittedAsync(ParserAdmission admission, int expected)
     {
         await admission.WaitForCapacityAsync().WaitAsync(TimeSpan.FromSeconds(2));
-        var result = await admission.RunAsync(
-            _ => Task.FromResult(expected), CancellationToken.None);
+        var result = await admission.RunAsync(_ => Task.FromResult(expected), CancellationToken.None);
         Assert.Equal(expected, result);
     }
 
     [Fact]
     public async Task RejectsExcessParserWithoutWaiting()
     {
-        using var admission = new ParserAdmission(
-            capacity: 1, deadline: TimeSpan.FromSeconds(5));
+        using ParserAdmission admission = new ParserAdmission(capacity: 1, deadline: TimeSpan.FromSeconds(5));
         var entered = Signal();
         var release = Signal();
         var blocker = admission.RunAsync(
@@ -49,22 +45,18 @@ public sealed class ParserAdmissionTests
     [Fact]
     public async Task SuccessReleasesSlot()
     {
-        using var admission = new ParserAdmission(capacity: 1);
+        using ParserAdmission admission = new ParserAdmission(capacity: 1);
 
-        Assert.Equal(1, await admission.RunAsync(
-            _ => Task.FromResult(1), CancellationToken.None));
+        Assert.Equal(1, await admission.RunAsync(_ => Task.FromResult(1), CancellationToken.None));
         await AssertAdmittedAsync(admission, 2);
     }
 
     [Fact]
     public async Task ActionExceptionReleasesSlot()
     {
-        using var admission = new ParserAdmission(capacity: 1);
+        using ParserAdmission admission = new ParserAdmission(capacity: 1);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            admission.RunAsync<int>(
-                _ => throw new InvalidOperationException("parser boom"),
-                CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => admission.RunAsync<int>(_ => throw new InvalidOperationException("parser boom"), CancellationToken.None));
         Assert.Equal("parser boom", exception.Message);
         await AssertAdmittedAsync(admission, 2);
     }
@@ -72,8 +64,7 @@ public sealed class ParserAdmissionTests
     [Fact]
     public async Task DeadlineKeepsSlotUntilCancelledWorkerStops()
     {
-        using var admission = new ParserAdmission(
-            capacity: 1, deadline: TimeSpan.FromMilliseconds(50));
+        using ParserAdmission admission = new ParserAdmission(capacity: 1, deadline: TimeSpan.FromMilliseconds(50));
         var started = Signal();
         var cleanup = Signal();
         var workerFinished = Signal();
@@ -113,9 +104,8 @@ public sealed class ParserAdmissionTests
     [Fact]
     public async Task CallerCancellationKeepsSlotUntilCancelledWorkerStops()
     {
-        using var admission = new ParserAdmission(
-            capacity: 1, deadline: TimeSpan.FromSeconds(30));
-        using var cancellation = new CancellationTokenSource();
+        using ParserAdmission admission = new ParserAdmission(capacity: 1, deadline: TimeSpan.FromSeconds(30));
+        using CancellationTokenSource cancellation = new CancellationTokenSource();
         var started = Signal();
         var cleanup = Signal();
         var workerFinished = Signal();
@@ -153,8 +143,7 @@ public sealed class ParserAdmissionTests
     [Fact]
     public async Task LateFaultAfterDeadlineReleasesSlotWhenWorkerStops()
     {
-        using var admission = new ParserAdmission(
-            capacity: 1, deadline: TimeSpan.FromMilliseconds(50));
+        using ParserAdmission admission = new ParserAdmission(capacity: 1, deadline: TimeSpan.FromMilliseconds(50));
         var started = Signal();
         var cleanup = Signal();
         var workerFinished = Signal();
@@ -192,8 +181,7 @@ public sealed class ParserAdmissionTests
     [Fact]
     public async Task CsvDispatchUsesTheSharedAdmission()
     {
-        using var admission = new ParserAdmission(
-            capacity: 1, deadline: TimeSpan.FromSeconds(5));
+        using ParserAdmission admission = new ParserAdmission(capacity: 1, deadline: TimeSpan.FromSeconds(5));
         var entered = Signal();
         var release = Signal();
         var blocker = admission.RunAsync(
@@ -206,17 +194,9 @@ public sealed class ParserAdmissionTests
             CancellationToken.None);
         await entered.Task;
 
-        using var runner = new PdfParserRunner();
+        using PdfParserRunner runner = new PdfParserRunner();
         var file = StatementFixtureBuilder.BuildFnbCsv(2, chequeAccount: false).Bytes;
-        var exception = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            StatementParser.InspectAsync(
-                file,
-                StatementSourceKind.Fnb,
-                null,
-                null,
-                null,
-                runner,
-                admission));
+        var exception = await Assert.ThrowsAsync<StatementRejectedException>(() => StatementParser.InspectAsync(file, StatementSourceKind.Fnb, null, null, null, runner, admission));
         Assert.Equal(ParserReasons.ImportBusy, exception.Reason);
 
         release.SetResult(true);

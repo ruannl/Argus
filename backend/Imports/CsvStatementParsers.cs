@@ -7,8 +7,7 @@ public static class CsvStatementParsers
 {
     private static readonly string[] _delimiterNames = [",", ";", "\t", "|"];
 
-    public static string DecodeUtf8(byte[] bytes,
-                                    CancellationToken cancellationToken = default)
+    public static string DecodeUtf8(byte[] bytes, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (bytes.Length > ImportLimits.MaxFileBytes)
@@ -18,8 +17,7 @@ public static class CsvStatementParsers
 
         try
         {
-            var text = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)
-                .GetString(bytes);
+            string text = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(bytes);
             return text.Length > 0 && text[0] == '\uFEFF' ? text[1..] : text;
         }
         catch (DecoderFallbackException)
@@ -28,8 +26,7 @@ public static class CsvStatementParsers
         }
     }
 
-    public static (byte[] CsvBytes, StatementFormat Format) UnwrapFnbArchive(byte[] bytes,
-                                                                             CancellationToken cancellationToken = default)
+    public static (byte[] CsvBytes, StatementFormat Format) UnwrapFnbArchive(byte[] bytes, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (bytes.Length > ImportLimits.MaxFileBytes)
@@ -59,7 +56,7 @@ public static class CsvStatementParsers
             {
                 throw new StatementRejectedException(ParserReasons.UnsafeArchive);
             }
-            var unixMode = (entry.ExternalAttributes >> 16) & 0xF000;
+            int unixMode = (entry.ExternalAttributes >> 16) & 0xF000;
             if (unixMode == 0xA000)
             {
                 throw new StatementRejectedException(ParserReasons.UnsafeArchive);
@@ -67,8 +64,8 @@ public static class CsvStatementParsers
 
             using var entryStream = entry.Open();
             using var output = new MemoryStream();
-            var buffer = new byte[64 * 1024];
-            var total = 0;
+            byte[] buffer = new byte[64 * 1024];
+            int total = 0;
             int read;
             while ((read = entryStream.Read(buffer, 0, buffer.Length)) > 0)
             {
@@ -103,12 +100,10 @@ public static class CsvStatementParsers
                                            CancellationToken cancellationToken = default)
     {
         var (csvBytes, format) = UnwrapFnbArchive(rawBytes, cancellationToken);
-        var text = DecodeUtf8(csvBytes, cancellationToken);
-        var records = CsvRecordReader.Read(
-            text, ',', ImportLimits.MaxDataRows + 100, cancellationToken);
+        string text = DecodeUtf8(csvBytes, cancellationToken);
+        var records = CsvRecordReader.Read(text, ',', ImportLimits.MaxDataRows + 100, cancellationToken);
         var header = records.FirstOrDefault(record => record.StartLine == 7);
-        if (header is null || header.Malformed || header.Fields.Count != 4 ||
-            !IsFnbHeader(header.Fields))
+        if (header is null || header.Malformed || header.Fields.Count != 4 || !IsFnbHeader(header.Fields))
         {
             throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
         }
@@ -126,7 +121,7 @@ public static class CsvStatementParsers
         var rows = new List<ParsedStatementRow>(dataRecords.Count);
         DateOnly? firstDate = null;
         DateOnly? lastDate = null;
-        var rowNumber = 0;
+        int rowNumber = 0;
         foreach (var record in dataRecords)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -149,8 +144,7 @@ public static class CsvStatementParsers
             }
 
             DateOnly? date = null;
-            if (raw["date"] is { } dateText &&
-                StatementDates.TryParseFullYearWithFormat(dateText, "yyyy/MM/dd", out var parsedDate))
+            if (raw["date"] is { } dateText && StatementDates.TryParseFullYearWithFormat(dateText, "yyyy/MM/dd", out var parsedDate))
             {
                 date = parsedDate;
             }
@@ -160,8 +154,7 @@ public static class CsvStatementParsers
             }
 
             long? cents = null;
-            if (raw["amount"] is { } amountText &&
-                StatementAmounts.TryParseSignedDecimal(amountText, out var parsedCents))
+            if (raw["amount"] is { } amountText && StatementAmounts.TryParseSignedDecimal(amountText, out long parsedCents))
             {
                 cents = parsedCents;
             }
@@ -170,8 +163,7 @@ public static class CsvStatementParsers
                 validation.Add(ValidationCodes.InvalidAmount);
             }
 
-            var (display, normalized, empty, tooLong) =
-                StatementText.NormalizeDescription(raw["description"], collapseDisplay: false);
+            var (display, normalized, empty, tooLong) = StatementText.NormalizeDescription(raw["description"], collapseDisplay: false);
             if (empty)
             {
                 warnings.Add(ValidationCodes.EmptyDescription);
@@ -183,8 +175,7 @@ public static class CsvStatementParsers
 
             if (date is not null)
             {
-                if (start is not null && end is not null &&
-                    !StatementDates.InPeriod(date.Value, start.Value, end.Value))
+                if (start is not null && end is not null && !StatementDates.InPeriod(date.Value, start.Value, end.Value))
                 {
                     validation.Add(ValidationCodes.DateOutsidePeriod);
                 }
@@ -238,8 +229,7 @@ public static class CsvStatementParsers
         string.Equals(fields[2].Trim(), "Balance", StringComparison.OrdinalIgnoreCase) &&
         string.Equals(fields[3].Trim(), "Description", StringComparison.OrdinalIgnoreCase);
 
-    public static ParsedStatement InspectGeneric(string text,
-                                                 CancellationToken cancellationToken = default)
+    public static ParsedStatement InspectGeneric(string text, CancellationToken cancellationToken = default)
     {
         var detection = DetectGeneric(text, cancellationToken);
         if (detection is null)
@@ -249,20 +239,12 @@ public static class CsvStatementParsers
 
         try
         {
-            return ParseGeneric(
-                text, detection.Config, null, null, detection.Suggestions, cancellationToken);
+            return ParseGeneric(text, detection.Config, null, null, detection.Suggestions, cancellationToken);
         }
         catch (StatementRejectedException exception) when (
             exception.Reason == ParserReasons.FormatConfirmationRequired)
         {
-            return new ParsedStatement(
-                StatementFormat.GenericCsv,
-                [],
-                null,
-                null,
-                detection.Suggestions,
-                ["mapping", "zar", "start_date", "end_date"],
-                ["mapping_confirmation_required"]);
+            return new ParsedStatement(StatementFormat.GenericCsv, [], null, null, detection.Suggestions, ["mapping", "zar", "start_date", "end_date"], ["mapping_confirmation_required"]);
         }
     }
 
@@ -282,12 +264,10 @@ public static class CsvStatementParsers
                                                 CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var delimiter = ResolveDelimiter(config.Delimiter);
-        var decimalSeparator = ResolveDecimal(config.DecimalSeparator);
-        var thousandsSeparator = ResolveThousands(config.ThousandsSeparator);
-        if (delimiter is null || decimalSeparator is null || thousandsSeparator == "\u0000" ||
-            config.HeaderLine is null || config.HeaderLine < 1 ||
-            config.DateColumn is null || config.DateFormat is null)
+        char? delimiter = ResolveDelimiter(config.Delimiter);
+        string? decimalSeparator = ResolveDecimal(config.DecimalSeparator);
+        string thousandsSeparator = ResolveThousands(config.ThousandsSeparator);
+        if (delimiter is null || decimalSeparator is null || thousandsSeparator == "\u0000" || config.HeaderLine is null || config.HeaderLine < 1 || config.DateColumn is null || config.DateFormat is null)
         {
             throw new StatementRejectedException(ParserReasons.FormatConfirmationRequired);
         }
@@ -297,21 +277,20 @@ public static class CsvStatementParsers
             throw new StatementRejectedException(ParserReasons.FormatConfirmationRequired);
         }
 
-        var amountMode = config.AmountMode ?? "signed";
+        string amountMode = config.AmountMode ?? "signed";
         if (amountMode is not ("signed" or "debit_credit"))
         {
             throw new StatementRejectedException(ParserReasons.FormatConfirmationRequired);
         }
 
-        var direction = config.Direction ?? "normal";
+        string direction = config.Direction ?? "normal";
         if (direction is not ("normal" or "inverted"))
         {
             throw new StatementRejectedException(ParserReasons.FormatConfirmationRequired);
         }
 
-        var negativeStyle = config.NegativeStyle ?? "any";
-        if (negativeStyle is not ("any" or "parentheses" or "trailing_minus" or "cr_dr" or
-            "leading_minus"))
+        string negativeStyle = config.NegativeStyle ?? "any";
+        if (negativeStyle is not ("any" or "parentheses" or "trailing_minus" or "cr_dr" or "leading_minus"))
         {
             throw new StatementRejectedException(ParserReasons.FormatConfirmationRequired);
         }
@@ -335,13 +314,12 @@ public static class CsvStatementParsers
             throw new StatementRejectedException(ParserReasons.FormatConfirmationRequired);
         }
 
-        var records = CsvRecordReader.Read(
-            text, delimiter.Value, ImportLimits.MaxDataRows + 100, cancellationToken);
+        var records = CsvRecordReader.Read(text, delimiter.Value, ImportLimits.MaxDataRows + 100, cancellationToken);
 
         // An FNB preamble never becomes generic source data. Detect the first
         // plausible transaction header, including malformed/alternate FNB
         // headers, and refuse a mapping that starts before it.
-        var preambleBoundary = FindPreambleBoundary(records);
+        int? preambleBoundary = FindPreambleBoundary(records);
         if (preambleBoundary is not null && config.HeaderLine.Value < preambleBoundary.Value)
         {
             throw new StatementRejectedException(ParserReasons.FormatConfirmationRequired);
@@ -351,7 +329,7 @@ public static class CsvStatementParsers
         // generic delimiter. A non-comma dialect can otherwise turn the
         // preamble lines into one-field data rows before any record-based
         // header heuristic sees them.
-        var fnbPreambleEnd = FindFnbPreambleEnd(text);
+        int? fnbPreambleEnd = FindFnbPreambleEnd(text);
         if (fnbPreambleEnd is not null && config.HeaderLine.Value < fnbPreambleEnd.Value)
         {
             throw new StatementRejectedException(ParserReasons.FormatConfirmationRequired);
@@ -377,7 +355,7 @@ public static class CsvStatementParsers
             throw new StatementRejectedException(ParserReasons.ProcessingLimit);
         }
 
-        var columnIndexes = new[]
+        int?[] columnIndexes = new[]
         {
             config.DateColumn,
             config.DescriptionColumn,
@@ -390,19 +368,17 @@ public static class CsvStatementParsers
         {
             throw new StatementRejectedException(ParserReasons.FormatConfirmationRequired);
         }
-        var maxIndex = columnIndexes
-            .Where(value => value is not null)
-            .Max(value => value!.Value);
+        int maxIndex = columnIndexes.Where(value => value is not null).Max(value => value!.Value);
         if (maxIndex >= header.Fields.Count)
         {
             throw new StatementRejectedException(ParserReasons.FormatConfirmationRequired);
         }
-        var headerWidth = header.Fields.Count;
+        int headerWidth = header.Fields.Count;
         var rows = new List<ParsedStatementRow>(dataRecords.Count);
         DateOnly? firstDate = null;
         DateOnly? lastDate = null;
-        var rowNumber = 0;
-        var centuryRequired = false;
+        int rowNumber = 0;
+        bool centuryRequired = false;
         foreach (var record in dataRecords)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -441,11 +417,10 @@ public static class CsvStatementParsers
             }
 
             DateOnly? date = null;
-            var twoDigit = IsTwoDigitFormat(config.DateFormat);
+            bool twoDigit = IsTwoDigitFormat(config.DateFormat);
             if (!twoDigit)
             {
-                if (raw["date"] is { } fullDate &&
-                    StatementDates.TryParseFullYearWithFormat(fullDate, config.DateFormat, out var parsed))
+                if (raw["date"] is { } fullDate && StatementDates.TryParseFullYearWithFormat(fullDate, config.DateFormat, out var parsed))
                 {
                     date = parsed;
                 }
@@ -454,9 +429,7 @@ public static class CsvStatementParsers
                     validation.Add(ValidationCodes.InvalidDate);
                 }
             }
-            else if (raw["date"] is { } shortDate &&
-                     StatementDates.TryParseTwoDigitYearWithFormat(
-                         shortDate, config.DateFormat, out var day, out var month, out var year2))
+            else if (raw["date"] is { } shortDate && StatementDates.TryParseTwoDigitYearWithFormat(shortDate, config.DateFormat, out int day, out int month, out int year2))
             {
                 if (start is null || end is null)
                 {
@@ -467,21 +440,17 @@ public static class CsvStatementParsers
                     }
                     else
                     {
-                        var (resolved, _) = StatementDates.Resolve(
-                            day, month, year2, null, null, config.Century);
+                        var (resolved, _) = StatementDates.Resolve(day, month, year2, null, null, config.Century);
                         date = resolved;
                     }
                 }
                 else
                 {
-                    var (resolved, multiple) = StatementDates.Resolve(
-                        day, month, year2, start, end, config.Century);
+                    var (resolved, multiple) = StatementDates.Resolve(day, month, year2, start, end, config.Century);
                     date = resolved;
                     if (resolved is null)
                     {
-                        validation.Add(multiple
-                            ? ValidationCodes.CenturyRequired
-                            : ValidationCodes.InvalidDate);
+                        validation.Add(multiple ? ValidationCodes.CenturyRequired : ValidationCodes.InvalidDate);
                     }
                 }
             }
@@ -493,20 +462,13 @@ public static class CsvStatementParsers
             long? cents = null;
             if (amountMode == "signed")
             {
-                if (raw["amount"] is { } amountRaw &&
-                    StatementAmounts.TryParseMagnitude(
-                        amountRaw,
-                        decimalSeparator,
-                        thousandsSeparator,
-                        out var magnitude,
-                        out var hasPositive,
-                        out var hasNegative))
+                if (raw["amount"] is { } amountRaw && StatementAmounts.TryParseMagnitude(amountRaw, decimalSeparator, thousandsSeparator, out long magnitude, out bool hasPositive, out bool hasNegative))
                 {
                     if (hasNegative && !MatchesNegativeStyle(amountRaw, negativeStyle))
                     {
                         validation.Add(ValidationCodes.InvalidSign);
                     }
-                    var negative = hasNegative;
+                    bool negative = hasNegative;
                     if (direction == "inverted")
                     {
                         negative = !negative;
@@ -519,17 +481,15 @@ public static class CsvStatementParsers
                 }
                 else
                 {
-                    validation.Add(raw["amount"] is null
-                        ? ValidationCodes.MissingAmount
-                        : ValidationCodes.InvalidAmount);
+                    validation.Add(raw["amount"] is null ? ValidationCodes.MissingAmount : ValidationCodes.InvalidAmount);
                 }
             }
             else
             {
-                var debitRaw = raw["debit"];
-                var creditRaw = raw["credit"];
-                var debitPopulated = !string.IsNullOrWhiteSpace(debitRaw);
-                var creditPopulated = !string.IsNullOrWhiteSpace(creditRaw);
+                string? debitRaw = raw["debit"];
+                string? creditRaw = raw["credit"];
+                bool debitPopulated = !string.IsNullOrWhiteSpace(debitRaw);
+                bool creditPopulated = !string.IsNullOrWhiteSpace(creditRaw);
                 if (debitPopulated && creditPopulated)
                 {
                     validation.Add(ValidationCodes.MultipleAmounts);
@@ -540,14 +500,8 @@ public static class CsvStatementParsers
                 }
                 else
                 {
-                    var chosen = debitPopulated ? debitRaw : creditRaw;
-                    if (StatementAmounts.TryParseMagnitude(
-                            chosen,
-                            decimalSeparator,
-                            thousandsSeparator,
-                            out var magnitude,
-                            out _,
-                            out _))
+                    string? chosen = debitPopulated ? debitRaw : creditRaw;
+                    if (StatementAmounts.TryParseMagnitude(chosen, decimalSeparator, thousandsSeparator, out long magnitude, out _, out _))
                     {
                         cents = debitPopulated ? -magnitude : magnitude;
                         if (cents == 0)
@@ -562,9 +516,7 @@ public static class CsvStatementParsers
                 }
             }
 
-            var (display, normalized, empty, tooLong) =
-                StatementText.NormalizeDescription(
-                    raw.GetValueOrDefault("description"), collapseDisplay: false);
+            var (display, normalized, empty, tooLong) = StatementText.NormalizeDescription(raw.GetValueOrDefault("description"), collapseDisplay: false);
             if (empty)
             {
                 warnings.Add(ValidationCodes.EmptyDescription);
@@ -576,8 +528,7 @@ public static class CsvStatementParsers
 
             if (date is not null)
             {
-                if (start is not null && end is not null &&
-                    !StatementDates.InPeriod(date.Value, start.Value, end.Value))
+                if (start is not null && end is not null && !StatementDates.InPeriod(date.Value, start.Value, end.Value))
                 {
                     validation.Add(ValidationCodes.DateOutsidePeriod);
                 }
@@ -589,9 +540,7 @@ public static class CsvStatementParsers
                 lastDate = lastDate is null || date > lastDate ? date : lastDate;
             }
 
-            var sourceId = config.StableIdColumn is not null
-                ? raw.GetValueOrDefault("source_id")
-                : null;
+            string? sourceId = config.StableIdColumn is not null ? raw.GetValueOrDefault("source_id") : null;
             if (string.IsNullOrWhiteSpace(sourceId))
             {
                 sourceId = null;
@@ -613,37 +562,26 @@ public static class CsvStatementParsers
                 sourceId));
         }
 
-        var suggestions = existingSuggestions is null
-            ? ConfigToSuggestions(config)
-            : new Dictionary<string, string>(existingSuggestions, StringComparer.Ordinal);
+        var suggestions = existingSuggestions is null ? ConfigToSuggestions(config) : new Dictionary<string, string>(existingSuggestions, StringComparer.Ordinal);
         var required = new List<string> { "mapping", "zar", "start_date", "end_date" };
         if (centuryRequired || rows.Any(row => row.Warnings.Contains(ValidationCodes.CenturyRequired)))
         {
             required.Add("century");
         }
 
-        return new ParsedStatement(
-            StatementFormat.GenericCsv,
-            rows,
-            firstDate,
-            lastDate,
-            suggestions,
-            required,
-            []);
+        return new ParsedStatement(StatementFormat.GenericCsv, rows, firstDate, lastDate, suggestions, required, []);
     }
 
-    private static GenericDetection? DetectGeneric(string text,
-                                                   CancellationToken cancellationToken = default)
+    private static GenericDetection? DetectGeneric(string text, CancellationToken cancellationToken = default)
     {
         var candidates = new List<GenericCandidate>();
-        foreach (var delimiter in _delimiterNames)
+        foreach (string delimiter in _delimiterNames)
         {
             cancellationToken.ThrowIfCancellationRequested();
             IReadOnlyList<CsvRecord> records;
             try
             {
-                records = CsvRecordReader.Read(
-                    text, delimiter[0], ImportLimits.MaxDataRows + 100, cancellationToken);
+                records = CsvRecordReader.Read(text, delimiter[0], ImportLimits.MaxDataRows + 100, cancellationToken);
             }
             catch (StatementRejectedException exception) when (
                 exception.Reason == ParserReasons.ProcessingLimit)
@@ -658,17 +596,15 @@ public static class CsvStatementParsers
             {
                 continue;
             }
+
             var fieldCounts = sample.Select(record => record.Fields.Count).Where(count => count >= 2).ToList();
             if (fieldCounts.Count < 2)
             {
                 continue;
             }
-            var mostCommon = fieldCounts
-                .GroupBy(count => count)
-                .OrderByDescending(group => group.Count())
-                .ThenBy(group => group.Key)
-                .First();
-            var consistency = mostCommon.Count() * 10 - Math.Abs(mostCommon.Key - 4);
+
+            var mostCommon = fieldCounts.GroupBy(count => count).OrderByDescending(group => group.Count()).ThenBy(group => group.Key).First();
+            int consistency = mostCommon.Count() * 10 - Math.Abs(mostCommon.Key - 4);
             candidates.Add(new GenericCandidate(delimiter[0], records, consistency, mostCommon.Key));
         }
 
@@ -678,21 +614,20 @@ public static class CsvStatementParsers
             return null;
         }
 
-        var header = best.Records.FirstOrDefault(record =>
-            record.Fields.Count >= 3 && LooksLikeHeader(record.Fields));
+        var header = best.Records.FirstOrDefault(record => record.Fields.Count >= 3 && LooksLikeHeader(record.Fields));
         header ??= best.Records.FirstOrDefault(record => record.Fields.Count >= 3);
         if (header is null)
         {
             return null;
         }
 
-        var headerFields = header.Fields.Select(NormalizeHeader).ToArray();
-        var dateColumn = FindHeader(headerFields, "date", "transaction date", "value date", "posting date");
-        var descriptionColumn = FindHeader(headerFields, "description", "details", "narrative", "memo", "reference");
-        var amountColumn = FindHeader(headerFields, "amount", "value", "transaction amount");
-        var debitColumn = FindHeader(headerFields, "debit", "withdrawal", "money out", "out");
-        var creditColumn = FindHeader(headerFields, "credit", "deposit", "money in", "in");
-        var stableIdColumn = FindHeader(headerFields, "transaction id", "id", "reference");
+        string[] headerFields = header.Fields.Select(NormalizeHeader).ToArray();
+        int? dateColumn = FindHeader(headerFields, "date", "transaction date", "value date", "posting date");
+        int? descriptionColumn = FindHeader(headerFields, "description", "details", "narrative", "memo", "reference");
+        int? amountColumn = FindHeader(headerFields, "amount", "value", "transaction amount");
+        int? debitColumn = FindHeader(headerFields, "debit", "withdrawal", "money out", "out");
+        int? creditColumn = FindHeader(headerFields, "credit", "deposit", "money in", "in");
+        int? stableIdColumn = FindHeader(headerFields, "transaction id", "id", "reference");
         if (stableIdColumn == descriptionColumn)
         {
             stableIdColumn = null;
@@ -700,22 +635,15 @@ public static class CsvStatementParsers
 
         dateColumn ??= 0;
         descriptionColumn ??= Math.Min(1, header.Fields.Count - 1);
-        var amountMode = debitColumn is not null && creditColumn is not null
-            ? "debit_credit"
-            : "signed";
+        string amountMode = debitColumn is not null && creditColumn is not null ? "debit_credit" : "signed";
         if (amountMode == "signed")
         {
             amountColumn ??= header.Fields.Count > 2 ? 2 : null;
         }
 
-        var dataRecords = best.Records
-            .Where(record => record.StartLine > header.StartLine)
-            .Take(40)
-            .ToList();
-        var dateFormat = ProposeDateFormat(dataRecords, dateColumn);
-        var (decimalSeparator, thousandsSeparator) = ProposeSeparators(
-            dataRecords,
-            amountMode == "signed" ? amountColumn : debitColumn);
+        var dataRecords = best.Records.Where(record => record.StartLine > header.StartLine).Take(40).ToList();
+        string dateFormat = ProposeDateFormat(dataRecords, dateColumn);
+        var (decimalSeparator, thousandsSeparator) = ProposeSeparators(dataRecords, amountMode == "signed" ? amountColumn : debitColumn);
 
         var config = new ParserConfig
         {
@@ -757,56 +685,49 @@ public static class CsvStatementParsers
             ["source_namespace"] = stableIdColumn is null ? string.Empty : "generic",
             ["dates_source"] = "derived",
         };
+
         return new GenericDetection(config, suggestions);
     }
 
     private static bool LooksLikeHeader(IReadOnlyList<string> fields)
     {
-        var normalized = fields.Select(NormalizeHeader).ToArray();
-        var hasDate = normalized.Any(value => value.Contains("date", StringComparison.Ordinal));
-        var hasDescription = normalized.Any(value =>
+        string[] normalized = fields.Select(NormalizeHeader).ToArray();
+        bool hasDate = normalized.Any(value => value.Contains("date", StringComparison.Ordinal));
+        bool hasDescription = normalized.Any(value =>
             value.Contains("desc", StringComparison.Ordinal) ||
             value.Contains("detail", StringComparison.Ordinal) ||
             value.Contains("narrative", StringComparison.Ordinal) ||
             value.Contains("memo", StringComparison.Ordinal));
-        var hasAmount = normalized.Any(value =>
-            value.Contains("amount", StringComparison.Ordinal) ||
-            value.Contains("debit", StringComparison.Ordinal) ||
-            value.Contains("credit", StringComparison.Ordinal));
+        bool hasAmount = normalized.Any(value => value.Contains("amount", StringComparison.Ordinal) || value.Contains("debit", StringComparison.Ordinal) || value.Contains("credit", StringComparison.Ordinal));
+
         return hasDate && hasDescription && hasAmount;
     }
 
     private static string NormalizeHeader(string value) =>
         StatementText.CollapseWhitespace(value).ToLowerInvariant();
 
-    private static int? FindHeader(IReadOnlyList<string> headers,
-                                   params string[] names)
+    private static int? FindHeader(IReadOnlyList<string> headers, params string[] names)
     {
-        for (var index = 0; index < headers.Count; index++)
+        for (int index = 0; index < headers.Count; index++)
         {
             if (names.Contains(headers[index], StringComparer.Ordinal))
             {
                 return index;
             }
         }
+
         return null;
     }
 
-    private static string ProposeDateFormat(IReadOnlyList<CsvRecord> records,
-                                            int? column)
+    private static string ProposeDateFormat(IReadOnlyList<CsvRecord> records, int? column)
     {
         if (column is null)
         {
             return "yyyy-MM-dd";
         }
 
-        var values = records
-            .Where(record => column.Value < record.Fields.Count)
-            .Select(record => record.Fields[column.Value])
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Take(20)
-            .ToList();
-        foreach (var format in _preferredDateFormats)
+        var values = records.Where(record => column.Value < record.Fields.Count).Select(record => record.Fields[column.Value]).Where(value => !string.IsNullOrWhiteSpace(value)).Take(20).ToList();
+        foreach (string format in _preferredDateFormats)
         {
             if (values.Count > 0 && values.All(value =>
                     format.Contains("yy", StringComparison.Ordinal) &&
@@ -817,39 +738,35 @@ public static class CsvStatementParsers
                 return format;
             }
         }
+
         return "yyyy-MM-dd";
     }
 
-    private static (string Decimal, string Thousands) ProposeSeparators(IReadOnlyList<CsvRecord> records,
-                                                                        int? column)
+    private static (string Decimal, string Thousands) ProposeSeparators(IReadOnlyList<CsvRecord> records, int? column)
     {
         if (column is null)
         {
             return (".", "none");
         }
 
-        var values = records
-            .Where(record => column.Value < record.Fields.Count)
-            .Select(record => record.Fields[column.Value])
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Take(20)
-            .ToList();
-        foreach (var value in values)
+        var values = records.Where(record => column.Value < record.Fields.Count).Select(record => record.Fields[column.Value]).Where(value => !string.IsNullOrWhiteSpace(value)).Take(20).ToList();
+        foreach (string? value in values)
         {
-            var lastComma = value.LastIndexOf(',');
-            var lastDot = value.LastIndexOf('.');
+            int lastComma = value.LastIndexOf(',');
+            int lastDot = value.LastIndexOf('.');
             if (lastComma >= 0 && lastDot >= 0)
             {
                 return lastDot > lastComma ? (".", "comma") : (",", "dot");
             }
         }
+
         return (".", "none");
     }
 
-    private static bool MatchesNegativeStyle(string raw,
-                                             string style)
+    private static bool MatchesNegativeStyle(string raw, string style)
     {
-        var value = raw.Trim();
+        string value = raw.Trim();
+
         return style switch
         {
             "any" => true,
@@ -883,6 +800,7 @@ public static class CsvStatementParsers
             ["source_namespace"] = config.SourceNamespace ?? string.Empty,
             ["century"] = config.Century?.ToString() ?? string.Empty,
         };
+
         return suggestions;
     }
 
@@ -894,17 +812,15 @@ public static class CsvStatementParsers
             {
                 continue;
             }
-            var fields = record.Fields
-                .Select(field => StatementText.CollapseWhitespace(field).ToLowerInvariant())
-                .ToArray();
-            var hasDate = fields.Any(field =>
-                field.Contains("date", StringComparison.Ordinal));
-            var hasDescription = fields.Any(field =>
+
+            string[] fields = record.Fields.Select(field => StatementText.CollapseWhitespace(field).ToLowerInvariant()).ToArray();
+            bool hasDate = fields.Any(field => field.Contains("date", StringComparison.Ordinal));
+            bool hasDescription = fields.Any(field =>
                 field.Contains("description", StringComparison.Ordinal) ||
                 field.Contains("details", StringComparison.Ordinal) ||
                 field.Contains("narrative", StringComparison.Ordinal) ||
                 field.Contains("memo", StringComparison.Ordinal));
-            var hasAmount = fields.Any(field =>
+            bool hasAmount = fields.Any(field =>
                 field.Contains("amount", StringComparison.Ordinal) ||
                 field.Contains("balance", StringComparison.Ordinal) ||
                 field.Contains("debit", StringComparison.Ordinal) ||
@@ -914,22 +830,20 @@ public static class CsvStatementParsers
                 return record.StartLine;
             }
         }
+
         return null;
     }
 
     private static int? FindFnbPreambleEnd(string text)
     {
-        var lines = text.Split('\n')
-            .Take(10)
-            .Select(line => line.TrimEnd('\r'))
-            .ToList();
-        var markerCount = lines.Take(6).Count(LooksLikeFnbPreambleLine);
+        var lines = text.Split('\n').Take(10).Select(line => line.TrimEnd('\r')).ToList();
+        int markerCount = lines.Take(6).Count(LooksLikeFnbPreambleLine);
         if (markerCount < 3)
         {
             return null;
         }
 
-        for (var index = 6; index < lines.Count; index++)
+        for (int index = 6; index < lines.Count; index++)
         {
             if (LooksLikeTransactionHeader(lines[index]))
             {
@@ -946,20 +860,19 @@ public static class CsvStatementParsers
 
     private static bool LooksLikeFnbTitle(string line)
     {
-        var normalized = StatementText.CollapseWhitespace(
-            line.TrimStart().TrimStart('"')).ToLowerInvariant();
-        return normalized.Contains("fnb", StringComparison.Ordinal) ||
-               normalized.Contains("first national", StringComparison.Ordinal);
+        string normalized = StatementText.CollapseWhitespace(line.TrimStart().TrimStart('"')).ToLowerInvariant();
+
+        return normalized.Contains("fnb", StringComparison.Ordinal) || normalized.Contains("first national", StringComparison.Ordinal);
     }
 
     private static bool LooksLikeFnbPreambleLine(string line)
     {
-        var normalized = StatementText.CollapseWhitespace(
-            line.TrimStart().TrimStart('"')).ToLowerInvariant();
+        string normalized = StatementText.CollapseWhitespace(line.TrimStart().TrimStart('"')).ToLowerInvariant();
         if (normalized.Length == 0)
         {
             return false;
         }
+
         return normalized.StartsWith("fnb", StringComparison.Ordinal) ||
                normalized.StartsWith("first national", StringComparison.Ordinal) ||
                normalized.StartsWith("account", StringComparison.Ordinal) ||
@@ -975,7 +888,8 @@ public static class CsvStatementParsers
 
     private static bool LooksLikeTransactionHeader(string line)
     {
-        var normalized = StatementText.CollapseWhitespace(line).ToLowerInvariant();
+        string normalized = StatementText.CollapseWhitespace(line).ToLowerInvariant();
+
         return normalized.Contains("date", StringComparison.Ordinal) &&
                (normalized.Contains("desc", StringComparison.Ordinal) ||
                 normalized.Contains("details", StringComparison.Ordinal) ||
@@ -1052,6 +966,5 @@ public static class CsvStatementParsers
                                            int Score,
                                            int CommonFieldCount);
 
-    private sealed record GenericDetection(ParserConfig Config,
-                                           IReadOnlyDictionary<string, string> Suggestions);
+    private sealed record GenericDetection(ParserConfig Config, IReadOnlyDictionary<string, string> Suggestions);
 }

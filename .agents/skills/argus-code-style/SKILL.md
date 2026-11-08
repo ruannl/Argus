@@ -19,7 +19,19 @@ dotnet format style <project> --diagnostics IDE0005 --severity info --include <p
 
 Paths are relative to `backend/`. Omit `--include` for a full pass or add
 `--verify-no-changes` for a check. Resolve naming diagnostics with a symbol
-rename and review long parameter declarations.
+rename.
+
+- For declarations with three or more parameters, keep the first parameter on
+  the declaration line and align the rest under it. Shorter lists can stay
+  inline.
+- Prefer explicit types over `var`, including `out` variables and tuple
+  deconstructions. `dotnet format` does not apply these suggestion-level
+  preferences; the IDE format does.
+- There is no fixed C# line length. Join statements when the result is at most
+  240 characters; otherwise break long boolean conditions after `&&` or `||`
+  and align the continuation.
+- Put a blank line after a guard clause and before a final `return`.
+- In a `catch` block, pass the caught exception to the logger.
 
 ## Next.js
 

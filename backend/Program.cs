@@ -16,10 +16,7 @@ if (args.Contains("--parse-statement-pdf", StringComparer.Ordinal))
     // The runner terminates this child by process group when a descendant
     // outlives a timed-out or abnormal root and keeps an inherited pipe open.
     argus.Server.Imports.ParserProcessIsolation.JoinOwnProcessGroup();
-    return await argus.Server.Imports.PdfParserChild.RunAsync(
-        Console.OpenStandardInput(),
-        Console.OpenStandardOutput(),
-        Console.OpenStandardError());
+    return await argus.Server.Imports.PdfParserChild.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput(), Console.OpenStandardError());
 }
 
 var builder = WebApplication.CreateBuilder(args);
@@ -86,8 +83,7 @@ builder.Services.AddSingleton<AccountApi>();
 builder.Services.AddSingleton<FinanceApi>();
 builder.Services.AddSingleton<argus.Server.Imports.ParserAdmission>();
 builder.Services.AddSingleton<argus.Server.Imports.PdfParserRunner>();
-builder.Services.AddSingleton<argus.Server.Imports.IImportFaultInjector>(
-    argus.Server.Imports.NoopImportFaultInjector.Instance);
+builder.Services.AddSingleton<argus.Server.Imports.IImportFaultInjector>(argus.Server.Imports.NoopImportFaultInjector.Instance);
 builder.Services.AddSingleton<StatementImportStore>();
 builder.Services.AddSingleton<StatementImportApi>();
 builder.Services.AddSingleton<TransactionStore>();
@@ -109,8 +105,7 @@ app.UseCors();
 
 app.Use(async (context, next) =>
 {
-    if (context.Request.Path.StartsWithSegments("/v1/finance/imports") ||
-        context.Request.Path.StartsWithSegments("/v1/finance/transactions"))
+    if (context.Request.Path.StartsWithSegments("/v1/finance/imports") || context.Request.Path.StartsWithSegments("/v1/finance/transactions"))
     {
         context.Response.Headers.CacheControl = "no-store";
     }
@@ -119,7 +114,7 @@ app.Use(async (context, next) =>
 
 app.Use(async (context, next) =>
 {
-    var requestId = context.Request.Headers["X-Request-Id"].ToString();
+    string requestId = context.Request.Headers["X-Request-Id"].ToString();
     if (string.IsNullOrEmpty(requestId))
     {
         requestId = Guid.NewGuid().ToString("N");
@@ -128,12 +123,7 @@ app.Use(async (context, next) =>
 
     var stopwatch = Stopwatch.StartNew();
     await next();
-    app.Logger.LogInformation(
-        "http_request method={Method} path={Path} status={Status} elapsed_ms={ElapsedMs}",
-        context.Request.Method,
-        context.Request.Path.Value,
-        context.Response.StatusCode,
-        stopwatch.ElapsedMilliseconds);
+    app.Logger.LogInformation("http_request method={Method} path={Path} status={Status} elapsed_ms={ElapsedMs}", context.Request.Method, context.Request.Path.Value, context.Response.StatusCode, stopwatch.ElapsedMilliseconds);
 });
 
 var db = app.Services.GetRequiredService<Db>();
@@ -141,10 +131,7 @@ await db.MigrateAsync();
 
 if (args.Contains("seed"))
 {
-    await Seed.RunAsync(
-        db,
-        settings,
-        app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("seed"));
+    await Seed.RunAsync(db, settings, app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("seed"));
     return 0;
 }
 

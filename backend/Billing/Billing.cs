@@ -14,22 +14,17 @@ public static class BillingEvents
 {
     public const string WebhookSignatureHeader = "X-Billing-Webhook-Signature";
 
-    public static bool VerifyWebhook(string payload,
-                                     string? signature,
-                                     string secret)
+    public static bool VerifyWebhook(string payload, string? signature, string secret)
     {
         if (string.IsNullOrEmpty(signature))
         {
             return false;
         }
 
-        var expected = Convert.ToHexString(
-                HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(payload)))
-            .ToLowerInvariant();
-        var provided = signature.Trim().ToLowerInvariant();
-        return CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(expected),
-            Encoding.UTF8.GetBytes(provided));
+        string expected = Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
+        string provided = signature.Trim().ToLowerInvariant();
+
+        return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(expected), Encoding.UTF8.GetBytes(provided));
     }
 
     /// <summary>
@@ -58,39 +53,34 @@ public static class BillingEvents
 
         using (document)
         {
-            var root = document.RootElement;
+            JsonElement root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
             {
                 return false;
             }
+
             if (!root.TryGetProperty("type", out var typeElement) || typeElement.ValueKind != JsonValueKind.String)
             {
                 return false;
             }
-            if (!root.TryGetProperty("customer_id", out var customerElement)
-                || customerElement.ValueKind != JsonValueKind.String
-                || !Guid.TryParse(customerElement.GetString(), out var customer))
+
+            if (!root.TryGetProperty("customer_id", out var customerElement) || customerElement.ValueKind != JsonValueKind.String || !Guid.TryParse(customerElement.GetString(), out Guid customer))
             {
                 return false;
             }
 
             DateTime? next = null;
-            if (root.TryGetProperty("next_billing_at", out var nextElement)
-                && nextElement.ValueKind != JsonValueKind.Null)
+            if (root.TryGetProperty("next_billing_at", out var nextElement) && nextElement.ValueKind != JsonValueKind.Null)
             {
-                if (nextElement.ValueKind != JsonValueKind.String
-                    || !DateTime.TryParse(
-                        nextElement.GetString(),
-                        CultureInfo.InvariantCulture,
-                        DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
-                        out var parsed))
+                if (nextElement.ValueKind != JsonValueKind.String || !DateTime.TryParse(nextElement.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed))
                 {
                     return false;
                 }
+
                 next = parsed;
             }
 
-            var type = typeElement.GetString()!;
+            string type = typeElement.GetString()!;
             switch (type)
             {
                 case "subscription.activated" when next is not null:

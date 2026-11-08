@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text;
 using argus.Server.Imports;
 
@@ -48,11 +49,7 @@ public sealed class StatementParserTests
     public void StandardBankFourPageFixtureParsesEveryRow()
     {
         var fixture = StatementFixtureBuilder.BuildStandardBankPdf(4, 49, 66);
-        var result = StandardBankPdfParser.Parse(
-            fixture.Bytes,
-            new DateOnly(2025, 1, 1),
-            new DateOnly(2025, 1, 31),
-            null);
+        var result = StandardBankPdfParser.Parse(fixture.Bytes, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), null);
 
         Assert.Equal(49, result.Rows.Count);
         Assert.Equal(new DateOnly(2025, 1, 1), result.ProposedStartDate);
@@ -73,11 +70,7 @@ public sealed class StatementParserTests
     public void StandardBankEighteenPageFixtureParsesEveryRow()
     {
         var fixture = StatementFixtureBuilder.BuildStandardBankPdf(18, 297, 356);
-        var result = StandardBankPdfParser.Parse(
-            fixture.Bytes,
-            new DateOnly(2025, 1, 1),
-            new DateOnly(2025, 1, 31),
-            null);
+        var result = StandardBankPdfParser.Parse(fixture.Bytes, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), null);
 
         Assert.Equal(297, result.Rows.Count);
         for (var index = 0; index < fixture.Rows.Count; index++)
@@ -94,11 +87,7 @@ public sealed class StatementParserTests
     [Fact]
     public void HandAuthoredSmallPdfParses()
     {
-        var result = StandardBankPdfParser.Parse(
-            StatementFixtureBuilder.BuildHandAuthoredSmallPdf(),
-            new DateOnly(2025, 2, 1),
-            new DateOnly(2025, 2, 28),
-            null);
+        var result = StandardBankPdfParser.Parse(StatementFixtureBuilder.BuildHandAuthoredSmallPdf(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(3, result.Rows.Count);
         Assert.Equal(-1000, result.Rows[0].AmountCents);
@@ -109,13 +98,8 @@ public sealed class StatementParserTests
     [Fact]
     public void CrossYearPeriodResolvesTwoDigitYears()
     {
-        var fixture = StatementFixtureBuilder.BuildStandardBankPdf(
-            4, 49, 0, includePeriod: true, crossYear: true, reorderedStreams: false);
-        var result = StandardBankPdfParser.Parse(
-            fixture.Bytes,
-            new DateOnly(2023, 12, 15),
-            new DateOnly(2024, 1, 15),
-            null);
+        var fixture = StatementFixtureBuilder.BuildStandardBankPdf(4, 49, 0, includePeriod: true, crossYear: true, reorderedStreams: false);
+        var result = StandardBankPdfParser.Parse(fixture.Bytes, new DateOnly(2023, 12, 15), new DateOnly(2024, 1, 15), null);
 
         Assert.Equal(new DateOnly(2023, 12, 15), result.ProposedStartDate);
         Assert.Equal(new DateOnly(2024, 1, 15), result.ProposedEndDate);
@@ -138,11 +122,8 @@ public sealed class StatementParserTests
     [Fact]
     public void GenericCsvMapsSignedAmountsAndQuotedMultilineDescriptions()
     {
-        const string csv = "Date,Description,Amount\n" +
-                           "2025-01-02,\"Coffee, large\",-12.34\n" +
-                           "2025-01-03,\"Multi\nline note\",100.00\n" +
-                           "2025-01-04,\"  Cafe  Corner\tnote  \",-5.00\n";
-        var config = new ParserConfig
+        const string csv = "Date,Description,Amount\n" + "2025-01-02,\"Coffee, large\",-12.34\n" + "2025-01-03,\"Multi\nline note\",100.00\n" + "2025-01-04,\"  Cafe  Corner\tnote  \",-5.00\n";
+        ParserConfig config = new ParserConfig
         {
             Format = "generic",
             HeaderLine = 1,
@@ -173,11 +154,8 @@ public sealed class StatementParserTests
     [Fact]
     public void FnbCsvPreservesInternalDescriptionWhitespaceAndTrimsPadding()
     {
-        const string csv = "one\ntwo\nthree\nfour\nfive\nsix\n" +
-                           "Date,Amount,Balance,Description\n" +
-                           "2024/01/02,-10.00,0.00,Coffee   Shop\tNote   \n";
-        var result = CsvStatementParsers.ParseFnb(
-            Encoding.UTF8.GetBytes(csv), null, null);
+        const string csv = "one\ntwo\nthree\nfour\nfive\nsix\n" + "Date,Amount,Balance,Description\n" + "2024/01/02,-10.00,0.00,Coffee   Shop\tNote   \n";
+        var result = CsvStatementParsers.ParseFnb(Encoding.UTF8.GetBytes(csv), null, null);
 
         var row = Assert.Single(result.Rows);
         Assert.Equal("Coffee   Shop\tNote", row.Description);
@@ -188,12 +166,9 @@ public sealed class StatementParserTests
     [Fact]
     public void FnbMalformedHeaderIsRejected()
     {
-        const string csv = "one\ntwo\nthree\nfour\nfive\nsix\n" +
-                           "\"Date\" ,Amount,Balance,Description\n" +
-                           "2024/01/02,-10.00,0.00,Coffee\n";
+        const string csv = "one\ntwo\nthree\nfour\nfive\nsix\n" + "\"Date\" ,Amount,Balance,Description\n" + "2024/01/02,-10.00,0.00,Coffee\n";
 
-        var exception = Assert.Throws<StatementRejectedException>(() =>
-            CsvStatementParsers.ParseFnb(Encoding.UTF8.GetBytes(csv), null, null));
+        var exception = Assert.Throws<StatementRejectedException>(() => CsvStatementParsers.ParseFnb(Encoding.UTF8.GetBytes(csv), null, null));
         Assert.Equal(ParserReasons.UnsupportedLayout, exception.Reason);
     }
 
@@ -201,7 +176,7 @@ public sealed class StatementParserTests
     public void GenericCsvRejectsNegativeColumnIndexes()
     {
         const string csv = "Date,Description,Amount\n2025-01-02,Shop,-1.00\n";
-        var config = new ParserConfig
+        ParserConfig config = new ParserConfig
         {
             Format = "generic",
             HeaderLine = 1,
@@ -216,20 +191,15 @@ public sealed class StatementParserTests
             Direction = "normal",
         };
 
-        var exception = Assert.Throws<StatementRejectedException>(() =>
-            CsvStatementParsers.ParseGeneric(Encoding.UTF8.GetBytes(csv), config, null, null));
+        var exception = Assert.Throws<StatementRejectedException>(() => CsvStatementParsers.ParseGeneric(Encoding.UTF8.GetBytes(csv), config, null, null));
         Assert.Equal(ParserReasons.FormatConfirmationRequired, exception.Reason);
     }
 
     [Fact]
     public void GenericDebitAndCreditColumnsAreExclusive()
     {
-        const string csv = "Date,Description,Debit,Credit\n" +
-                           "2025-01-02,Outgoing,10.00,\n" +
-                           "2025-01-03,Incoming,,20.00\n" +
-                           "2025-01-04,Both,1.00,2.00\n" +
-                           "2025-01-05,Neither,,\n";
-        var config = new ParserConfig
+        const string csv = "Date,Description,Debit,Credit\n" + "2025-01-02,Outgoing,10.00,\n" + "2025-01-03,Incoming,,20.00\n" + "2025-01-04,Both,1.00,2.00\n" + "2025-01-05,Neither,,\n";
+        ParserConfig config = new ParserConfig
         {
             Format = "generic",
             HeaderLine = 1,
@@ -257,7 +227,7 @@ public sealed class StatementParserTests
     public void GenericTwoDigitDatesResolveAgainstConfirmedPeriod()
     {
         const string csv = "Date,Description,Amount\n01/12/23,December,-1.00\n05/01/24,January,2.00\n";
-        var config = new ParserConfig
+        ParserConfig config = new ParserConfig
         {
             Format = "generic",
             HeaderLine = 1,
@@ -272,11 +242,7 @@ public sealed class StatementParserTests
             Direction = "normal",
         };
 
-        var result = CsvStatementParsers.ParseGeneric(
-            Encoding.UTF8.GetBytes(csv),
-            config,
-            new DateOnly(2023, 12, 1),
-            new DateOnly(2024, 1, 31));
+        var result = CsvStatementParsers.ParseGeneric(Encoding.UTF8.GetBytes(csv), config, new DateOnly(2023, 12, 1), new DateOnly(2024, 1, 31));
 
         Assert.Equal(new DateOnly(2023, 12, 1), result.Rows[0].TransactionDate);
         Assert.Equal(new DateOnly(2024, 1, 5), result.Rows[1].TransactionDate);
@@ -286,7 +252,7 @@ public sealed class StatementParserTests
     public void GenericInvalidAmountsNeverRoundOrTruncate()
     {
         const string csv = "Date,Description,Amount\n2025-01-02,Too precise,1.234\n2025-01-03,Overflow,10000000000000000.00\n";
-        var config = new ParserConfig
+        ParserConfig config = new ParserConfig
         {
             Format = "generic",
             HeaderLine = 1,
@@ -314,8 +280,7 @@ public sealed class StatementParserTests
     {
         var bytes = Encoding.UTF8.GetBytes("Date,Description,Amount\n2025-01-02,Coffee,-1.00\n");
 
-        var exception = Assert.Throws<StatementRejectedException>(() =>
-            CsvStatementParsers.ParseGeneric(bytes, new ParserConfig(), null, null));
+        var exception = Assert.Throws<StatementRejectedException>(() => CsvStatementParsers.ParseGeneric(bytes, new ParserConfig(), null, null));
 
         Assert.Equal(ParserReasons.FormatConfirmationRequired, exception.Reason);
     }
@@ -323,8 +288,8 @@ public sealed class StatementParserTests
     [Fact]
     public void ZipWithMultipleEntriesIsRejected()
     {
-        using var output = new MemoryStream();
-        using (var archive = new System.IO.Compression.ZipArchive(
+        using MemoryStream output = new MemoryStream();
+        using (ZipArchive archive = new System.IO.Compression.ZipArchive(
                    output, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
         {
             using (var first = archive.CreateEntry("one.csv").Open())
@@ -337,8 +302,7 @@ public sealed class StatementParserTests
             }
         }
 
-        var exception = Assert.Throws<StatementRejectedException>(() =>
-            CsvStatementParsers.ParseFnb(output.ToArray(), null, null));
+        var exception = Assert.Throws<StatementRejectedException>(() => CsvStatementParsers.ParseFnb(output.ToArray(), null, null));
 
         Assert.Equal(ParserReasons.UnsafeArchive, exception.Reason);
     }
@@ -346,8 +310,7 @@ public sealed class StatementParserTests
     [Fact]
     public void NonPdfBytesAreRejectedSafely()
     {
-        var exception = Assert.Throws<StatementRejectedException>(() =>
-            StandardBankPdfParser.Parse(Encoding.UTF8.GetBytes("not a pdf"), null, null, null));
+        var exception = Assert.Throws<StatementRejectedException>(() => StandardBankPdfParser.Parse(Encoding.UTF8.GetBytes("not a pdf"), null, null, null));
 
         Assert.Equal(ParserReasons.UnsupportedLayout, exception.Reason);
     }
@@ -367,18 +330,16 @@ public sealed class StatementParserTests
     [Fact]
     public void PeriodOnlyPagesBeforeAndAfterATableAreHarmless()
     {
-        var period = new PdfText(40, 780, "Statement period: 01 Feb 2025 to 28 Feb 2025");
-        var before = new MinimalPdfBuilder();
+        PdfText period = new PdfText(40, 780, "Statement period: 01 Feb 2025 to 28 Feb 2025");
+        MinimalPdfBuilder before = new MinimalPdfBuilder();
         before.AddPage([period]);
         before.AddPage(StatementFixtureBuilder.HandAuthoredSmallPdfTexts());
-        var beforeResult = StandardBankPdfParser.Parse(
-            before.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var beforeResult = StandardBankPdfParser.Parse(before.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
-        var after = new MinimalPdfBuilder();
+        MinimalPdfBuilder after = new MinimalPdfBuilder();
         after.AddPage(StatementFixtureBuilder.HandAuthoredSmallPdfTexts());
         after.AddPage([period]);
-        var afterResult = StandardBankPdfParser.Parse(
-            after.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var afterResult = StandardBankPdfParser.Parse(after.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(3, beforeResult.Rows.Count);
         Assert.Equal(3, afterResult.Rows.Count);
@@ -389,7 +350,7 @@ public sealed class StatementParserTests
     [Fact]
     public void OpeningAndClosingBalanceRowsAreExcluded()
     {
-        var texts = new List<PdfText>
+        List<PdfText> texts = new List<PdfText>
         {
             new(40, 820, "Synthetic Bank"),
             new(40, 800, "Statement period: 01 Feb 2025 to 28 Feb 2025"),
@@ -417,11 +378,10 @@ public sealed class StatementParserTests
             new(100, 706, "Closing balance"),
             new(530, 706, "28.50"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(3, result.Rows.Count);
         Assert.Equal(-1000, result.Rows[0].AmountCents);
@@ -432,18 +392,17 @@ public sealed class StatementParserTests
     [Fact]
     public void BroughtAndCarriedForwardLabelsAreExcludedPositionally()
     {
-        var texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        List<PdfText> texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 770, "Balance brought forward"),
             new(530, 770, "1,000.00"),
             new(100, 706, "Balance carried forward"),
             new(530, 706, "28.50"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(3, result.Rows.Count);
     }
@@ -452,19 +411,17 @@ public sealed class StatementParserTests
     [InlineData("Total payments", 300)]
     [InlineData("Total deposits", 400)]
     [InlineData("Total bank fees", 470)]
-    public void TerminalTotalsForEachFlowBandAreExcluded(string label,
-                                                         double flowX)
+    public void TerminalTotalsForEachFlowBandAreExcluded(string label, double flowX)
     {
-        var texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        List<PdfText> texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 706, label),
             new(flowX, 706, "1,234.56"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(3, result.Rows.Count);
     }
@@ -472,7 +429,7 @@ public sealed class StatementParserTests
     [Fact]
     public void TerminalTotalBeforeALaterTransactionBecomesAnInvalidCandidate()
     {
-        var texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        List<PdfText> texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 706, "Total payments"),
             new(300, 706, "1,234.56"),
@@ -480,11 +437,10 @@ public sealed class StatementParserTests
             new(100, 688, "Later row"),
             new(300, 688, "5.00"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(5, result.Rows.Count);
         var total = Assert.Single(result.Rows, row => row.RawValues["description"] == "Total payments");
@@ -496,7 +452,7 @@ public sealed class StatementParserTests
     [Fact]
     public void DatedSummaryAndTotalDescriptionsRemainTransactions()
     {
-        var texts = new List<PdfText>
+        List<PdfText> texts = new List<PdfText>
         {
             new(40, 800, "Date"),
             new(100, 800, "Description"),
@@ -518,11 +474,10 @@ public sealed class StatementParserTests
             new(100, 706, "Synthetic Bank"),
             new(400, 706, "40.00"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(4, result.Rows.Count);
         Assert.All(result.Rows, row => Assert.True(row.IsValid));
@@ -535,7 +490,7 @@ public sealed class StatementParserTests
     [Fact]
     public void EveryDateAndFlowCombinationRemainsACandidate()
     {
-        var texts = new List<PdfText>
+        List<PdfText> texts = new List<PdfText>
         {
             new(40, 800, "Date"),
             new(100, 800, "Description"),
@@ -577,11 +532,10 @@ public sealed class StatementParserTests
             new(300, 580, "0.00"),
             new(400, 580, "5.00"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(11, result.Rows.Count);
         Assert.Equal(-123456, result.Rows[0].AmountCents);
@@ -605,7 +559,7 @@ public sealed class StatementParserTests
     [Fact]
     public void SingleWordBankFeesHeaderParses()
     {
-        var texts = new List<PdfText>
+        List<PdfText> texts = new List<PdfText>
         {
             new(40, 800, "Date"),
             new(100, 800, "Description"),
@@ -617,11 +571,10 @@ public sealed class StatementParserTests
             new(100, 760, "Single header row"),
             new(300, 760, "10.00"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Single(result.Rows);
         Assert.Equal(-1000, result.Rows[0].AmountCents);
@@ -630,15 +583,14 @@ public sealed class StatementParserTests
     [Fact]
     public void SummaryWordsInAContinuationRemainDescriptionText()
     {
-        var texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        List<PdfText> texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 752, "Summary page 2"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(3, result.Rows.Count);
         Assert.Equal("Hand written one Summary page 2", result.Rows[0].Description);
@@ -647,7 +599,7 @@ public sealed class StatementParserTests
     [Fact]
     public void CrossPageContinuationAttachesBeforeTheNextPagesFirstRow()
     {
-        var first = new List<PdfText>
+        List<PdfText> first = new List<PdfText>
         {
             new(40, 800, "Date"),
             new(100, 800, "Description"),
@@ -660,7 +612,7 @@ public sealed class StatementParserTests
             new(100, 760, "First row"),
             new(300, 760, "10.00"),
         };
-        var second = new List<PdfText>
+        List<PdfText> second = new List<PdfText>
         {
             new(40, 800, "Date"),
             new(100, 800, "Description"),
@@ -674,12 +626,11 @@ public sealed class StatementParserTests
             new(100, 752, "Second row"),
             new(300, 752, "20.00"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(first);
         pdf.AddPage(second);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(2, result.Rows.Count);
         Assert.Equal("First row continued across pages", result.Rows[0].Description);
@@ -690,24 +641,13 @@ public sealed class StatementParserTests
     public void CompatibleRepeatedHeadersAreConsumedWithoutExtraRows()
     {
         var texts = Header(800, 40, 100, 300, 400, 470, 500, 530);
-        texts.AddRange(
-        [
-            new PdfText(40, 760, "01 Feb 2025"),
-            new PdfText(100, 760, "First row"),
-            new PdfText(300, 760, "10.00"),
-        ]);
+        texts.AddRange([new PdfText(40, 760, "01 Feb 2025"), new PdfText(100, 760, "First row"), new PdfText(300, 760, "10.00"),]);
         texts.AddRange(Header(700, 40, 100, 300, 400, 470, 500, 530));
-        texts.AddRange(
-        [
-            new PdfText(40, 680, "02 Feb 2025"),
-            new PdfText(100, 680, "Second row"),
-            new PdfText(300, 680, "20.00"),
-        ]);
-        var pdf = new MinimalPdfBuilder();
+        texts.AddRange([new PdfText(40, 680, "02 Feb 2025"), new PdfText(100, 680, "Second row"), new PdfText(300, 680, "20.00"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(2, result.Rows.Count);
         Assert.All(result.Rows, row => Assert.True(row.IsValid));
@@ -719,24 +659,13 @@ public sealed class StatementParserTests
     public void ShiftedCompatibleRepeatedHeaderPreservesColumnAssignments()
     {
         var texts = Header(800, 40, 100, 300, 400, 470, 500, 530);
-        texts.AddRange(
-        [
-            new PdfText(40, 760, "01 Feb 2025"),
-            new PdfText(100, 760, "First row"),
-            new PdfText(300, 760, "10.00"),
-        ]);
+        texts.AddRange([new PdfText(40, 760, "01 Feb 2025"), new PdfText(100, 760, "First row"), new PdfText(300, 760, "10.00"),]);
         texts.AddRange(Header(700, 45, 105, 305, 405, 475, 505, 535));
-        texts.AddRange(
-        [
-            new PdfText(40, 680, "02 Feb 2025"),
-            new PdfText(100, 680, "Second row"),
-            new PdfText(300, 680, "20.00"),
-        ]);
-        var pdf = new MinimalPdfBuilder();
+        texts.AddRange([new PdfText(40, 680, "02 Feb 2025"), new PdfText(100, 680, "Second row"), new PdfText(300, 680, "20.00"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(2, result.Rows.Count);
         Assert.All(result.Rows, row => Assert.True(row.IsValid));
@@ -746,37 +675,23 @@ public sealed class StatementParserTests
     public void HeaderResidueCannotBeConsumedAsACompleteHeader()
     {
         var texts = Header(800, 40, 100, 300, 400, 470, 500, 530);
-        texts.AddRange(
-        [
-            new PdfText(40, 760, "01 Feb 2025"),
-            new PdfText(100, 760, "First row"),
-            new PdfText(300, 760, "10.00"),
-        ]);
+        texts.AddRange([new PdfText(40, 760, "01 Feb 2025"), new PdfText(100, 760, "First row"), new PdfText(300, 760, "10.00"),]);
         texts.AddRange(Header(700, 40, 100, 300, 400, 470, 500, 530));
         texts.Add(new PdfText(560, 700, "RESIDUE"));
-        texts.AddRange(
-        [
-            new PdfText(40, 680, "02 Feb 2025"),
-            new PdfText(100, 680, "Second row"),
-            new PdfText(300, 680, "20.00"),
-        ]);
-        var pdf = new MinimalPdfBuilder();
+        texts.AddRange([new PdfText(40, 680, "02 Feb 2025"), new PdfText(100, 680, "Second row"), new PdfText(300, 680, "20.00"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(3, result.Rows.Count);
-        Assert.Contains(
-            result.Rows,
-            row => row.ValidationCodes.Contains(ValidationCodes.InvalidDate) &&
-                   row.RawValues["description"] == "Description");
+        Assert.Contains(result.Rows, row => row.ValidationCodes.Contains(ValidationCodes.InvalidDate) && row.RawValues["description"] == "Description");
     }
 
     [Fact]
     public void AboveHeaderCandidatesKeepDistinctDocumentSourceLines()
     {
-        var texts = new List<PdfText>
+        List<PdfText> texts = new List<PdfText>
         {
             new(40, 820, "01 Feb 2025"),
             new(100, 820, "First above"),
@@ -786,17 +701,11 @@ public sealed class StatementParserTests
             new(300, 810, "20.00"),
         };
         texts.AddRange(Header(780, 40, 100, 300, 400, 470, 500, 530));
-        texts.AddRange(
-        [
-            new PdfText(40, 760, "03 Feb 2025"),
-            new PdfText(100, 760, "Body row"),
-            new PdfText(300, 760, "30.00"),
-        ]);
-        var pdf = new MinimalPdfBuilder();
+        texts.AddRange([new PdfText(40, 760, "03 Feb 2025"), new PdfText(100, 760, "Body row"), new PdfText(300, 760, "30.00"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(3, result.Rows.Count);
         Assert.Equal([1, 2, 4], result.Rows.Select(row => row.SourceLine).ToArray());
@@ -807,35 +716,18 @@ public sealed class StatementParserTests
     [Fact]
     public void LaterPageSourceLinesIncludeAllConsumedLines()
     {
-        var pdf = new MinimalPdfBuilder();
-        pdf.AddPage(
-        [
-            new PdfText(40, 820, "Synthetic Bank"),
-            new PdfText(40, 800, "Statement period: 01 Feb 2025 to 28 Feb 2025"),
-        ]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
+        pdf.AddPage([new PdfText(40, 820, "Synthetic Bank"), new PdfText(40, 800, "Statement period: 01 Feb 2025 to 28 Feb 2025"),]);
 
         var second = Header(800, 40, 100, 300, 400, 470, 500, 530);
-        second.AddRange(
-        [
-            new PdfText(40, 760, "01 Feb 2025"),
-            new PdfText(100, 760, "Second page row"),
-            new PdfText(300, 760, "10.00"),
-            new PdfText(100, 30, "Page 2 of 3"),
-        ]);
+        second.AddRange([new PdfText(40, 760, "01 Feb 2025"), new PdfText(100, 760, "Second page row"), new PdfText(300, 760, "10.00"), new PdfText(100, 30, "Page 2 of 3"),]);
         pdf.AddPage(second);
 
         var third = Header(800, 40, 100, 300, 400, 470, 500, 530);
-        third.AddRange(
-        [
-            new PdfText(40, 760, "02 Feb 2025"),
-            new PdfText(100, 760, "Third page row"),
-            new PdfText(300, 760, "20.00"),
-            new PdfText(100, 30, "Page 3 of 3"),
-        ]);
+        third.AddRange([new PdfText(40, 760, "02 Feb 2025"), new PdfText(100, 760, "Third page row"), new PdfText(300, 760, "20.00"), new PdfText(100, 30, "Page 3 of 3"),]);
         pdf.AddPage(third);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(2, result.Rows.Count);
         Assert.Equal([4, 7], result.Rows.Select(row => row.SourceLine).ToArray());
@@ -862,7 +754,7 @@ public sealed class StatementParserTests
             texts.Add(new PdfText(100, y, $"Boundary {index}"));
             texts.Add(new PdfText(300, y, $"{index + 1}.00"));
         }
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
         var result = StandardBankPdfParser.Parse(pdf.Build(), null, null, null);
@@ -894,11 +786,10 @@ public sealed class StatementParserTests
             new PdfText(100, 724, "Last day"),
             new PdfText(300, 724, "30.00"),
         ]);
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2024, 2, 1), new DateOnly(2024, 2, 29), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2024, 2, 1), new DateOnly(2024, 2, 29), null);
 
         Assert.Equal(3, result.Rows.Count);
         Assert.Contains("invalid_date", result.Rows[0].ValidationCodes);
@@ -909,17 +800,16 @@ public sealed class StatementParserTests
     [Fact]
     public void TerminalTotalBeforeAHeaderlessSummaryRemainsAnInvalidCandidate()
     {
-        var first = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        List<PdfText> first = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 706, "Total payments"),
             new(300, 706, "1,234.56"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(first);
         pdf.AddPage([new PdfText(40, 780, "Summary")]);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(4, result.Rows.Count);
         var total = Assert.Single(result.Rows, row => row.RawValues["description"] == "Total payments");
@@ -930,7 +820,7 @@ public sealed class StatementParserTests
     [Fact]
     public void TerminalTotalWithClosingBalanceAndFooterIsExcluded()
     {
-        var texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        List<PdfText> texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 706, "Total payments"),
             new(300, 706, "1,234.56"),
@@ -938,11 +828,10 @@ public sealed class StatementParserTests
             new(530, 688, "1,234.56"),
             new(100, 30, "Page 1 of 1"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(3, result.Rows.Count);
     }
@@ -953,17 +842,16 @@ public sealed class StatementParserTests
     [InlineData("Statement period: 01 Jan 2025 to 31 Jan 2025")]
     public void TerminalTotalBeforeLaterRecognizedContentIsRetained(string content)
     {
-        var first = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        List<PdfText> first = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 706, "Total payments"),
             new(300, 706, "1,234.56"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(first);
         pdf.AddPage([new PdfText(40, 780, content)]);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(4, result.Rows.Count);
         var total = Assert.Single(result.Rows, row => row.RawValues["description"] == "Total payments");
@@ -973,18 +861,17 @@ public sealed class StatementParserTests
     [Fact]
     public void TerminalTotalBeforeAHeaderOnlyRestartIsRetained()
     {
-        var first = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        List<PdfText> first = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 706, "Total payments"),
             new(300, 706, "1,234.56"),
         };
         var second = Header(800, 40, 100, 300, 400, 470, 500, 530);
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(first);
         pdf.AddPage(second);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(4, result.Rows.Count);
         var total = Assert.Single(result.Rows, row => row.RawValues["description"] == "Total payments");
@@ -994,12 +881,11 @@ public sealed class StatementParserTests
     [Fact]
     public void TopOfPageSummaryJustInsideTheToleranceIsAccepted()
     {
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(StatementFixtureBuilder.HandAuthoredSmallPdfTexts());
         pdf.AddPage([new PdfText(40, 730, "Summary")]);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(3, result.Rows.Count);
     }
@@ -1007,12 +893,11 @@ public sealed class StatementParserTests
     [Fact]
     public void TopOfPageSummaryAfterATableIsAccepted()
     {
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(StatementFixtureBuilder.HandAuthoredSmallPdfTexts());
         pdf.AddPage([new PdfText(40, 780, "Summary")]);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(3, result.Rows.Count);
     }
@@ -1020,32 +905,19 @@ public sealed class StatementParserTests
     [Fact]
     public void AdjacentCrossPageContinuationsAttachExactlyOnce()
     {
-        var first = new List<PdfText>();
+        List<PdfText> first = new List<PdfText>();
         first.AddRange(Header(800, 40, 100, 300, 400, 470, 500, 530));
-        first.AddRange(
-        [
-            new PdfText(40, 760, "01 Feb 2025"),
-            new PdfText(100, 760, "First row"),
-            new PdfText(300, 760, "10.00"),
-        ]);
+        first.AddRange([new PdfText(40, 760, "01 Feb 2025"), new PdfText(100, 760, "First row"), new PdfText(300, 760, "10.00"),]);
 
-        var second = new List<PdfText>();
+        List<PdfText> second = new List<PdfText>();
         second.AddRange(Header(800, 40, 100, 300, 400, 470, 500, 530));
-        second.AddRange(
-        [
-            new PdfText(100, 770, "first fragment"),
-            new PdfText(100, 762, "second fragment"),
-            new PdfText(40, 752, "02 Feb 2025"),
-            new PdfText(100, 752, "Second row"),
-            new PdfText(300, 752, "20.00"),
-        ]);
+        second.AddRange([new PdfText(100, 770, "first fragment"), new PdfText(100, 762, "second fragment"), new PdfText(40, 752, "02 Feb 2025"), new PdfText(100, 752, "Second row"), new PdfText(300, 752, "20.00"),]);
 
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(first);
         pdf.AddPage(second);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(2, result.Rows.Count);
         Assert.Equal("First row first fragment second fragment", result.Rows[0].Description);
@@ -1055,33 +927,19 @@ public sealed class StatementParserTests
     [Fact]
     public void FooterDoesNotBlockTheImmediateNextPageBridge()
     {
-        var first = new List<PdfText>();
+        List<PdfText> first = new List<PdfText>();
         first.AddRange(Header(800, 40, 100, 300, 400, 470, 500, 530));
-        first.AddRange(
-        [
-            new PdfText(40, 760, "01 Feb 2025"),
-            new PdfText(100, 760, "First row"),
-            new PdfText(300, 760, "10.00"),
-            new PdfText(100, 30, "Page 1 of 2"),
-        ]);
+        first.AddRange([new PdfText(40, 760, "01 Feb 2025"), new PdfText(100, 760, "First row"), new PdfText(300, 760, "10.00"), new PdfText(100, 30, "Page 1 of 2"),]);
 
-        var second = new List<PdfText>();
+        List<PdfText> second = new List<PdfText>();
         second.AddRange(Header(800, 40, 100, 300, 400, 470, 500, 530));
-        second.AddRange(
-        [
-            new PdfText(100, 770, "continued after footer"),
-            new PdfText(40, 752, "02 Feb 2025"),
-            new PdfText(100, 752, "Second row"),
-            new PdfText(300, 752, "20.00"),
-            new PdfText(100, 30, "Page 2 of 2"),
-        ]);
+        second.AddRange([new PdfText(100, 770, "continued after footer"), new PdfText(40, 752, "02 Feb 2025"), new PdfText(100, 752, "Second row"), new PdfText(300, 752, "20.00"), new PdfText(100, 30, "Page 2 of 2"),]);
 
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(first);
         pdf.AddPage(second);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(2, result.Rows.Count);
         Assert.Equal("First row continued after footer", result.Rows[0].Description);
@@ -1091,17 +949,11 @@ public sealed class StatementParserTests
     public void DatedAccountFeeDescriptionRemainsATransaction()
     {
         var texts = Header(800, 40, 100, 300, 400, 470, 500, 530);
-        texts.AddRange(
-        [
-            new PdfText(40, 760, "01 Feb 2025"),
-            new PdfText(100, 760, "Account fee"),
-            new PdfText(300, 760, "10.00"),
-        ]);
-        var pdf = new MinimalPdfBuilder();
+        texts.AddRange([new PdfText(40, 760, "01 Feb 2025"), new PdfText(100, 760, "Account fee"), new PdfText(300, 760, "10.00"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(
-            pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Single(result.Rows);
         Assert.True(result.Rows[0].IsValid);
@@ -1118,19 +970,18 @@ public sealed class StatementParserTests
         Assert.Equal(356, eighteenPage.Rows.Sum(row => CountOccurrences(row.Description, "continued note")));
     }
 
-    private static List<PdfText> Header(double y,
-                                        params double[] xs)
+    private static List<PdfText> Header(double y, params double[] xs)
     {
         var labels = new[]
         {
             "Date", "Description", "Payments", "Deposits", "Bank", "fees", "Balance",
         };
         Assert.Equal(labels.Length, xs.Length);
+
         return labels.Select((label, index) => new PdfText(xs[index], y, label)).ToList();
     }
 
-    private static int CountOccurrences(string value,
-                                        string needle)
+    private static int CountOccurrences(string value, string needle)
     {
         var count = 0;
         var index = 0;
@@ -1139,6 +990,7 @@ public sealed class StatementParserTests
             count++;
             index += needle.Length;
         }
+
         return count;
     }
 }

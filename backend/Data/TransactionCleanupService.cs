@@ -5,8 +5,7 @@ namespace argus.Server.Data;
 /// minutes. It locks headers only, never then acquires account or customer
 /// locks, and retains compact terminal receipts without payloads.
 /// </summary>
-public sealed class TransactionCleanupService(TransactionStore store,
-                                              ILogger<TransactionCleanupService> logger) : BackgroundService
+public sealed class TransactionCleanupService(TransactionStore store, ILogger<TransactionCleanupService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -22,9 +21,7 @@ public sealed class TransactionCleanupService(TransactionStore store,
             }
             catch (Exception exception)
             {
-                logger.LogError(
-                    "transaction_cleanup_failed error_class={ErrorClass}",
-                    exception.GetType().Name);
+                logger.LogError(exception, "transaction_cleanup_failed error_class={ErrorClass}", exception.GetType().Name);
             }
 
             try

@@ -47,24 +47,23 @@ public static class Errors
 /// </summary>
 public static class Trust
 {
-    public static bool OriginValid(HttpContext context,
-                                   AppSettings settings)
+    public static bool OriginValid(HttpContext context, AppSettings settings)
     {
-        foreach (var name in new[] { "Origin", Brand.FrontendOriginHeader })
+        foreach (string? name in new[] { "Origin", Brand.FrontendOriginHeader })
         {
-            var value = context.Request.Headers[name].ToString();
+            string value = context.Request.Headers[name].ToString();
             if (!string.IsNullOrEmpty(value) && value != settings.FrontendUrl)
             {
                 return false;
             }
         }
+
         return true;
     }
 
-    public static bool ApplicationSecretValid(HttpContext context,
-                                              AppSettings settings)
+    public static bool ApplicationSecretValid(HttpContext context, AppSettings settings)
     {
-        var provided = context.Request.Headers[Brand.ApplicationSecretHeader].ToString();
+        string provided = context.Request.Headers[Brand.ApplicationSecretHeader].ToString();
         if (string.IsNullOrEmpty(provided))
         {
             return false;
@@ -72,24 +71,24 @@ public static class Trust
 
         // Hash both sides before the constant-time compare so length differences
         // are not observable and no padding decision is required.
-        var providedHash = SHA256.HashData(Encoding.UTF8.GetBytes(provided));
-        var expectedHash = SHA256.HashData(Encoding.UTF8.GetBytes(settings.ApiSecret));
+        byte[] providedHash = SHA256.HashData(Encoding.UTF8.GetBytes(provided));
+        byte[] expectedHash = SHA256.HashData(Encoding.UTF8.GetBytes(settings.ApiSecret));
+
         return CryptographicOperations.FixedTimeEquals(providedHash, expectedHash);
     }
 
     /// <summary>Returns the raw session token, or null when absent or oversized.</summary>
     public static string? SessionToken(HttpContext context)
     {
-        var value = context.Request.Headers[Brand.SessionHeader].ToString();
+        string value = context.Request.Headers[Brand.SessionHeader].ToString();
+
         return string.IsNullOrEmpty(value) || value.Length > 1024 ? null : value;
     }
 }
 
-public sealed record LoginRequest(string? Email,
-                                  string? Password);
+public sealed record LoginRequest(string? Email, string? Password);
 
-public sealed record RegisterRequest(string? Email,
-                                     string? Password);
+public sealed record RegisterRequest(string? Email, string? Password);
 
 public sealed record VerifyRequest(string? Token);
 
@@ -97,21 +96,15 @@ public sealed record ResendRequest(string? Email);
 
 public sealed record PasswordResetRequest(string? Email);
 
-public sealed record PasswordResetConsumeRequest(string? Token,
-                                                 string? Password);
+public sealed record PasswordResetConsumeRequest(string? Token, string? Password);
 
-public sealed record LoginResponse(string Token,
-                                   string ExpiresAt);
+public sealed record LoginResponse(string Token, string ExpiresAt);
 
-public sealed record CreateAccountRequest(string? DisplayName,
-                                          string? Institution);
+public sealed record CreateAccountRequest(string? DisplayName, string? Institution);
 
-public sealed record CreateCategoryRequest(string? DisplayName,
-                                           string? Kind);
+public sealed record CreateCategoryRequest(string? DisplayName, string? Kind);
 
-public sealed record UpdateCategoryRequest(string? DisplayName,
-                                           string? Kind,
-                                           bool? ConfirmKindChange);
+public sealed record UpdateCategoryRequest(string? DisplayName, string? Kind, bool? ConfirmKindChange);
 
 public sealed record CreateMerchantTagRequest(string? DisplayName);
 
@@ -126,9 +119,7 @@ public static class JsonBody
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
     };
 
-    public readonly record struct ParseResult<T>(T? Value,
-                                                 bool Parsed,
-                                                 bool UnknownField);
+    public readonly record struct ParseResult<T>(T? Value, bool Parsed, bool UnknownField);
 
     /// <summary>
     /// Account PATCH needs to tell "institution omitted" from "institution
@@ -142,8 +133,7 @@ public static class JsonBody
                                                           bool InstitutionProvided,
                                                           string? Institution);
 
-    public static async Task<AccountPatchParseResult> ReadAccountPatchAsync(HttpRequest request,
-                                                                            CancellationToken cancellationToken = default)
+    public static async Task<AccountPatchParseResult> ReadAccountPatchAsync(HttpRequest request, CancellationToken cancellationToken = default)
     {
         string body;
         using (var reader = new StreamReader(request.Body, Encoding.UTF8))
@@ -165,7 +155,7 @@ public static class JsonBody
             }
 
             string? displayName = null;
-            var institutionProvided = false;
+            bool institutionProvided = false;
             string? institution = null;
 
             foreach (var property in document.RootElement.EnumerateObject())
@@ -218,22 +208,20 @@ public static class JsonBody
         {
             return new ParseResult<T>(default, false, false);
         }
+
         try
         {
             var value = JsonSerializer.Deserialize<T>(body, _options);
-            return value is null
-                ? new ParseResult<T>(default, false, false)
-                : new ParseResult<T>(value, true, false);
+            return value is null ? new ParseResult<T>(default, false, false) : new ParseResult<T>(value, true, false);
         }
         catch (JsonException exception)
         {
-            var unknown = exception.Message.Contains("could not be mapped", StringComparison.OrdinalIgnoreCase);
+            bool unknown = exception.Message.Contains("could not be mapped", StringComparison.OrdinalIgnoreCase);
             return new ParseResult<T>(default, false, unknown);
         }
     }
 
-    public static async Task<ParseResult<T>> ReadAsync<T>(HttpRequest request,
-                                                          CancellationToken cancellationToken = default)
+    public static async Task<ParseResult<T>> ReadAsync<T>(HttpRequest request, CancellationToken cancellationToken = default)
     {
         string body;
         using (var reader = new StreamReader(request.Body, Encoding.UTF8))
@@ -253,14 +241,13 @@ public static class JsonBody
             {
                 return new ParseResult<T>(default, false, false);
             }
+
             var value = JsonSerializer.Deserialize<T>(body, _options);
-            return value is null
-                ? new ParseResult<T>(default, false, false)
-                : new ParseResult<T>(value, true, false);
+            return value is null ? new ParseResult<T>(default, false, false) : new ParseResult<T>(value, true, false);
         }
         catch (JsonException exception)
         {
-            var unknown = exception.Message.Contains("could not be mapped", StringComparison.OrdinalIgnoreCase);
+            bool unknown = exception.Message.Contains("could not be mapped", StringComparison.OrdinalIgnoreCase);
             return new ParseResult<T>(default, false, unknown);
         }
     }

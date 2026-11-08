@@ -16,15 +16,15 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
         var session = await RegisterVerifyLoginAsync(email);
         var me = await SendAsync(Get("/v1/me", session: session));
         Assert.Equal(HttpStatusCode.OK, me.StatusCode);
+
         return (session, (await BodyAsync(me)).GetProperty("id").GetGuid());
     }
 
-    protected async Task<Guid> CreateAccountAsync(string session,
-                                                  string name = "Cheque")
+    protected async Task<Guid> CreateAccountAsync(string session, string name = "Cheque")
     {
-        var response = await SendAsync(Post(
-            "/v1/finance/accounts", Json(new { display_name = name }), session: session));
+        var response = await SendAsync(Post("/v1/finance/accounts", Json(new { display_name = name }), session: session));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
         return (await BodyAsync(response)).GetProperty("id").GetGuid();
     }
 
@@ -32,10 +32,8 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
     {
         var response = await SendAsync(Get("/v1/finance/categories", session: session));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        return (await BodyAsync(response))
-            .GetProperty("categories")
-            .EnumerateArray()
-            .ToArray();
+
+        return (await BodyAsync(response)).GetProperty("categories").EnumerateArray().ToArray();
     }
 
     protected async Task<(Guid SystemCategoryId, Guid ExpenseCategoryId)> DefaultCategoriesAsync(
@@ -43,24 +41,22 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
     {
         var categories = await ListCategoriesAsync(session);
         var system = categories.Single(category => category.GetProperty("is_system").GetBoolean());
-        var expense = categories.First(
-            category => category.GetProperty("kind").GetString() == "Expense");
+        var expense = categories.First(category => category.GetProperty("kind").GetString() == "Expense");
+
         return (system.GetProperty("id").GetGuid(), expense.GetProperty("id").GetGuid());
     }
 
-    protected async Task<Guid> CreateTagAsync(string session,
-                                              string name)
+    protected async Task<Guid> CreateTagAsync(string session, string name)
     {
-        var response = await SendAsync(Post(
-            "/v1/finance/merchant-tags", Json(new { display_name = name }), session: session));
+        var response = await SendAsync(Post("/v1/finance/merchant-tags", Json(new { display_name = name }), session: session));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
         return (await BodyAsync(response)).GetProperty("id").GetGuid();
     }
 
-    protected async Task<Guid> SeedTagAsync(Guid customerId,
-                                            string name)
+    protected async Task<Guid> SeedTagAsync(Guid customerId, string name)
     {
-        var id = Guid.NewGuid();
+        Guid id = Guid.NewGuid();
         await ExecuteSqlParamsAsync(
             """
             INSERT INTO merchant_tags (id, customer_id, display_name, normalized_name, created_at, updated_at)
@@ -70,6 +66,7 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
             ("customer_id", customerId),
             ("name", name),
             ("normalized", name.ToLowerInvariant()));
+
         return id;
     }
 
@@ -78,7 +75,7 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
                                                   bool hidden = false,
                                                   string label = "Synthetic statement")
     {
-        var id = Guid.NewGuid();
+        Guid id = Guid.NewGuid();
         await ExecuteSqlParamsAsync(
             """
             INSERT INTO statement_imports (
@@ -98,6 +95,7 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
             ("label", label),
             ("fingerprint", "fp-" + id.ToString("N")),
             ("hidden", hidden));
+
         return id;
     }
 
@@ -114,7 +112,7 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
                                                     int version = 1,
                                                     int? sourcePage = null)
     {
-        var id = Guid.NewGuid();
+        Guid id = Guid.NewGuid();
         await ExecuteSqlParamsAsync(
             """
             INSERT INTO transactions (
@@ -162,8 +160,7 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
         return id;
     }
 
-    protected async Task SetStatementHiddenAsync(Guid statementId,
-                                                 bool hidden)
+    protected async Task SetStatementHiddenAsync(Guid statementId, bool hidden)
     {
         await ExecuteSqlParamsAsync(
             """
@@ -178,8 +175,7 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
             ("id", statementId));
     }
 
-    protected async Task ExecuteSqlParamsAsync(string sql,
-                                               params (string Name, object? Value)[] parameters)
+    protected async Task ExecuteSqlParamsAsync(string sql, params (string Name, object? Value)[] parameters)
     {
         var db = Factory.CreateDb();
         await using var connection = await db.OpenAsync();
@@ -199,8 +195,7 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
         {
             if (value is Guid[] guids)
             {
-                command.Parameters.AddWithValue(
-                    name, NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Uuid, guids);
+                command.Parameters.AddWithValue(name, NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Uuid, guids);
             }
             else
             {
@@ -214,6 +209,7 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
     {
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await BodyAsync(response);
+
         return body.GetProperty("transactions").EnumerateArray().ToArray();
     }
 }

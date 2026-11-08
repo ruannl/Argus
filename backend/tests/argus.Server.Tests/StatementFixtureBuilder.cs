@@ -22,10 +22,9 @@ public sealed record StatementFixture(byte[] Bytes,
 /// </summary>
 public static class StatementFixtureBuilder
 {
-    public static StatementFixture BuildFnbCsv(int rowCount,
-                                               bool chequeAccount)
+    public static StatementFixture BuildFnbCsv(int rowCount, bool chequeAccount)
     {
-        var builder = new StringBuilder();
+        StringBuilder builder = new StringBuilder();
         builder.AppendLine("Synthetic FNB export");
         builder.AppendLine("Account: SYNTHETIC-0000");
         builder.AppendLine("Statement: synthetic statement");
@@ -33,7 +32,7 @@ public static class StatementFixtureBuilder
         builder.AppendLine("Generated: 2026-01-01");
         builder.AppendLine("Do not use with real data");
         builder.AppendLine("Date,Amount,Balance,Description");
-        var rows = new List<StatementFixtureRow>(rowCount);
+        List<StatementFixtureRow> rows = new List<StatementFixtureRow>(rowCount);
         var runningBalance = 100_000_00L;
         for (var index = 0; index < rowCount; index++)
         {
@@ -51,38 +50,24 @@ public static class StatementFixtureBuilder
             }
             var amount = (cents / 100m).ToString("0.00", CultureInfo.InvariantCulture);
             var balance = (runningBalance / 100m).ToString("0.00", CultureInfo.InvariantCulture);
-            builder.Append(date.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture))
-                .Append(',').Append(amount)
-                .Append(',').Append(chequeAccount ? balance : "0.00")
-                .Append(',').Append(description)
-                .Append('\n');
-            rows.Add(new StatementFixtureRow(
-                date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                description.Trim(),
-                cents,
-                [],
-                null));
+            builder.Append(date.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture)).Append(',').Append(amount).Append(',').Append(chequeAccount ? balance : "0.00").Append(',').Append(description).Append('\n');
+            rows.Add(new StatementFixtureRow(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), description.Trim(), cents, [], null));
         }
 
-        return new StatementFixture(
-            Encoding.UTF8.GetBytes(builder.ToString()),
-            rows,
-            null,
-            null,
-            0);
+        return new StatementFixture(Encoding.UTF8.GetBytes(builder.ToString()), rows, null, null, 0);
     }
 
-    public static StatementFixture BuildFnbZip(int rowCount,
-                                               bool chequeAccount)
+    public static StatementFixture BuildFnbZip(int rowCount, bool chequeAccount)
     {
         var csv = BuildFnbCsv(rowCount, chequeAccount);
-        using var output = new MemoryStream();
-        using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+        using MemoryStream output = new MemoryStream();
+        using (ZipArchive archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
         {
             var entry = archive.CreateEntry("statement.csv", CompressionLevel.Fastest);
             using var stream = entry.Open();
             stream.Write(csv.Bytes);
         }
+
         return csv with { Bytes = output.ToArray() };
     }
 
@@ -98,21 +83,20 @@ public static class StatementFixtureBuilder
         var tablePages = pageCount - 1;
         var rowsPerPage = DistributeRows(rowCount, tablePages);
         var continuationsPerRow = DistributeContinuations(rowCount, continuationCount);
-        var rows = new List<StatementFixtureRow>(rowCount);
-        var pdf = new MinimalPdfBuilder();
-        var pageTexts = new List<List<PdfText>>();
-        var random = new Random(20261104);
+        List<StatementFixtureRow> rows = new List<StatementFixtureRow>(rowCount);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
+        List<List<PdfText>> pageTexts = new List<List<PdfText>>();
+        Random random = new Random(20261104);
 
         // Cover page.
-        var cover = new List<PdfText>
+        List<PdfText> cover = new List<PdfText>
         {
             new(40, 820, "Synthetic Bank"),
             new(40, 800, "Synthetic statement"),
         };
         if (includePeriod)
         {
-            cover.Add(new PdfText(40, 780,
-                $"Statement period: {periodStart.ToString("dd MMM yyyy", CultureInfo.InvariantCulture)} to {periodEnd.ToString("dd MMM yyyy", CultureInfo.InvariantCulture)}"));
+            cover.Add(new PdfText(40, 780, $"Statement period: {periodStart.ToString("dd MMM yyyy", CultureInfo.InvariantCulture)} to {periodEnd.ToString("dd MMM yyyy", CultureInfo.InvariantCulture)}"));
         }
         pageTexts.Add(cover);
 
@@ -122,7 +106,7 @@ public static class StatementFixtureBuilder
         foreach (var count in rowsPerPage)
         {
             pageNumber++;
-            var texts = new List<PdfText>();
+            List<PdfText> texts = new List<PdfText>();
             AddHeader(texts);
             var y = 770.0;
             if (pendingContinuations is { Count: > 0 })
@@ -143,9 +127,7 @@ public static class StatementFixtureBuilder
                 var date = periodStart.AddDays(rowIndex % (periodEnd.DayNumber - periodStart.DayNumber + 1));
                 var amountCase = FlowCase(rowIndex);
                 var cents = ExpectedCents(rowIndex, amountCase);
-                var amountText = cents is null
-                    ? "10.00"
-                    : (Math.Abs(cents.Value) / 100m).ToString("N2", CultureInfo.InvariantCulture);
+                var amountText = cents is null ? "10.00" : (Math.Abs(cents.Value) / 100m).ToString("N2", CultureInfo.InvariantCulture);
                 var description = $"Synthetic merchant {rowIndex:D4}";
                 var expectedDescription = description;
                 texts.Add(new PdfText(40, y, date.ToString("dd MMM yy", CultureInfo.InvariantCulture)));
@@ -174,14 +156,12 @@ public static class StatementFixtureBuilder
                         break;
                 }
 
-                var continuationTexts = new List<string>();
+                List<string> continuationTexts = new List<string>();
                 for (var continuation = 0; continuation < continuationLines; continuation++)
                 {
                     continuationTexts.Add($"continued note {rowIndex:D4}-{continuation}");
                 }
-                expectedDescription += continuationTexts.Count == 0
-                    ? string.Empty
-                    : " " + string.Join(" ", continuationTexts);
+                expectedDescription += continuationTexts.Count == 0 ? string.Empty : " " + string.Join(" ", continuationTexts);
 
                 if (isLastOnPage && continuationTexts.Count > 0)
                 {
@@ -199,12 +179,7 @@ public static class StatementFixtureBuilder
                     y = continuationY - 8;
                 }
 
-                rows.Add(new StatementFixtureRow(
-                    date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    expectedDescription,
-                    cents,
-                    ValidationFor(amountCase),
-                    pageNumber + 1));
+                rows.Add(new StatementFixtureRow(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), expectedDescription, cents, ValidationFor(amountCase), pageNumber + 1));
             }
 
             pageTexts.Add(texts);
@@ -216,12 +191,7 @@ public static class StatementFixtureBuilder
             pdf.AddPage(ordered);
         }
 
-        return new StatementFixture(
-            pdf.Build(),
-            rows,
-            includePeriod ? periodStart : null,
-            includePeriod ? periodEnd : null,
-            continuationCount);
+        return new StatementFixture(pdf.Build(), rows, includePeriod ? periodStart : null, includePeriod ? periodEnd : null, continuationCount);
     }
 
     /// <summary>
@@ -238,7 +208,7 @@ public static class StatementFixtureBuilder
         var hasImage = secondPageIsImage || secondPageHasImage;
         var objectCount = 3 + pageCount * 2 + (hasImage ? 1 : 0);
         var offsets = new long[objectCount + 1];
-        using var output = new MemoryStream();
+        using MemoryStream output = new MemoryStream();
         void Write(string value) => output.Write(Encoding.ASCII.GetBytes(value));
         void BeginObject(int id)
         {
@@ -248,7 +218,7 @@ public static class StatementFixtureBuilder
         void EndObject() => Write("endobj\n");
         string TextContent(IReadOnlyList<PdfText> texts)
         {
-            var builder = new StringBuilder();
+            StringBuilder builder = new StringBuilder();
             foreach (var text in texts)
             {
                 builder.Append("BT /F1 8 Tf 1 0 0 1 ")
@@ -259,6 +229,7 @@ public static class StatementFixtureBuilder
                     .Append(MinimalPdfBuilder.Escape(text.Text))
                     .Append(") Tj ET\n");
             }
+
             return builder.ToString();
         }
 
@@ -276,8 +247,7 @@ public static class StatementFixtureBuilder
 
         var firstContent = TextContent(firstPage);
         BeginObject(4);
-        Write("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] " +
-              "/Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>\n");
+        Write("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] " + "/Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>\n");
         EndObject();
         BeginObject(5);
         Write($"<< /Length {Encoding.ASCII.GetByteCount(firstContent)} >>\nstream\n");
@@ -290,15 +260,10 @@ public static class StatementFixtureBuilder
             if (hasImage)
             {
                 const string imageContent = "q 595 0 0 842 0 0 cm /Im1 Do Q\n";
-                var secondContent = secondPageIsImage
-                    ? imageContent
-                    : TextContent(secondPage ?? []) + imageContent;
-                var resources = secondPageIsImage
-                    ? "/XObject << /Im1 8 0 R >>"
-                    : "/Font << /F1 3 0 R >> /XObject << /Im1 8 0 R >>";
+                var secondContent = secondPageIsImage ? imageContent : TextContent(secondPage ?? []) + imageContent;
+                var resources = secondPageIsImage ? "/XObject << /Im1 8 0 R >>" : "/Font << /F1 3 0 R >> /XObject << /Im1 8 0 R >>";
                 BeginObject(6);
-                Write("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] " +
-                      $"/Resources << {resources} >> /Contents 7 0 R >>\n");
+                Write("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] " + $"/Resources << {resources} >> /Contents 7 0 R >>\n");
                 EndObject();
                 BeginObject(7);
                 Write($"<< /Length {Encoding.ASCII.GetByteCount(secondContent)} >>\nstream\n");
@@ -306,8 +271,7 @@ public static class StatementFixtureBuilder
                 Write("endstream\n");
                 EndObject();
                 BeginObject(8);
-                Write("<< /Type /XObject /Subtype /Image /Width 1 /Height 1 " +
-                      "/ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n");
+                Write("<< /Type /XObject /Subtype /Image /Width 1 /Height 1 " + "/ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n");
                 output.WriteByte(0);
                 Write("\nendstream\n");
                 EndObject();
@@ -316,8 +280,7 @@ public static class StatementFixtureBuilder
             {
                 var secondContent = TextContent(secondPage ?? []);
                 BeginObject(6);
-                Write("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] " +
-                      "/Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>\n");
+                Write("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] " + "/Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>\n");
                 EndObject();
                 BeginObject(7);
                 Write($"<< /Length {Encoding.ASCII.GetByteCount(secondContent)} >>\nstream\n");
@@ -335,6 +298,7 @@ public static class StatementFixtureBuilder
             Write($"{offsets[id]:D10} 00000 n \n");
         }
         Write($"trailer\n<< /Size {objectCount + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
+
         return output.ToArray();
     }
 
@@ -365,8 +329,9 @@ public static class StatementFixtureBuilder
 
     public static byte[] BuildHandAuthoredSmallPdf()
     {
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(HandAuthoredSmallPdfTexts());
+
         return pdf.Build();
     }
 
@@ -381,8 +346,7 @@ public static class StatementFixtureBuilder
         texts.Add(new PdfText(530, 800, "Balance"));
     }
 
-    private static int[] DistributeRows(int rowCount,
-                                        int pages)
+    private static int[] DistributeRows(int rowCount, int pages)
     {
         var result = new int[pages];
         var baseCount = rowCount / pages;
@@ -391,11 +355,11 @@ public static class StatementFixtureBuilder
         {
             result[index] = baseCount + (index < remainder ? 1 : 0);
         }
+
         return result;
     }
 
-    private static int[] DistributeContinuations(int rowCount,
-                                                 int total)
+    private static int[] DistributeContinuations(int rowCount, int total)
     {
         var result = new int[rowCount];
         if (total <= rowCount)
@@ -417,6 +381,7 @@ public static class StatementFixtureBuilder
                 result[index % rowCount]++;
             }
         }
+
         return result;
     }
 
@@ -426,14 +391,17 @@ public static class StatementFixtureBuilder
         {
             return PdfFlowCase.Missing;
         }
+
         if (index % 23 == 11)
         {
             return PdfFlowCase.Multiple;
         }
+
         if (index % 29 == 12)
         {
             return PdfFlowCase.ConflictingSign;
         }
+
         return (index % 3) switch
         {
             0 => PdfFlowCase.Payments,
@@ -442,13 +410,13 @@ public static class StatementFixtureBuilder
         };
     }
 
-    private static long? ExpectedCents(int index,
-                                       PdfFlowCase flowCase)
+    private static long? ExpectedCents(int index, PdfFlowCase flowCase)
     {
         if (flowCase is PdfFlowCase.Missing or PdfFlowCase.Multiple or PdfFlowCase.ConflictingSign)
         {
             return null;
         }
+
         return flowCase switch
         {
             PdfFlowCase.Payments => -(10_000 + index * 137),
@@ -465,15 +433,15 @@ public static class StatementFixtureBuilder
         _ => [],
     };
 
-    private static List<PdfText> Shuffle(List<PdfText> texts,
-                                         Random random)
+    private static List<PdfText> Shuffle(List<PdfText> texts, Random random)
     {
-        var copy = new List<PdfText>(texts);
+        List<PdfText> copy = new List<PdfText>(texts);
         for (var index = copy.Count - 1; index > 0; index--)
         {
             var swap = random.Next(index + 1);
             (copy[index], copy[swap]) = (copy[swap], copy[index]);
         }
+
         return copy;
     }
 
@@ -488,9 +456,7 @@ public static class StatementFixtureBuilder
     }
 }
 
-public readonly record struct PdfText(double X,
-                                      double Y,
-                                      string Text);
+public readonly record struct PdfText(double X, double Y, string Text);
 
 public sealed class MinimalPdfBuilder
 {
@@ -503,7 +469,7 @@ public sealed class MinimalPdfBuilder
                         double imageWidth,
                         double imageHeight)
     {
-        var builder = new StringBuilder();
+        StringBuilder builder = new StringBuilder();
         foreach (var text in texts)
         {
             builder.Append("BT /F1 8 Tf 1 0 0 1 ")
@@ -527,12 +493,10 @@ public sealed class MinimalPdfBuilder
         var nextImageId = 4 + _pages.Count * 2;
         for (var index = 0; index < _pages.Count; index++)
         {
-            imageIds[index] = Enumerable.Range(0, _pages[index].ImageCount)
-                .Select(_ => nextImageId++)
-                .ToArray();
+            imageIds[index] = Enumerable.Range(0, _pages[index].ImageCount).Select(_ => nextImageId++).ToArray();
         }
 
-        using var output = new MemoryStream();
+        using MemoryStream output = new MemoryStream();
         void Write(string value)
         {
             var bytes = Encoding.ASCII.GetBytes(value);
@@ -565,8 +529,7 @@ public sealed class MinimalPdfBuilder
             var resources = "/Font << /F1 3 0 R >>";
             if (page.ImageCount > 0)
             {
-                var xobjects = string.Join(" ", imageIds[index]
-                    .Select((id, imageIndex) => $"/Im{imageIndex + 1} {id} 0 R"));
+                var xobjects = string.Join(" ", imageIds[index].Select((id, imageIndex) => $"/Im{imageIndex + 1} {id} 0 R"));
                 resources += $" /XObject << {xobjects} >>";
             }
             BeginObject(pageId);
@@ -585,8 +548,7 @@ public sealed class MinimalPdfBuilder
             for (var imageIndex = 0; imageIndex < imageIds[index].Length; imageIndex++)
             {
                 BeginObject(imageIds[index][imageIndex]);
-                Write("<< /Type /XObject /Subtype /Image /Width 1 /Height 1 " +
-                      "/ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n");
+                Write("<< /Type /XObject /Subtype /Image /Width 1 /Height 1 " + "/ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n");
                 output.WriteByte(0);
                 Write("\nendstream\n");
                 EndObject();
@@ -601,15 +563,15 @@ public sealed class MinimalPdfBuilder
             Write($"{offsets[id]:D10} 00000 n \n");
         }
         Write($"trailer\n<< /Size {objectCount + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
+
         return output.ToArray();
     }
 
-    public byte[] BuildImageOnly(int imageCount = 1,
-                                 double imageWidth = 100,
-                                 double imageHeight = 100)
+    public byte[] BuildImageOnly(int imageCount = 1, double imageWidth = 100, double imageHeight = 100)
     {
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage([], imageCount, imageWidth, imageHeight);
+
         return pdf.Build();
     }
 
@@ -620,7 +582,7 @@ public sealed class MinimalPdfBuilder
 
     private static string ImageContent(PageContent page)
     {
-        var builder = new StringBuilder();
+        StringBuilder builder = new StringBuilder();
         for (var index = 0; index < page.ImageCount; index++)
         {
             builder.Append("q ")
@@ -633,6 +595,7 @@ public sealed class MinimalPdfBuilder
                 .Append(index + 1)
                 .Append(" Do Q\n");
         }
+
         return builder.ToString();
     }
 

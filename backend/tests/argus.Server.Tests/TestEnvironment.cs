@@ -28,9 +28,9 @@ public static class TestEnvironment
         var url = Environment.GetEnvironmentVariable("ARGUS_TEST_DATABASE_URL");
         if (string.IsNullOrEmpty(url))
         {
-            throw new InvalidOperationException(
-                "ARGUS_TEST_DATABASE_URL is required for isolation tests; refusing to skip.");
+            throw new InvalidOperationException("ARGUS_TEST_DATABASE_URL is required for isolation tests; refusing to skip.");
         }
+
         return url;
     }
 
@@ -47,8 +47,7 @@ public static class TestEnvironment
         Set("LOG_FORMAT", "json");
     }
 
-    private static void Set(string name,
-                            string value) =>
+    private static void Set(string name, string value) =>
         Environment.SetEnvironmentVariable("ARGUS_" + name, value);
 }
 
@@ -64,6 +63,7 @@ public sealed class CapturingMailer : IMailer
                                       CancellationToken cancellationToken = default)
     {
         Record("verification", recipient, rawToken);
+
         return Task.CompletedTask;
     }
 
@@ -73,26 +73,25 @@ public sealed class CapturingMailer : IMailer
                                        CancellationToken cancellationToken = default)
     {
         Record("reset", recipient, rawToken);
+
         return Task.CompletedTask;
     }
 
-    public Task SendAlreadyRegisteredAsync(string recipient,
-                                           string frontendUrl,
-                                           CancellationToken cancellationToken = default)
+    public Task SendAlreadyRegisteredAsync(string recipient, string frontendUrl, CancellationToken cancellationToken = default)
     {
         Record("already-registered", recipient, string.Empty);
+
         return Task.CompletedTask;
     }
 
-    public Task SendSuspiciousLoginAsync(string recipient,
-                                         CancellationToken cancellationToken = default)
+    public Task SendSuspiciousLoginAsync(string recipient, CancellationToken cancellationToken = default)
     {
         Record("suspicious-login", recipient, string.Empty);
+
         return Task.CompletedTask;
     }
 
-    public string? LastToken(string kind,
-                             string recipient)
+    public string? LastToken(string kind, string recipient)
     {
         lock (_gate)
         {
@@ -107,8 +106,7 @@ public sealed class CapturingMailer : IMailer
         }
     }
 
-    public int Count(string kind,
-                     string recipient)
+    public int Count(string kind, string recipient)
     {
         lock (_gate)
         {
@@ -124,9 +122,7 @@ public sealed class CapturingMailer : IMailer
         }
     }
 
-    private void Record(string kind,
-                        string recipient,
-                        string token)
+    private void Record(string kind, string recipient, string token)
     {
         lock (_gate)
         {
@@ -181,14 +177,11 @@ public sealed class CapturingLoggerProvider : ILoggerProvider
     {
         lock (_gate)
         {
-            _entries.Add(exception is null
-                ? $"{level} {category}: {message}"
-                : $"{level} {category}: {message} [{exception.GetType().Name}]");
+            _entries.Add(exception is null ? $"{level} {category}: {message}" : $"{level} {category}: {message} [{exception.GetType().Name}]");
         }
     }
 
-    private sealed class CapturingLogger(CapturingLoggerProvider provider,
-                                         string category) : ILogger
+    private sealed class CapturingLogger(CapturingLoggerProvider provider, string category) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -217,8 +210,7 @@ public sealed class TestRemoteIpStartupFilter : IStartupFilter
             if (context.Request.Path.StartsWithSegments("/v1/finance"))
             {
                 var header = context.Request.Headers["X-Test-Remote-Ip"].ToString();
-                context.Connection.RemoteIpAddress =
-                    IPAddress.TryParse(header, out var address) ? address : IPAddress.Loopback;
+                context.Connection.RemoteIpAddress = IPAddress.TryParse(header, out var address) ? address : IPAddress.Loopback;
             }
             await nextMiddleware();
         });
@@ -240,8 +232,7 @@ public sealed class KitFactory : WebApplicationFactory<Program>
     {
     }
 
-    internal KitFactory(IImportFaultInjector? faultInjector,
-                        ITransactionFaultInjector? transactionFaultInjector)
+    internal KitFactory(IImportFaultInjector? faultInjector, ITransactionFaultInjector? transactionFaultInjector)
     {
         FaultInjector = faultInjector;
         TransactionFaultInjector = transactionFaultInjector;
@@ -260,11 +251,9 @@ public sealed class KitFactory : WebApplicationFactory<Program>
             services.AddSingleton<IMailer>(Mailer);
             services.AddSingleton<ILoggerProvider>(LogCapture);
             services.AddSingleton<IStartupFilter, TestRemoteIpStartupFilter>();
-            services.AddSingleton<IImportFaultInjector>(
-                FaultInjector ?? NoopImportFaultInjector.Instance);
+            services.AddSingleton<IImportFaultInjector>(FaultInjector ?? NoopImportFaultInjector.Instance);
             services.RemoveAll<ITransactionFaultInjector>();
-            services.AddSingleton<ITransactionFaultInjector>(
-                TransactionFaultInjector ?? NoopTransactionFaultInjector.Instance);
+            services.AddSingleton<ITransactionFaultInjector>(TransactionFaultInjector ?? NoopTransactionFaultInjector.Instance);
         });
     }
 

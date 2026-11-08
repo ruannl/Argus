@@ -17,12 +17,9 @@ public interface IMailer
                                 string frontendUrl,
                                 CancellationToken cancellationToken = default);
 
-    Task SendAlreadyRegisteredAsync(string recipient,
-                                    string frontendUrl,
-                                    CancellationToken cancellationToken = default);
+    Task SendAlreadyRegisteredAsync(string recipient, string frontendUrl, CancellationToken cancellationToken = default);
 
-    Task SendSuspiciousLoginAsync(string recipient,
-                                  CancellationToken cancellationToken = default);
+    Task SendSuspiciousLoginAsync(string recipient, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -32,8 +29,7 @@ public interface IMailer
 /// failures are logged, never surfaced to the caller: the account flows stay
 /// non-enumerating.
 /// </summary>
-public sealed class ResendMailer(AppSettings settings,
-                                 ILogger<ResendMailer> logger) : IMailer
+public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> logger) : IMailer
 {
     private const string Endpoint = "https://api.resend.com/emails";
     private const int AntiEnumerationPadMs = 750;
@@ -46,7 +42,8 @@ public sealed class ResendMailer(AppSettings settings,
                                       string frontendUrl,
                                       CancellationToken cancellationToken = default)
     {
-        var link = $"{frontendUrl.TrimEnd('/')}/verify?token={Uri.EscapeDataString(rawToken)}";
+        string link = $"{frontendUrl.TrimEnd('/')}/verify?token={Uri.EscapeDataString(rawToken)}";
+
         return SendAsync(
             recipient,
             "Verify your email address",
@@ -60,7 +57,8 @@ public sealed class ResendMailer(AppSettings settings,
                                        string frontendUrl,
                                        CancellationToken cancellationToken = default)
     {
-        var link = $"{frontendUrl.TrimEnd('/')}/reset?token={Uri.EscapeDataString(rawToken)}";
+        string link = $"{frontendUrl.TrimEnd('/')}/reset?token={Uri.EscapeDataString(rawToken)}";
+
         return SendAsync(
             recipient,
             "Reset your password",
@@ -69,11 +67,10 @@ public sealed class ResendMailer(AppSettings settings,
             cancellationToken);
     }
 
-    public Task SendAlreadyRegisteredAsync(string recipient,
-                                           string frontendUrl,
-                                           CancellationToken cancellationToken = default)
+    public Task SendAlreadyRegisteredAsync(string recipient, string frontendUrl, CancellationToken cancellationToken = default)
     {
-        var link = $"{frontendUrl.TrimEnd('/')}/login";
+        string link = $"{frontendUrl.TrimEnd('/')}/login";
+
         return SendAsync(
             recipient,
             "Your account is already set up",
@@ -82,8 +79,7 @@ public sealed class ResendMailer(AppSettings settings,
             cancellationToken);
     }
 
-    public Task SendSuspiciousLoginAsync(string recipient,
-                                         CancellationToken cancellationToken = default)
+    public Task SendSuspiciousLoginAsync(string recipient, CancellationToken cancellationToken = default)
     {
         return SendAsync(
             recipient,
@@ -102,14 +98,7 @@ public sealed class ResendMailer(AppSettings settings,
         var pad = Task.Delay(AntiEnumerationPadMs, CancellationToken.None);
         try
         {
-            var payload = System.Text.Json.JsonSerializer.Serialize(new
-            {
-                from = settings.ResendFrom,
-                to = new[] { recipient },
-                subject,
-                text,
-                html,
-            });
+            string payload = System.Text.Json.JsonSerializer.Serialize(new { from = settings.ResendFrom, to = new[] { recipient }, subject, text, html, });
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(NetworkTimeoutMs);
@@ -123,10 +112,7 @@ public sealed class ResendMailer(AppSettings settings,
             using var response = await _client.SendAsync(request, timeout.Token);
             if (!response.IsSuccessStatusCode)
             {
-                logger.LogWarning(
-                    "mailer.resend_rejected status={Status} recipient={Recipient}",
-                    (int)response.StatusCode,
-                    recipient);
+                logger.LogWarning("mailer.resend_rejected status={Status} recipient={Recipient}", (int)response.StatusCode, recipient);
             }
         }
         catch (Exception exception)

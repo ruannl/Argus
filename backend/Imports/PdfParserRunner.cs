@@ -17,9 +17,7 @@ public sealed class PdfParserRunner : IDisposable
     private readonly Func<ProcessStartInfo> _startInfoFactory;
     private readonly TimeSpan _timeout;
 
-    public PdfParserRunner(Func<ProcessStartInfo>? startInfoFactory = null,
-                           TimeSpan? timeout = null,
-                           ParserAdmission? admission = null)
+    public PdfParserRunner(Func<ProcessStartInfo>? startInfoFactory = null, TimeSpan? timeout = null, ParserAdmission? admission = null)
     {
         _startInfoFactory = startInfoFactory ?? DefaultStartInfo;
         _timeout = timeout ?? TimeSpan.FromSeconds(ImportLimits.ParserDeadlineSeconds);
@@ -27,9 +25,7 @@ public sealed class PdfParserRunner : IDisposable
         _ownsAdmission = admission is null;
     }
 
-    public async Task<ParsedStatement> ParseAsync(byte[] bytes,
-                                                  PdfChildRequestOptions options,
-                                                  CancellationToken cancellationToken = default)
+    public async Task<ParsedStatement> ParseAsync(byte[] bytes, PdfChildRequestOptions options, CancellationToken cancellationToken = default)
     {
         await _admission.EnterAsync(cancellationToken);
         try
@@ -42,11 +38,9 @@ public sealed class PdfParserRunner : IDisposable
         }
     }
 
-    private async Task<ParsedStatement> ParseCoreAsync(byte[] bytes,
-                                                       PdfChildRequestOptions options,
-                                                       CancellationToken cancellationToken)
+    private async Task<ParsedStatement> ParseCoreAsync(byte[] bytes, PdfChildRequestOptions options, CancellationToken cancellationToken)
     {
-        var header = JsonSerializer.SerializeToUtf8Bytes(options, PdfChildProtocol.JsonOptions);
+        byte[] header = JsonSerializer.SerializeToUtf8Bytes(options, PdfChildProtocol.JsonOptions);
         if (header.Length > 64 * 1024)
         {
             throw new StatementRejectedException(ParserReasons.InvalidRequest);
@@ -71,13 +65,13 @@ public sealed class PdfParserRunner : IDisposable
 
         using var killSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         using var deadlineSource = new CancellationTokenSource();
-        var killedForBound = false;
-        var terminateDescendants = false;
+        bool killedForBound = false;
+        bool terminateDescendants = false;
         Task? stderrTask = null;
         Task<byte[]>? stdoutTask = null;
         Task? inputTask = null;
         Task? memoryTask = null;
-        var leaderPid = process.Id;
+        int leaderPid = process.Id;
         try
         {
             stderrTask = DrainAsync(process.StandardError.BaseStream, killSource.Token);
@@ -95,8 +89,7 @@ public sealed class PdfParserRunner : IDisposable
                 Kill(process, leaderPid);
             }
 
-            var exited = await Task.WhenAny(
-                exitTask, Task.Delay(TimeSpan.FromSeconds(2), CancellationToken.None));
+            var exited = await Task.WhenAny(exitTask, Task.Delay(TimeSpan.FromSeconds(2), CancellationToken.None));
             if (exited != exitTask)
             {
                 killedForBound = true;
@@ -141,8 +134,7 @@ public sealed class PdfParserRunner : IDisposable
             PdfChildResponse? response;
             try
             {
-                response = JsonSerializer.Deserialize<PdfChildResponse>(
-                    output, PdfChildProtocol.JsonOptions);
+                response = JsonSerializer.Deserialize<PdfChildResponse>(output, PdfChildProtocol.JsonOptions);
             }
             catch (JsonException)
             {
@@ -178,24 +170,24 @@ public sealed class PdfParserRunner : IDisposable
         }
     }
 
-    private static async Task<T> AwaitBounded<T>(Task<T> task,
-                                                 TimeSpan timeout)
+    private static async Task<T> AwaitBounded<T>(Task<T> task, TimeSpan timeout)
     {
         var completed = await Task.WhenAny(task, Task.Delay(timeout, CancellationToken.None));
         if (completed != task)
         {
             throw new StatementRejectedException(ParserReasons.ProcessingLimit);
         }
+
         return await task;
     }
 
-    private static async Task AwaitQuietly(Task? task,
-                                           TimeSpan timeout)
+    private static async Task AwaitQuietly(Task? task, TimeSpan timeout)
     {
         if (task is null)
         {
             return;
         }
+
         var completed = await Task.WhenAny(task, Task.Delay(timeout, CancellationToken.None));
         if (completed == task)
         {
@@ -226,7 +218,7 @@ public sealed class PdfParserRunner : IDisposable
                                               byte[] bytes,
                                               CancellationToken cancellationToken)
     {
-        var length = new byte[4];
+        byte[] length = new byte[4];
         BinaryPrimitives.WriteInt32BigEndian(length, header.Length);
         await stdin.WriteAsync(length, cancellationToken);
         await stdin.WriteAsync(header, cancellationToken);
@@ -235,11 +227,10 @@ public sealed class PdfParserRunner : IDisposable
         stdin.Close();
     }
 
-    private static async Task<byte[]> ReadBoundedAsync(Stream stdout,
-                                                       CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadBoundedAsync(Stream stdout, CancellationToken cancellationToken)
     {
         using var output = new MemoryStream();
-        var buffer = new byte[64 * 1024];
+        byte[] buffer = new byte[64 * 1024];
         int read;
         while ((read = await stdout.ReadAsync(buffer, cancellationToken)) > 0)
         {
@@ -249,22 +240,20 @@ public sealed class PdfParserRunner : IDisposable
             }
             output.Write(buffer, 0, read);
         }
+
         return output.ToArray();
     }
 
-    private static async Task DrainAsync(Stream stderr,
-                                         CancellationToken cancellationToken)
+    private static async Task DrainAsync(Stream stderr, CancellationToken cancellationToken)
     {
-        var buffer = new byte[64 * 1024];
+        byte[] buffer = new byte[64 * 1024];
         while (await stderr.ReadAsync(buffer, cancellationToken) > 0)
         {
             // Discard: child diagnostics never reach logs or responses.
         }
     }
 
-    private static async Task MonitorMemoryAsync(Process process,
-                                                 Action onExceeded,
-                                                 CancellationToken cancellationToken)
+    private static async Task MonitorMemoryAsync(Process process, Action onExceeded, CancellationToken cancellationToken)
     {
         try
         {
@@ -285,8 +274,7 @@ public sealed class PdfParserRunner : IDisposable
         }
     }
 
-    private static void Kill(Process process,
-                             int leaderPid)
+    private static void Kill(Process process, int leaderPid)
     {
         // The child joins its own process group on Linux. Group termination is
         // what reaches a descendant that inherited a pipe after the root exited;
@@ -305,8 +293,8 @@ public sealed class PdfParserRunner : IDisposable
 
     private static ProcessStartInfo DefaultStartInfo()
     {
-        var serverAssembly = typeof(Program).Assembly.Location;
-        var runtimeConfig = Path.ChangeExtension(serverAssembly, ".runtimeconfig.json");
+        string serverAssembly = typeof(Program).Assembly.Location;
+        string runtimeConfig = Path.ChangeExtension(serverAssembly, ".runtimeconfig.json");
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
@@ -322,11 +310,11 @@ public sealed class PdfParserRunner : IDisposable
         {
             // Test host output: reuse the test runtime's deps/runtimeconfig so
             // the server assembly can be launched apphost-free.
-            var entry = Assembly.GetEntryAssembly()?.Location;
+            string? entry = Assembly.GetEntryAssembly()?.Location;
             if (!string.IsNullOrEmpty(entry))
             {
-                var deps = Path.ChangeExtension(entry, ".deps.json");
-                var testRuntimeConfig = Path.ChangeExtension(entry, ".runtimeconfig.json");
+                string deps = Path.ChangeExtension(entry, ".deps.json");
+                string testRuntimeConfig = Path.ChangeExtension(entry, ".runtimeconfig.json");
                 startInfo.ArgumentList.Add("exec");
                 if (File.Exists(deps))
                 {
@@ -344,6 +332,7 @@ public sealed class PdfParserRunner : IDisposable
         startInfo.ArgumentList.Add(serverAssembly);
         startInfo.ArgumentList.Add("--parse-statement-pdf");
         startInfo.Environment["DOTNET_GCHeapHardLimit"] = "0x10000000";
+
         return startInfo;
     }
 

@@ -39,12 +39,10 @@ public sealed class StatementImportApi(FinanceGuard guard,
         app.MapDelete("/v1/finance/imports/{id:guid}", DeleteAsync);
     }
 
-    private async Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(HttpContext context,
-                                                                               CancellationToken cancellationToken) =>
+    private async Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(HttpContext context, CancellationToken cancellationToken) =>
         await guard.AuthenticateAsync(context, cancellationToken);
 
-    private async Task<IResult> GuardedAsync(Func<Task<IResult>> action,
-                                             string operation)
+    private async Task<IResult> GuardedAsync(Func<Task<IResult>> action, string operation)
     {
         try
         {
@@ -56,11 +54,7 @@ public sealed class StatementImportApi(FinanceGuard guard,
         }
         catch (StatementRepeatException exception)
         {
-            return Results.Json(new
-            {
-                error = ImportErrorCodes.StatementRepeat,
-                existing_import_ids = exception.ExistingImportIds,
-            }, statusCode: 409);
+            return Results.Json(new { error = ImportErrorCodes.StatementRepeat, existing_import_ids = exception.ExistingImportIds, }, statusCode: 409);
         }
         catch (ImportStoreException exception)
         {
@@ -68,69 +62,55 @@ public sealed class StatementImportApi(FinanceGuard guard,
         }
         catch (PostgresException exception)
         {
-            _logger.LogError(
-                "finance_operation_failed operation={Operation} error_class={ErrorClass} sql_state={SqlState}",
-                operation, "postgres", exception.SqlState);
+            _logger.LogError(exception, "finance_operation_failed operation={Operation} error_class={ErrorClass} sql_state={SqlState}", operation, "postgres", exception.SqlState);
             return Errors.Internal();
         }
         catch (Exception exception)
         {
-            _logger.LogError(
-                "finance_operation_failed operation={Operation} error_class={ErrorClass}",
-                operation, exception.GetType().Name);
+            _logger.LogError(exception, "finance_operation_failed operation={Operation} error_class={ErrorClass}", operation, exception.GetType().Name);
             return Errors.Internal();
         }
     }
 
     // --- Inspect and prepare -----------------------------------------------
 
-    private Task<IResult> InspectAsync(HttpContext context,
-                                       CancellationToken cancellationToken) =>
+    private Task<IResult> InspectAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
+
             if (!rateLimiter.CheckImportCustomer(customerId!.Value)) return Errors.RateLimited();
 
             var multipart = await MultipartImportReader.ReadAsync(context.Request, cancellationToken);
-            var parsedOptions = JsonBody.ParseBytes<ImportOptionsRequest>(
-                Encoding.UTF8.GetBytes(multipart.OptionsJson));
+            var parsedOptions = JsonBody.ParseBytes<ImportOptionsRequest>(Encoding.UTF8.GetBytes(multipart.OptionsJson));
             if (!parsedOptions.Parsed) return Errors.InvalidRequest();
+
             var options = parsedOptions.Value!;
-            if (options.FinancialAccountId is null ||
-                !StatementSourceKinds.TryParse(options.SourceKind, out var sourceKind) ||
-                (options.StartDate is null) != (options.EndDate is null))
+            if (options.FinancialAccountId is null || !StatementSourceKinds.TryParse(options.SourceKind, out var sourceKind) || (options.StartDate is null) != (options.EndDate is null))
             {
                 return Errors.InvalidRequest();
             }
+
             DateOnly? start = null;
             DateOnly? end = null;
             if (options.StartDate is not null)
             {
-                if (!TryDate(options.StartDate, out var parsedStart) ||
-                    !TryDate(options.EndDate, out var parsedEnd) ||
-                    parsedStart > parsedEnd)
+                if (!TryDate(options.StartDate, out var parsedStart) || !TryDate(options.EndDate, out var parsedEnd) || parsedStart > parsedEnd)
                 {
                     return Errors.InvalidRequest();
                 }
+
                 start = parsedStart;
                 end = parsedEnd;
             }
 
-            var account = await store.GetAccountAsync(
-                customerId.Value, options.FinancialAccountId.Value, cancellationToken);
+            var account = await store.GetAccountAsync(customerId.Value, options.FinancialAccountId.Value, cancellationToken);
             if (account is null) return Errors.NotFound();
+
             if (account.IsArchived) return StoreError(ImportErrorCodes.AccountArchived);
 
-            var result = await StatementParser.InspectAsync(
-                multipart.FileBytes,
-                sourceKind,
-                options.ParserConfig,
-                start,
-                end,
-                pdfRunner,
-                parserAdmission,
-                cancellationToken);
+            var result = await StatementParser.InspectAsync(multipart.FileBytes, sourceKind, options.ParserConfig, start, end, pdfRunner, parserAdmission, cancellationToken);
 
             return Results.Json(new
             {
@@ -153,18 +133,18 @@ public sealed class StatementImportApi(FinanceGuard guard,
             });
         }, "imports_inspect");
 
-    private Task<IResult> CreateReviewAsync(HttpContext context,
-                                            CancellationToken cancellationToken) =>
+    private Task<IResult> CreateReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
+
             if (!rateLimiter.CheckImportCustomer(customerId!.Value)) return Errors.RateLimited();
 
             var multipart = await MultipartImportReader.ReadAsync(context.Request, cancellationToken);
-            var parsedOptions = JsonBody.ParseBytes<ImportOptionsRequest>(
-                Encoding.UTF8.GetBytes(multipart.OptionsJson));
+            var parsedOptions = JsonBody.ParseBytes<ImportOptionsRequest>(Encoding.UTF8.GetBytes(multipart.OptionsJson));
             if (!parsedOptions.Parsed) return Errors.InvalidRequest();
+
             var options = parsedOptions.Value!;
             if (options.FinancialAccountId is null ||
                 !StatementSourceKinds.TryParse(options.SourceKind, out var sourceKind) ||
@@ -177,71 +157,59 @@ public sealed class StatementImportApi(FinanceGuard guard,
                 return Errors.InvalidRequest();
             }
 
-            var account = await store.GetAccountAsync(
-                customerId.Value, options.FinancialAccountId.Value, cancellationToken);
+            var account = await store.GetAccountAsync(customerId.Value, options.FinancialAccountId.Value, cancellationToken);
             if (account is null) return Errors.NotFound();
+
             if (account.IsArchived) return StoreError(ImportErrorCodes.AccountArchived);
 
             var config = options.ParserConfig ?? new ParserConfig
             {
                 Format = sourceKind == StatementSourceKind.GenericCsv ? "generic" : null,
             };
-            var parsed = await StatementParser.PrepareAsync(
-                multipart.FileBytes, sourceKind, config, start, end, pdfRunner,
-                parserAdmission, cancellationToken);
-            var detail = await store.CreateReviewAsync(
-                customerId.Value,
-                options.FinancialAccountId.Value,
-                sourceKind,
-                config,
-                start,
-                end,
-                parsed,
-                cancellationToken);
+            var parsed = await StatementParser.PrepareAsync(multipart.FileBytes, sourceKind, config, start, end, pdfRunner, parserAdmission, cancellationToken);
+            var detail = await store.CreateReviewAsync(customerId.Value, options.FinancialAccountId.Value, sourceKind, config, start, end, parsed, cancellationToken);
 
-            _audit.LogInformation(
-                "audit.import_review_created customer_id={CustomerId} review_id={ReviewId} rows={Rows}",
-                customerId.Value, detail.Summary.Id, detail.Summary.TotalRows);
+            _audit.LogInformation("audit.import_review_created customer_id={CustomerId} review_id={ReviewId} rows={Rows}", customerId.Value, detail.Summary.Id, detail.Summary.TotalRows);
             return Results.Json(ReviewResponse.From(detail), statusCode: 201);
         }, "imports_review_create");
 
-    private Task<IResult> ListReviewsAsync(HttpContext context,
-                                           CancellationToken cancellationToken) =>
+    private Task<IResult> ListReviewsAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
+
             var reviews = await store.ListOpenReviewsAsync(customerId!.Value, cancellationToken);
             return Results.Json(new { reviews = reviews.Select(OpenReviewResponse.From).ToArray() });
         }, "imports_reviews_list");
 
-    private Task<IResult> GetReviewAsync(HttpContext context,
-                                         CancellationToken cancellationToken) =>
+    private Task<IResult> GetReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
+
             var id = RouteGuid(context);
             if (id is null) return Errors.NotFound();
-            var page = QueryInt(context, "page", 1);
-            var pageSize = QueryInt(context, "page_size", ImportLimits.MaxPageSize);
-            var detail = await store.GetReviewAsync(
-                customerId!.Value, id.Value, page, pageSize, cancellationToken);
+
+            int page = QueryInt(context, "page", 1);
+            int pageSize = QueryInt(context, "page_size", ImportLimits.MaxPageSize);
+            var detail = await store.GetReviewAsync(customerId!.Value, id.Value, page, pageSize, cancellationToken);
             return Results.Json(ReviewResponse.From(detail));
         }, "imports_review_get");
 
-    private Task<IResult> PatchReviewAsync(HttpContext context,
-                                           CancellationToken cancellationToken) =>
+    private Task<IResult> PatchReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
+
             var id = RouteGuid(context);
             if (id is null) return Errors.NotFound();
-            var body = await ReadJsonBytesAsync(context.Request, cancellationToken);
+
+            byte[] body = await ReadJsonBytesAsync(context.Request, cancellationToken);
             var parsed = JsonBody.ParseBytes<ImportReviewPatchRequest>(body);
-            if (!parsed.Parsed || parsed.Value!.ExpectedReviewVersion is null ||
-                parsed.Value.Decisions is null)
+            if (!parsed.Parsed || parsed.Value!.ExpectedReviewVersion is null || parsed.Value.Decisions is null)
             {
                 return Errors.InvalidRequest();
             }
@@ -253,135 +221,103 @@ public sealed class StatementImportApi(FinanceGuard guard,
                 {
                     return Errors.InvalidRequest();
                 }
-                decisions.Add(new ImportDecision(
-                    decision.RowId.Value,
-                    decision.Skip,
-                    decision.Override,
-                    decision.WithinFileState,
-                    decision.WithinFileGroup,
-                    decision.WithinFileAction,
-                    decision.SelectedTagIds));
+
+                decisions.Add(new ImportDecision(decision.RowId.Value, decision.Skip, decision.Override, decision.WithinFileState, decision.WithinFileGroup, decision.WithinFileAction, decision.SelectedTagIds));
             }
 
-            var summary = await store.PatchReviewAsync(
-                customerId!.Value,
-                id.Value,
-                parsed.Value.ExpectedReviewVersion.Value,
-                decisions,
-                parsed.Value.StatementOverride,
-                cancellationToken);
+            var summary = await store.PatchReviewAsync(customerId!.Value, id.Value, parsed.Value.ExpectedReviewVersion.Value, decisions, parsed.Value.StatementOverride, cancellationToken);
             return Results.Json(ReviewSummaryResponse.From(summary));
         }, "imports_review_patch");
 
-    private Task<IResult> RefreshReviewAsync(HttpContext context,
-                                             CancellationToken cancellationToken) =>
+    private Task<IResult> RefreshReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
+
             var id = RouteGuid(context);
             if (id is null) return Errors.NotFound();
-            var body = await ReadJsonBytesAsync(context.Request, cancellationToken);
+
+            byte[] body = await ReadJsonBytesAsync(context.Request, cancellationToken);
             var parsed = JsonBody.ParseBytes<ReviewVersionRequest>(body);
             if (!parsed.Parsed || parsed.Value!.ExpectedReviewVersion is null)
             {
                 return Errors.InvalidRequest();
             }
-            var summary = await store.RefreshReviewAsync(
-                customerId!.Value, id.Value, parsed.Value.ExpectedReviewVersion.Value, cancellationToken);
+
+            var summary = await store.RefreshReviewAsync(customerId!.Value, id.Value, parsed.Value.ExpectedReviewVersion.Value, cancellationToken);
             return Results.Json(ReviewSummaryResponse.From(summary));
         }, "imports_review_refresh");
 
-    private Task<IResult> CommitReviewAsync(HttpContext context,
-                                            CancellationToken cancellationToken) =>
+    private Task<IResult> CommitReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
+
             var id = RouteGuid(context);
             if (id is null) return Errors.NotFound();
-            var body = await ReadJsonBytesAsync(context.Request, cancellationToken);
+
+            byte[] body = await ReadJsonBytesAsync(context.Request, cancellationToken);
             var parsed = JsonBody.ParseBytes<ImportCommitRequest>(body);
-            if (!parsed.Parsed ||
-                parsed.Value!.ExpectedReviewVersion is null ||
-                string.IsNullOrWhiteSpace(parsed.Value.ConfirmedSummaryHash))
+            if (!parsed.Parsed || parsed.Value!.ExpectedReviewVersion is null || string.IsNullOrWhiteSpace(parsed.Value.ConfirmedSummaryHash))
             {
                 return Errors.InvalidRequest();
             }
-            var result = await store.CommitReviewAsync(
-                customerId!.Value,
-                id.Value,
-                parsed.Value.ExpectedReviewVersion.Value,
-                parsed.Value.ConfirmedSummaryHash,
-                cancellationToken);
-            _audit.LogInformation(
-                "audit.import_committed customer_id={CustomerId} statement_id={StatementId} rows={Rows} replayed={Replayed}",
-                customerId.Value, result.Summary.Id, result.Summary.ImportedCount, result.Replayed);
+
+            var result = await store.CommitReviewAsync(customerId!.Value, id.Value, parsed.Value.ExpectedReviewVersion.Value, parsed.Value.ConfirmedSummaryHash, cancellationToken);
+            _audit.LogInformation("audit.import_committed customer_id={CustomerId} statement_id={StatementId} rows={Rows} replayed={Replayed}", customerId.Value, result.Summary.Id, result.Summary.ImportedCount, result.Replayed);
             return Results.Json(CommitResponse.From(result), statusCode: result.Replayed ? 200 : 201);
         }, "imports_review_commit");
 
-    private Task<IResult> AbandonReviewAsync(HttpContext context,
-                                             CancellationToken cancellationToken) =>
+    private Task<IResult> AbandonReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
+
             var id = RouteGuid(context);
             if (id is null) return Errors.NotFound();
-            var body = await ReadJsonBytesAsync(context.Request, cancellationToken);
+
+            byte[] body = await ReadJsonBytesAsync(context.Request, cancellationToken);
             var parsed = JsonBody.ParseBytes<ReviewVersionRequest>(body);
             if (!parsed.Parsed || parsed.Value!.ExpectedReviewVersion is null)
             {
                 return Errors.InvalidRequest();
             }
-            var result = await store.AbandonReviewAsync(
-                customerId!.Value, id.Value, parsed.Value.ExpectedReviewVersion.Value, cancellationToken);
-            return Results.Json(new
-            {
-                committed = result.Committed,
-                statement = result.Commit is null ? null : StatementSummaryResponse.From(result.Commit.Summary),
-                replayed = result.Commit?.Replayed ?? false,
-            });
+
+            var result = await store.AbandonReviewAsync(customerId!.Value, id.Value, parsed.Value.ExpectedReviewVersion.Value, cancellationToken);
+            return Results.Json(new { committed = result.Committed, statement = result.Commit is null ? null : StatementSummaryResponse.From(result.Commit.Summary), replayed = result.Commit?.Replayed ?? false, });
         }, "imports_review_abandon");
 
     // --- History, detail, and statement lifecycle --------------------------
 
-    private Task<IResult> ListHistoryAsync(HttpContext context,
-                                           CancellationToken cancellationToken) =>
+    private Task<IResult> ListHistoryAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
+
             var accountId = QueryGuid(context, "account_id");
-            var state = context.Request.Query["state"].ToString();
-            var cursor = context.Request.Query["cursor"].ToString();
-            var limit = QueryInt(context, "limit", 50);
-            var page = await store.ListHistoryAsync(
-                customerId!.Value,
-                accountId,
-                string.IsNullOrWhiteSpace(state) ? null : state,
-                string.IsNullOrWhiteSpace(cursor) ? null : cursor,
-                limit,
-                cancellationToken);
-            return Results.Json(new
-            {
-                items = page.Items.Select(StatementSummaryResponse.From).ToArray(),
-                next_cursor = page.NextCursor,
-            });
+            string state = context.Request.Query["state"].ToString();
+            string cursor = context.Request.Query["cursor"].ToString();
+            int limit = QueryInt(context, "limit", 50);
+            var page = await store.ListHistoryAsync(customerId!.Value, accountId, string.IsNullOrWhiteSpace(state) ? null : state, string.IsNullOrWhiteSpace(cursor) ? null : cursor, limit, cancellationToken);
+            return Results.Json(new { items = page.Items.Select(StatementSummaryResponse.From).ToArray(), next_cursor = page.NextCursor, });
         }, "imports_history_list");
 
-    private Task<IResult> GetImportAsync(HttpContext context,
-                                         CancellationToken cancellationToken) =>
+    private Task<IResult> GetImportAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
+
             var id = RouteGuid(context);
             if (id is null) return Errors.NotFound();
-            var page = QueryInt(context, "page", 1);
-            var pageSize = QueryInt(context, "page_size", ImportLimits.MaxPageSize);
-            var detail = await store.GetStatementAsync(
-                customerId!.Value, id.Value, page, pageSize, cancellationToken);
+
+            int page = QueryInt(context, "page", 1);
+            int pageSize = QueryInt(context, "page_size", ImportLimits.MaxPageSize);
+            var detail = await store.GetStatementAsync(customerId!.Value, id.Value, page, pageSize, cancellationToken);
             return Results.Json(new
             {
                 statement = StatementSummaryResponse.From(detail.Summary),
@@ -392,112 +328,83 @@ public sealed class StatementImportApi(FinanceGuard guard,
             });
         }, "imports_statement_get");
 
-    private Task<IResult> HideAsync(HttpContext context,
-                                    CancellationToken cancellationToken) =>
+    private Task<IResult> HideAsync(HttpContext context, CancellationToken cancellationToken) =>
         SetVisibilityAsync(context, cancellationToken, hidden: true);
 
-    private Task<IResult> RestoreAsync(HttpContext context,
-                                       CancellationToken cancellationToken) =>
+    private Task<IResult> RestoreAsync(HttpContext context, CancellationToken cancellationToken) =>
         SetVisibilityAsync(context, cancellationToken, hidden: false);
 
-    private Task<IResult> SetVisibilityAsync(HttpContext context,
-                                             CancellationToken cancellationToken,
-                                             bool hidden) =>
+    private Task<IResult> SetVisibilityAsync(HttpContext context, CancellationToken cancellationToken, bool hidden) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
+
             var id = RouteGuid(context);
             if (id is null) return Errors.NotFound();
-            var body = await ReadJsonBytesAsync(context.Request, cancellationToken);
+
+            byte[] body = await ReadJsonBytesAsync(context.Request, cancellationToken);
             var parsed = JsonBody.ParseBytes<StatementMutationRequest>(body);
-            if (!parsed.Parsed ||
-                parsed.Value!.ExpectedVersion is null ||
-                parsed.Value.ExpectedTransactionCount is null ||
-                parsed.Value.Confirm != true)
+            if (!parsed.Parsed || parsed.Value!.ExpectedVersion is null || parsed.Value.ExpectedTransactionCount is null || parsed.Value.Confirm != true)
             {
                 return Errors.InvalidRequest();
             }
-            var summary = await store.SetStatementVisibilityAsync(
-                customerId!.Value,
-                id.Value,
-                hidden,
-                parsed.Value.ExpectedVersion.Value,
-                parsed.Value.ExpectedTransactionCount.Value,
-                true,
-                cancellationToken);
+
+            var summary = await store.SetStatementVisibilityAsync(customerId!.Value, id.Value, hidden, parsed.Value.ExpectedVersion.Value, parsed.Value.ExpectedTransactionCount.Value, true, cancellationToken);
             return Results.Json(StatementSummaryResponse.From(summary));
         }, hidden ? "imports_statement_hide" : "imports_statement_restore");
 
-    private Task<IResult> DeleteAsync(HttpContext context,
-                                      CancellationToken cancellationToken) =>
+    private Task<IResult> DeleteAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
             var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
+
             var id = RouteGuid(context);
             if (id is null) return Errors.NotFound();
+
             var request = context.Request;
-            var body = await ReadJsonBytesAsync(request, cancellationToken);
+            byte[] body = await ReadJsonBytesAsync(request, cancellationToken);
             var parsed = JsonBody.ParseBytes<StatementMutationRequest>(body);
-            if (!parsed.Parsed ||
-                parsed.Value!.ExpectedVersion is null ||
-                parsed.Value.ExpectedTransactionCount is null ||
-                parsed.Value.Confirm != true)
+            if (!parsed.Parsed || parsed.Value!.ExpectedVersion is null || parsed.Value.ExpectedTransactionCount is null || parsed.Value.Confirm != true)
             {
                 return Errors.InvalidRequest();
             }
-            var result = await store.DeleteStatementAsync(
-                customerId!.Value,
-                id.Value,
-                parsed.Value.ExpectedVersion.Value,
-                parsed.Value.ExpectedTransactionCount.Value,
-                true,
-                cancellationToken);
-            _audit.LogInformation(
-                "audit.import_deleted customer_id={CustomerId} statement_id={StatementId} deleted={Deleted}",
-                customerId.Value, id.Value, result.DeletedTransactionCount);
-            return Results.Json(new
-            {
-                deleted = result.Deleted,
-                deleted_transaction_count = result.DeletedTransactionCount,
-            });
+
+            var result = await store.DeleteStatementAsync(customerId!.Value, id.Value, parsed.Value.ExpectedVersion.Value, parsed.Value.ExpectedTransactionCount.Value, true, cancellationToken);
+            _audit.LogInformation("audit.import_deleted customer_id={CustomerId} statement_id={StatementId} deleted={Deleted}", customerId.Value, id.Value, result.DeletedTransactionCount);
+            return Results.Json(new { deleted = result.Deleted, deleted_transaction_count = result.DeletedTransactionCount, });
         }, "imports_statement_delete");
 
     // --- Helpers -----------------------------------------------------------
 
-    private static bool TryDate(string? value,
-                                out DateOnly date) =>
+    private static bool TryDate(string? value, out DateOnly date) =>
         DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture,
             DateTimeStyles.None, out date);
 
     private static Guid? RouteGuid(HttpContext context) =>
-        context.Request.RouteValues.TryGetValue("id", out var value) &&
+        context.Request.RouteValues.TryGetValue("id", out object? value) &&
         Guid.TryParse(value?.ToString(), out var id)
             ? id
             : null;
 
-    private static int QueryInt(HttpContext context,
-                                string name,
-                                int fallback) =>
+    private static int QueryInt(HttpContext context, string name, int fallback) =>
         int.TryParse(context.Request.Query[name].ToString(), NumberStyles.Integer,
-            CultureInfo.InvariantCulture, out var value)
+            CultureInfo.InvariantCulture, out int value)
             ? value
             : fallback;
 
-    private static Guid? QueryGuid(HttpContext context,
-                                   string name) =>
+    private static Guid? QueryGuid(HttpContext context, string name) =>
         Guid.TryParse(context.Request.Query[name].ToString(), out var value) ? value : null;
 
-    private static async Task<byte[]> ReadJsonBytesAsync(HttpRequest request,
-                                                         CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadJsonBytesAsync(HttpRequest request, CancellationToken cancellationToken)
     {
         if (request.ContentLength is > ImportLimits.MaxJsonBodyBytes)
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
         using var output = new MemoryStream();
-        var buffer = new byte[16 * 1024];
+        byte[] buffer = new byte[16 * 1024];
         int read;
         while ((read = await request.Body.ReadAsync(buffer, cancellationToken)) > 0)
         {
@@ -507,6 +414,7 @@ public sealed class StatementImportApi(FinanceGuard guard,
             }
             output.Write(buffer, 0, read);
         }
+
         return output.ToArray();
     }
 
@@ -550,9 +458,7 @@ public sealed record ImportOptionsRequest(Guid? FinancialAccountId,
                                           bool? ConfirmZar,
                                           bool? StatementOverride);
 
-public sealed record ImportReviewPatchRequest(int? ExpectedReviewVersion,
-                                              ReviewDecisionRequest[]? Decisions,
-                                              bool? StatementOverride);
+public sealed record ImportReviewPatchRequest(int? ExpectedReviewVersion, ReviewDecisionRequest[]? Decisions, bool? StatementOverride);
 
 public sealed record ReviewDecisionRequest(Guid? RowId,
                                            bool? Skip,
@@ -564,12 +470,9 @@ public sealed record ReviewDecisionRequest(Guid? RowId,
 
 public sealed record ReviewVersionRequest(int? ExpectedReviewVersion);
 
-public sealed record ImportCommitRequest(int? ExpectedReviewVersion,
-                                         string? ConfirmedSummaryHash);
+public sealed record ImportCommitRequest(int? ExpectedReviewVersion, string? ConfirmedSummaryHash);
 
-public sealed record StatementMutationRequest(int? ExpectedVersion,
-                                              long? ExpectedTransactionCount,
-                                              bool? Confirm);
+public sealed record StatementMutationRequest(int? ExpectedVersion, long? ExpectedTransactionCount, bool? Confirm);
 
 public sealed record PreviewRowResponse(Guid RowId,
                                         int SourceLine,
@@ -595,8 +498,7 @@ public sealed record PreviewRowResponse(Guid RowId,
         row.Warnings.ToArray());
 }
 
-public sealed record ReviewResponse(ReviewSummaryResponse Summary,
-                                    ReviewPageResponse Page)
+public sealed record ReviewResponse(ReviewSummaryResponse Summary, ReviewPageResponse Page)
 {
     public static ReviewResponse From(ImportReviewDetail detail) => new(
         ReviewSummaryResponse.From(detail.Summary),
@@ -813,14 +715,12 @@ public sealed record StatementRowResponse(Guid Id,
         record.Tags.Select(TagResponse.From).ToArray());
 }
 
-public sealed record TagResponse(Guid Id,
-                                 string DisplayName)
+public sealed record TagResponse(Guid Id, string DisplayName)
 {
     public static TagResponse From(ImportTagRecord record) => new(record.Id, record.DisplayName);
 }
 
-public sealed record CommitResponse(bool Replayed,
-                                    StatementSummaryResponse Statement)
+public sealed record CommitResponse(bool Replayed, StatementSummaryResponse Statement)
 {
     public static CommitResponse From(ImportCommitResult result) => new(
         result.Replayed,

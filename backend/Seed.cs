@@ -17,24 +17,8 @@ public static class Seed
     {
         await db.MigrateAsync(cancellationToken);
         var financeStore = new FinanceStore(db);
-        await SeedAccountAsync(
-            db,
-            financeStore,
-            logger,
-            settings.SeedDevPassword,
-            "dev@example.test",
-            isAdmin: true,
-            isLifetime: true,
-            cancellationToken);
-        await SeedAccountAsync(
-            db,
-            financeStore,
-            logger,
-            settings.SeedUserPassword,
-            "user@example.test",
-            isAdmin: false,
-            isLifetime: false,
-            cancellationToken);
+        await SeedAccountAsync(db, financeStore, logger, settings.SeedDevPassword, "dev@example.test", isAdmin: true, isLifetime: true, cancellationToken);
+        await SeedAccountAsync(db, financeStore, logger, settings.SeedUserPassword, "user@example.test", isAdmin: false, isLifetime: false, cancellationToken);
     }
 
     private static async Task SeedAccountAsync(Db db,
@@ -46,8 +30,8 @@ public static class Seed
                                                bool isLifetime,
                                                CancellationToken cancellationToken)
     {
-        var password = string.IsNullOrEmpty(pinnedPassword) ? Tokens.NewToken() : pinnedPassword;
-        var passwordHash = PasswordHasher.Hash(password);
+        string password = string.IsNullOrEmpty(pinnedPassword) ? Tokens.NewToken() : pinnedPassword;
+        string passwordHash = PasswordHasher.Hash(password);
 
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -66,7 +50,7 @@ public static class Seed
         command.Parameters.AddWithValue("lifetime", isLifetime);
         command.Parameters.AddWithValue("admin", isAdmin);
 
-        var inserted = await command.ExecuteNonQueryAsync(cancellationToken);
+        int inserted = await command.ExecuteNonQueryAsync(cancellationToken);
         if (inserted == 1)
         {
             Console.WriteLine($"seed: created {email} password {password}");

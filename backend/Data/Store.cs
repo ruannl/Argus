@@ -34,31 +34,29 @@ public sealed class Store(Db db)
 
     // --- Customers ----------------------------------------------------------
 
-    public async Task<CustomerRecord?> FindCustomerByEmailAsync(string canonicalEmail,
-                                                                CancellationToken cancellationToken = default)
+    public async Task<CustomerRecord?> FindCustomerByEmailAsync(string canonicalEmail, CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = $"SELECT {CustomerColumns} FROM customers WHERE canonical_email = @email";
         command.Parameters.AddWithValue("email", canonicalEmail);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
         return await reader.ReadAsync(cancellationToken) ? MapCustomer(reader) : null;
     }
 
-    public async Task<CustomerRecord?> FindCustomerByIdAsync(Guid customerId,
-                                                             CancellationToken cancellationToken = default)
+    public async Task<CustomerRecord?> FindCustomerByIdAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = $"SELECT {CustomerColumns} FROM customers WHERE id = @id";
         command.Parameters.AddWithValue("id", customerId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
         return await reader.ReadAsync(cancellationToken) ? MapCustomer(reader) : null;
     }
 
-    public async Task<(CustomerRecord Customer, bool Created)> InsertCustomerAsync(string canonicalEmail,
-                                                                                   string passwordHash,
-                                                                                   CancellationToken cancellationToken = default)
+    public async Task<(CustomerRecord Customer, bool Created)> InsertCustomerAsync(string canonicalEmail, string passwordHash, CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using (var insert = connection.CreateCommand())
@@ -80,17 +78,15 @@ public sealed class Store(Db db)
         }
 
         var existing = await FindCustomerByEmailAsync(canonicalEmail, cancellationToken);
-        return existing is null
-            ? throw new InvalidOperationException("customer insert conflicted but no row exists")
-            : (existing, false);
+
+        return existing is null ? throw new InvalidOperationException("customer insert conflicted but no row exists") : (existing, false);
     }
 
     /// <summary>
     /// Adds one failed login. Returns true exactly when this failure crossed the
     /// threshold and locked the account for 900 seconds.
     /// </summary>
-    public async Task<bool> RecordFailedLoginAsync(Guid customerId,
-                                                   CancellationToken cancellationToken = default)
+    public async Task<bool> RecordFailedLoginAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -106,6 +102,7 @@ public sealed class Store(Db db)
             RETURNING failed_login_count >= 5
             """;
         command.Parameters.AddWithValue("id", customerId);
+
         return await command.ExecuteScalarAsync(cancellationToken) is true;
     }
 
@@ -116,11 +113,9 @@ public sealed class Store(Db db)
     /// verified. Holding the customer row through commit serializes issuance
     /// with password reset's hash replacement and session revocation.
     /// </summary>
-    public async Task<(string Token, DateTime ExpiresAt)?> CreateSessionForVerifiedHashAsync(Guid customerId,
-                                                                                             string verifiedPasswordHash,
-                                                                                             CancellationToken cancellationToken = default)
+    public async Task<(string Token, DateTime ExpiresAt)?> CreateSessionForVerifiedHashAsync(Guid customerId, string verifiedPasswordHash, CancellationToken cancellationToken = default)
     {
-        var token = Tokens.NewToken();
+        string token = Tokens.NewToken();
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
@@ -133,11 +128,11 @@ public sealed class Store(Db db)
                 """;
             lookup.Parameters.AddWithValue("id", customerId);
             await using var reader = await lookup.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken)
-                || !string.Equals(reader.GetString(0), verifiedPasswordHash, StringComparison.Ordinal)
-                || reader.IsDBNull(1)
-                || reader.IsDBNull(2)
-                || (!reader.IsDBNull(3) && reader.GetFieldValue<DateTime>(3) > DateTime.UtcNow))
+            if (!await reader.ReadAsync(cancellationToken) ||
+                !string.Equals(reader.GetString(0), verifiedPasswordHash, StringComparison.Ordinal) ||
+                reader.IsDBNull(1) ||
+                reader.IsDBNull(2) ||
+                (!reader.IsDBNull(3) && reader.GetFieldValue<DateTime>(3) > DateTime.UtcNow))
             {
                 await reader.CloseAsync();
                 await transaction.RollbackAsync(cancellationToken);
@@ -175,6 +170,7 @@ public sealed class Store(Db db)
         }
 
         await transaction.CommitAsync(cancellationToken);
+
         return (token, expiresAt);
     }
 
@@ -183,8 +179,7 @@ public sealed class Store(Db db)
     /// absolute expiry, and not idle beyond the idle window; touching the row
     /// and enforcing the idle check happen in one conditional UPDATE.
     /// </summary>
-    public async Task<Guid?> ValidateAndTouchSessionAsync(string tokenHash,
-                                                          CancellationToken cancellationToken = default)
+    public async Task<Guid?> ValidateAndTouchSessionAsync(string tokenHash, CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -198,12 +193,12 @@ public sealed class Store(Db db)
             RETURNING customer_id
             """;
         command.Parameters.AddWithValue("token_hash", tokenHash);
+
         return await command.ExecuteScalarAsync(cancellationToken) is Guid customerId ? customerId : null;
     }
 
     /// <summary>Revokes one session; returns the owner when it revoked a live row.</summary>
-    public async Task<Guid?> RevokeSessionAsync(string tokenHash,
-                                                CancellationToken cancellationToken = default)
+    public async Task<Guid?> RevokeSessionAsync(string tokenHash, CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -214,15 +209,15 @@ public sealed class Store(Db db)
             RETURNING customer_id
             """;
         command.Parameters.AddWithValue("token_hash", tokenHash);
+
         return await command.ExecuteScalarAsync(cancellationToken) is Guid customerId ? customerId : null;
     }
 
     // --- Email verification tokens -----------------------------------------
 
-    public async Task<string> CreateVerificationTokenAsync(Guid customerId,
-                                                           CancellationToken cancellationToken = default)
+    public async Task<string> CreateVerificationTokenAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
-        var token = Tokens.NewToken();
+        string token = Tokens.NewToken();
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
@@ -231,12 +226,12 @@ public sealed class Store(Db db)
             """;
         AddTokenParameters(command, customerId, token, VerificationTokenTtl);
         await command.ExecuteNonQueryAsync(cancellationToken);
+
         return token;
     }
 
     /// <summary>Consumes every open verification token, then issues exactly one new token.</summary>
-    public async Task<string> RotateVerificationTokenAsync(Guid customerId,
-                                                           CancellationToken cancellationToken = default)
+    public async Task<string> RotateVerificationTokenAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -252,7 +247,7 @@ public sealed class Store(Db db)
             await consume.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        var token = Tokens.NewToken();
+        string token = Tokens.NewToken();
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
@@ -265,6 +260,7 @@ public sealed class Store(Db db)
         }
 
         await transaction.CommitAsync(cancellationToken);
+
         return token;
     }
 
@@ -273,8 +269,7 @@ public sealed class Store(Db db)
     /// lifetime accounts cannot be activated by token, matching the frozen
     /// behaviour; the transaction rolls back so the token stays unconsumed.
     /// </summary>
-    public async Task<Guid?> ConsumeVerificationAndActivateAsync(string tokenHash,
-                                                                 CancellationToken cancellationToken = default)
+    public async Task<Guid?> ConsumeVerificationAndActivateAsync(string tokenHash, CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -289,7 +284,7 @@ public sealed class Store(Db db)
                 RETURNING customer_id
                 """;
             consume.Parameters.AddWithValue("token_hash", tokenHash);
-            var result = await consume.ExecuteScalarAsync(cancellationToken);
+            object? result = await consume.ExecuteScalarAsync(cancellationToken);
             if (result is not Guid found)
             {
                 await transaction.RollbackAsync(cancellationToken);
@@ -328,13 +323,13 @@ public sealed class Store(Db db)
         }
 
         await transaction.CommitAsync(cancellationToken);
+
         return customerId;
     }
 
     // --- Password reset tokens ---------------------------------------------
 
-    public async Task<ResetRequestOutcome> RequestPasswordResetAsync(string canonicalEmail,
-                                                                     CancellationToken cancellationToken = default)
+    public async Task<ResetRequestOutcome> RequestPasswordResetAsync(string canonicalEmail, CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -348,7 +343,7 @@ public sealed class Store(Db db)
                 WHERE canonical_email = @email AND email_verified_at IS NOT NULL
                 """;
             lookup.Parameters.AddWithValue("email", canonicalEmail);
-            var result = await lookup.ExecuteScalarAsync(cancellationToken);
+            object? result = await lookup.ExecuteScalarAsync(cancellationToken);
             if (result is not Guid found)
             {
                 await transaction.RollbackAsync(cancellationToken);
@@ -368,7 +363,7 @@ public sealed class Store(Db db)
             await consume.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        var token = Tokens.NewToken();
+        string token = Tokens.NewToken();
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
@@ -381,6 +376,7 @@ public sealed class Store(Db db)
         }
 
         await transaction.CommitAsync(cancellationToken);
+
         return new ResetRequestOutcome.Issued(customerId, canonicalEmail, token);
     }
 
@@ -388,9 +384,7 @@ public sealed class Store(Db db)
     /// Consumes one reset token, replaces the password hash, and revokes every
     /// live session in the same transaction.
     /// </summary>
-    public async Task<Guid?> ConsumePasswordResetAsync(string tokenHash,
-                                                       string newPasswordHash,
-                                                       CancellationToken cancellationToken = default)
+    public async Task<Guid?> ConsumePasswordResetAsync(string tokenHash, string newPasswordHash, CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -405,7 +399,7 @@ public sealed class Store(Db db)
                 RETURNING customer_id
                 """;
             consume.Parameters.AddWithValue("token_hash", tokenHash);
-            var result = await consume.ExecuteScalarAsync(cancellationToken);
+            object? result = await consume.ExecuteScalarAsync(cancellationToken);
             if (result is not Guid found)
             {
                 await transaction.RollbackAsync(cancellationToken);
@@ -438,6 +432,7 @@ public sealed class Store(Db db)
         }
 
         await transaction.CommitAsync(cancellationToken);
+
         return customerId;
     }
 

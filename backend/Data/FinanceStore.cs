@@ -62,8 +62,7 @@ public abstract record CategoryOutcome
 
 public abstract record CategoryDeleteOutcome
 {
-    public sealed record Success(long ReassignedTransactionCount,
-                                 Guid UncategorisedCategoryId) : CategoryDeleteOutcome;
+    public sealed record Success(long ReassignedTransactionCount, Guid UncategorisedCategoryId) : CategoryDeleteOutcome;
 
     public sealed record NotFound : CategoryDeleteOutcome;
 
@@ -172,7 +171,7 @@ public sealed class FinanceStore(Db db)
         }
 
         var builder = new StringBuilder(input.Length);
-        var pendingSpace = false;
+        bool pendingSpace = false;
         foreach (var rune in input.EnumerateRunes())
         {
             if (Rune.IsWhiteSpace(rune))
@@ -192,7 +191,7 @@ public sealed class FinanceStore(Db db)
             builder.Append(rune.ToString());
         }
 
-        var collapsed = builder.ToString();
+        string collapsed = builder.ToString();
         if (collapsed.Length == 0 || CountRunes(collapsed) > maxRunes)
         {
             return false;
@@ -200,13 +199,12 @@ public sealed class FinanceStore(Db db)
 
         displayName = collapsed;
         normalizedName = collapsed.ToLowerInvariant();
+
         return true;
     }
 
     /// <summary>Null or whitespace means "no institution"; anything else is normalized.</summary>
-    public static bool TryNormalizeInstitution(string? input,
-                                               out string? institution,
-                                               int maxRunes = MaxNameRunes)
+    public static bool TryNormalizeInstitution(string? input, out string? institution, int maxRunes = MaxNameRunes)
     {
         institution = null;
         if (string.IsNullOrWhiteSpace(input))
@@ -214,12 +212,13 @@ public sealed class FinanceStore(Db db)
             return true;
         }
 
-        if (!TryNormalizeName(input, out var displayName, out _, maxRunes))
+        if (!TryNormalizeName(input, out string? displayName, out _, maxRunes))
         {
             return false;
         }
 
         institution = displayName;
+
         return true;
     }
 
@@ -227,11 +226,12 @@ public sealed class FinanceStore(Db db)
 
     private static int CountRunes(string value)
     {
-        var count = 0;
+        int count = 0;
         foreach (var _ in value.EnumerateRunes())
         {
             count++;
         }
+
         return count;
     }
 
@@ -247,15 +247,14 @@ public sealed class FinanceStore(Db db)
     /// serialize, and the under-lock re-check stops a second seeder from
     /// resurrecting defaults after the customer renamed or deleted them.
     /// </summary>
-    public async Task EnsureCategoriesSeededAsync(Guid customerId,
-                                                  CancellationToken cancellationToken = default)
+    public async Task EnsureCategoriesSeededAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
         await using (var fast = await db.OpenAsync(cancellationToken))
         {
             await using var check = fast.CreateCommand();
             check.CommandText = "SELECT categories_seeded_at FROM customers WHERE id = @customer_id";
             check.Parameters.AddWithValue("customer_id", customerId);
-            var value = await check.ExecuteScalarAsync(cancellationToken);
+            object? value = await check.ExecuteScalarAsync(cancellationToken);
             // No customer row: nothing to seed. Non-null value: already seeded.
             if (value is null || value is not DBNull)
             {
@@ -270,10 +269,9 @@ public sealed class FinanceStore(Db db)
         await using (var lockRow = connection.CreateCommand())
         {
             lockRow.Transaction = transaction;
-            lockRow.CommandText =
-                "SELECT categories_seeded_at FROM customers WHERE id = @customer_id FOR UPDATE";
+            lockRow.CommandText = "SELECT categories_seeded_at FROM customers WHERE id = @customer_id FOR UPDATE";
             lockRow.Parameters.AddWithValue("customer_id", customerId);
-            var value = await lockRow.ExecuteScalarAsync(cancellationToken);
+            object? value = await lockRow.ExecuteScalarAsync(cancellationToken);
             if (value is null)
             {
                 await transaction.CommitAsync(cancellationToken);
@@ -316,8 +314,7 @@ public sealed class FinanceStore(Db db)
         await using (var markSeeded = connection.CreateCommand())
         {
             markSeeded.Transaction = transaction;
-            markSeeded.CommandText =
-                "UPDATE customers SET categories_seeded_at = NOW(), updated_at = NOW() WHERE id = @customer_id";
+            markSeeded.CommandText = "UPDATE customers SET categories_seeded_at = NOW(), updated_at = NOW() WHERE id = @customer_id";
             markSeeded.Parameters.AddWithValue("customer_id", customerId);
             await markSeeded.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -327,8 +324,7 @@ public sealed class FinanceStore(Db db)
 
     // --- Financial accounts ------------------------------------------------
 
-    public async Task<IReadOnlyList<FinancialAccountRecord>> ListAccountsAsync(Guid customerId,
-                                                                               CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<FinancialAccountRecord>> ListAccountsAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -346,6 +342,7 @@ public sealed class FinanceStore(Db db)
         {
             accounts.Add(MapAccount(reader));
         }
+
         return accounts;
     }
 
@@ -354,8 +351,7 @@ public sealed class FinanceStore(Db db)
                                                          string? institution,
                                                          CancellationToken cancellationToken = default)
     {
-        if (!TryNormalizeName(displayName, out var name, out _) ||
-            !TryNormalizeInstitution(institution, out var normalizedInstitution))
+        if (!TryNormalizeName(displayName, out string? name, out _) || !TryNormalizeInstitution(institution, out string? normalizedInstitution))
         {
             return new AccountOutcome.InvalidName();
         }
@@ -378,6 +374,7 @@ public sealed class FinanceStore(Db db)
         await command.ExecuteNonQueryAsync(cancellationToken);
 
         var created = await FindAccountAsync(customerId, id, cancellationToken);
+
         return created is null ? new AccountOutcome.NotFound() : new AccountOutcome.Success(created);
     }
 
@@ -393,7 +390,7 @@ public sealed class FinanceStore(Db db)
                                                          string? institution,
                                                          CancellationToken cancellationToken = default)
     {
-        if (!TryNormalizeName(displayName, out var name, out _))
+        if (!TryNormalizeName(displayName, out string? name, out _))
         {
             return new AccountOutcome.InvalidName();
         }
@@ -433,6 +430,7 @@ public sealed class FinanceStore(Db db)
 
         var updated = await FindAccountAsync(connection, transaction, customerId, id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+
         return updated is null ? new AccountOutcome.NotFound() : new AccountOutcome.Success(updated);
     }
 
@@ -469,14 +467,14 @@ public sealed class FinanceStore(Db db)
 
         var updated = await FindAccountAsync(connection, transaction, customerId, id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+
         return updated is null ? new AccountOutcome.NotFound() : new AccountOutcome.Success(updated);
     }
 
-    private async Task<FinancialAccountRecord?> FindAccountAsync(Guid customerId,
-                                                                 Guid id,
-                                                                 CancellationToken cancellationToken)
+    private async Task<FinancialAccountRecord?> FindAccountAsync(Guid customerId, Guid id, CancellationToken cancellationToken)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
+
         return await FindAccountAsync(connection, null, customerId, id, cancellationToken);
     }
 
@@ -496,6 +494,7 @@ public sealed class FinanceStore(Db db)
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("id", id);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
         return await reader.ReadAsync(cancellationToken) ? MapAccount(reader) : null;
     }
 
@@ -514,13 +513,13 @@ public sealed class FinanceStore(Db db)
             """;
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("id", id);
+
         return await command.ExecuteScalarAsync(cancellationToken) is not null;
     }
 
     // --- Categories --------------------------------------------------------
 
-    public async Task<IReadOnlyList<CategoryRecord>> ListCategoriesAsync(Guid customerId,
-                                                                         CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<CategoryRecord>> ListCategoriesAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
         await EnsureCategoriesSeededAsync(customerId, cancellationToken);
 
@@ -540,6 +539,7 @@ public sealed class FinanceStore(Db db)
         {
             categories.Add(MapCategory(reader));
         }
+
         return categories;
     }
 
@@ -550,10 +550,11 @@ public sealed class FinanceStore(Db db)
     {
         await EnsureCategoriesSeededAsync(customerId, cancellationToken);
 
-        if (!TryNormalizeName(displayName, out var name, out var normalizedName))
+        if (!TryNormalizeName(displayName, out string? name, out string? normalizedName))
         {
             return new CategoryOutcome.InvalidName();
         }
+
         if (!IsUserCategoryKind(kind))
         {
             return new CategoryOutcome.InvalidKind();
@@ -591,6 +592,7 @@ public sealed class FinanceStore(Db db)
         }
 
         var created = await FindCategoryAsync(customerId, id, cancellationToken);
+
         return created is null ? new CategoryOutcome.NotFound() : new CategoryOutcome.Success(created);
     }
 
@@ -603,10 +605,11 @@ public sealed class FinanceStore(Db db)
     {
         await EnsureCategoriesSeededAsync(customerId, cancellationToken);
 
-        if (!TryNormalizeName(displayName, out var name, out var normalizedName))
+        if (!TryNormalizeName(displayName, out string? name, out string? normalizedName))
         {
             return new CategoryOutcome.InvalidName();
         }
+
         if (!IsUserCategoryKind(kind))
         {
             return new CategoryOutcome.InvalidKind();
@@ -664,6 +667,7 @@ public sealed class FinanceStore(Db db)
 
         var updated = await FindCategoryAsync(connection, transaction, customerId, id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+
         return updated is null ? new CategoryOutcome.NotFound() : new CategoryOutcome.Success(updated);
     }
 
@@ -714,6 +718,7 @@ public sealed class FinanceStore(Db db)
 
         var updated = await FindCategoryAsync(connection, transaction, customerId, id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+
         return updated is null ? new CategoryOutcome.NotFound() : new CategoryOutcome.Success(updated);
     }
 
@@ -722,9 +727,7 @@ public sealed class FinanceStore(Db db)
     /// to the customer's system <c>Uncategorised</c> bucket. No transaction row
     /// is ever deleted.
     /// </summary>
-    public async Task<CategoryDeleteOutcome> DeleteCategoryAsync(Guid customerId,
-                                                                 Guid id,
-                                                                 CancellationToken cancellationToken = default)
+    public async Task<CategoryDeleteOutcome> DeleteCategoryAsync(Guid customerId, Guid id, CancellationToken cancellationToken = default)
     {
         await EnsureCategoriesSeededAsync(customerId, cancellationToken);
 
@@ -799,6 +802,7 @@ public sealed class FinanceStore(Db db)
         }
 
         await transaction.CommitAsync(cancellationToken);
+
         return new CategoryDeleteOutcome.Success(reassigned, uncategorisedId.Value);
     }
 
@@ -829,12 +833,8 @@ public sealed class FinanceStore(Db db)
         {
             return null;
         }
-        return new CategoryState(
-            reader.GetGuid(0),
-            reader.GetString(1),
-            reader.GetBoolean(2),
-            reader.GetBoolean(3),
-            reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTime>(4));
+
+        return new CategoryState(reader.GetGuid(0), reader.GetString(1), reader.GetBoolean(2), reader.GetBoolean(3), reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTime>(4));
     }
 
     private static async Task<Guid?> FindUncategorisedIdAsync(NpgsqlConnection connection,
@@ -844,17 +844,16 @@ public sealed class FinanceStore(Db db)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText =
-            "SELECT id FROM categories WHERE customer_id = @customer_id AND is_system = TRUE";
+        command.CommandText = "SELECT id FROM categories WHERE customer_id = @customer_id AND is_system = TRUE";
         command.Parameters.AddWithValue("customer_id", customerId);
+
         return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
     }
 
-    private async Task<CategoryRecord?> FindCategoryAsync(Guid customerId,
-                                                          Guid id,
-                                                          CancellationToken cancellationToken)
+    private async Task<CategoryRecord?> FindCategoryAsync(Guid customerId, Guid id, CancellationToken cancellationToken)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
+
         return await FindCategoryAsync(connection, null, customerId, id, cancellationToken);
     }
 
@@ -874,13 +873,13 @@ public sealed class FinanceStore(Db db)
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("id", id);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
         return await reader.ReadAsync(cancellationToken) ? MapCategory(reader) : null;
     }
 
     // --- Merchant tags -----------------------------------------------------
 
-    public async Task<IReadOnlyList<MerchantTagRecord>> ListMerchantTagsAsync(Guid customerId,
-                                                                              CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<MerchantTagRecord>> ListMerchantTagsAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -898,14 +897,13 @@ public sealed class FinanceStore(Db db)
         {
             tags.Add(MapMerchantTag(reader));
         }
+
         return tags;
     }
 
-    public async Task<MerchantTagOutcome> CreateMerchantTagAsync(Guid customerId,
-                                                                 string? displayName,
-                                                                 CancellationToken cancellationToken = default)
+    public async Task<MerchantTagOutcome> CreateMerchantTagAsync(Guid customerId, string? displayName, CancellationToken cancellationToken = default)
     {
-        if (!TryNormalizeName(displayName, out var name, out var normalizedName))
+        if (!TryNormalizeName(displayName, out string? name, out string? normalizedName))
         {
             return new MerchantTagOutcome.InvalidName();
         }
@@ -934,9 +932,8 @@ public sealed class FinanceStore(Db db)
         }
 
         var created = await FindMerchantTagAsync(customerId, id, cancellationToken);
-        return created is null
-            ? new MerchantTagOutcome.NotFound()
-            : new MerchantTagOutcome.Success(created);
+
+        return created is null ? new MerchantTagOutcome.NotFound() : new MerchantTagOutcome.Success(created);
     }
 
     public async Task<MerchantTagOutcome> UpdateMerchantTagAsync(Guid customerId,
@@ -944,7 +941,7 @@ public sealed class FinanceStore(Db db)
                                                                  string? displayName,
                                                                  CancellationToken cancellationToken = default)
     {
-        if (!TryNormalizeName(displayName, out var name, out var normalizedName))
+        if (!TryNormalizeName(displayName, out string? name, out string? normalizedName))
         {
             return new MerchantTagOutcome.InvalidName();
         }
@@ -983,9 +980,8 @@ public sealed class FinanceStore(Db db)
 
         var updated = await FindMerchantTagAsync(connection, transaction, customerId, id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return updated is null
-            ? new MerchantTagOutcome.NotFound()
-            : new MerchantTagOutcome.Success(updated);
+
+        return updated is null ? new MerchantTagOutcome.NotFound() : new MerchantTagOutcome.Success(updated);
     }
 
     /// <summary>Archive or restore. Repeating the same transition is an idempotent success.</summary>
@@ -1021,18 +1017,15 @@ public sealed class FinanceStore(Db db)
 
         var updated = await FindMerchantTagAsync(connection, transaction, customerId, id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return updated is null
-            ? new MerchantTagOutcome.NotFound()
-            : new MerchantTagOutcome.Success(updated);
+
+        return updated is null ? new MerchantTagOutcome.NotFound() : new MerchantTagOutcome.Success(updated);
     }
 
     /// <summary>
     /// Deletes a merchant tag and atomically removes its transaction
     /// assignments. Transactions themselves are preserved.
     /// </summary>
-    public async Task<MerchantTagDeleteOutcome> DeleteMerchantTagAsync(Guid customerId,
-                                                                       Guid id,
-                                                                       CancellationToken cancellationToken = default)
+    public async Task<MerchantTagDeleteOutcome> DeleteMerchantTagAsync(Guid customerId, Guid id, CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -1116,14 +1109,14 @@ public sealed class FinanceStore(Db db)
         }
 
         await transaction.CommitAsync(cancellationToken);
+
         return new MerchantTagDeleteOutcome.Success(unassigned);
     }
 
-    private async Task<MerchantTagRecord?> FindMerchantTagAsync(Guid customerId,
-                                                                Guid id,
-                                                                CancellationToken cancellationToken)
+    private async Task<MerchantTagRecord?> FindMerchantTagAsync(Guid customerId, Guid id, CancellationToken cancellationToken)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
+
         return await FindMerchantTagAsync(connection, null, customerId, id, cancellationToken);
     }
 
@@ -1143,6 +1136,7 @@ public sealed class FinanceStore(Db db)
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("id", id);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
         return await reader.ReadAsync(cancellationToken) ? MapMerchantTag(reader) : null;
     }
 
@@ -1161,6 +1155,7 @@ public sealed class FinanceStore(Db db)
             """;
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("id", id);
+
         return await command.ExecuteScalarAsync(cancellationToken) is not null;
     }
 

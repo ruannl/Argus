@@ -19,26 +19,22 @@ public static class PasswordHasher
 
     public static string Hash(string password)
     {
-        var salt = RandomNumberGenerator.GetBytes(SaltBytes);
-        var hash = Derive(Encoding.UTF8.GetBytes(password), salt, MemoryKib, Iterations, Parallelism);
-        return $"argon2id$v=19$m={MemoryKib},t={Iterations},p={Parallelism}$" +
-               $"{Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
+        byte[] salt = RandomNumberGenerator.GetBytes(SaltBytes);
+        byte[] hash = Derive(Encoding.UTF8.GetBytes(password), salt, MemoryKib, Iterations, Parallelism);
+
+        return $"argon2id$v=19$m={MemoryKib},t={Iterations},p={Parallelism}$" + $"{Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
     }
 
-    public static bool Verify(string password,
-                              string encoded)
+    public static bool Verify(string password, string encoded)
     {
-        var parts = encoded.Split('$');
+        string[] parts = encoded.Split('$');
         if (parts.Length != 5 || parts[0] != "argon2id" || parts[1] != "v=19")
         {
             return false;
         }
 
-        var parameters = parts[2].Split(',');
-        if (parameters.Length != 3
-            || !TryParseParameter(parameters[0], "m", out var memoryKib)
-            || !TryParseParameter(parameters[1], "t", out var iterations)
-            || !TryParseParameter(parameters[2], "p", out var parallelism))
+        string[] parameters = parts[2].Split(',');
+        if (parameters.Length != 3 || !TryParseParameter(parameters[0], "m", out int memoryKib) || !TryParseParameter(parameters[1], "t", out int iterations) || !TryParseParameter(parameters[2], "p", out int parallelism))
         {
             return false;
         }
@@ -55,7 +51,8 @@ public static class PasswordHasher
             return false;
         }
 
-        var actual = Derive(Encoding.UTF8.GetBytes(password), salt, memoryKib, iterations, parallelism);
+        byte[] actual = Derive(Encoding.UTF8.GetBytes(password), salt, memoryKib, iterations, parallelism);
+
         return CryptographicOperations.FixedTimeEquals(actual, expected);
     }
 
@@ -72,17 +69,15 @@ public static class PasswordHasher
             Iterations = iterations,
             DegreeOfParallelism = parallelism,
         };
+
         return argon2.GetBytes(HashBytes);
     }
 
-    private static bool TryParseParameter(string text,
-                                          string name,
-                                          out int value)
+    private static bool TryParseParameter(string text, string name, out int value)
     {
         value = 0;
-        return text.StartsWith(name + "=", StringComparison.Ordinal)
-            && int.TryParse(text[(name.Length + 1)..], out value)
-            && value > 0;
+
+        return text.StartsWith(name + "=", StringComparison.Ordinal) && int.TryParse(text[(name.Length + 1)..], out value) && value > 0;
     }
 }
 
@@ -95,8 +90,8 @@ public static class Tokens
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
 
     public static bool HasValidShape(string? token) =>
-        token is { Length: 64 }
-        && token.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+        token is { Length: 64 } &&
+        token.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 }
 
 /// <summary>
@@ -105,6 +100,5 @@ public static class Tokens
 /// </summary>
 public interface IPwnedScreener
 {
-    Task<bool?> IsPwnedAsync(string password,
-                             CancellationToken cancellationToken = default);
+    Task<bool?> IsPwnedAsync(string password, CancellationToken cancellationToken = default);
 }

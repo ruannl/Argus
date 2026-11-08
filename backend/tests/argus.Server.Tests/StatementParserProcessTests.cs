@@ -11,15 +11,9 @@ public sealed class StatementParserProcessTests
     public async Task ChildModeParsesPdfFromStandardInput()
     {
         var bytes = StatementFixtureBuilder.BuildHandAuthoredSmallPdf();
-        using var runner = new PdfParserRunner(timeout: TimeSpan.FromSeconds(20));
+        using PdfParserRunner runner = new PdfParserRunner(timeout: TimeSpan.FromSeconds(20));
 
-        var result = await runner.ParseAsync(
-            bytes,
-            new PdfChildRequestOptions(
-                new DateOnly(2025, 2, 1),
-                new DateOnly(2025, 2, 28),
-                null,
-                20_000));
+        var result = await runner.ParseAsync(bytes, new PdfChildRequestOptions(new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null, 20_000));
 
         Assert.Equal(3, result.Rows.Count);
         Assert.Equal(-1000, result.Rows[0].AmountCents);
@@ -29,14 +23,9 @@ public sealed class StatementParserProcessTests
     [Fact]
     public async Task TimeoutKillsAChildThatDoesNotReadOrExit()
     {
-        using var runner = new PdfParserRunner(
-            () => Shell("sleep 30"),
-            TimeSpan.FromMilliseconds(500));
+        using PdfParserRunner runner = new PdfParserRunner(() => Shell("sleep 30"), TimeSpan.FromMilliseconds(500));
 
-        var exception = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(
-                new byte[512 * 1024],
-                new PdfChildRequestOptions(null, null, null, 500)));
+        var exception = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(new byte[512 * 1024], new PdfChildRequestOptions(null, null, null, 500)));
 
         Assert.Equal(ParserReasons.ProcessingLimit, exception.Reason);
     }
@@ -44,14 +33,9 @@ public sealed class StatementParserProcessTests
     [Fact]
     public async Task StderrFloodDoesNotDeadlockOrLeak()
     {
-        using var runner = new PdfParserRunner(
-            () => Shell("head -c 200000 /dev/zero 1>&2; exit 3"),
-            TimeSpan.FromSeconds(5));
+        using PdfParserRunner runner = new PdfParserRunner(() => Shell("head -c 200000 /dev/zero 1>&2; exit 3"), TimeSpan.FromSeconds(5));
 
-        var exception = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(
-                StatementFixtureBuilder.BuildHandAuthoredSmallPdf(),
-                new PdfChildRequestOptions(null, null, null, 5_000)));
+        var exception = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(StatementFixtureBuilder.BuildHandAuthoredSmallPdf(), new PdfChildRequestOptions(null, null, null, 5_000)));
 
         Assert.Equal(ParserReasons.UnsupportedLayout, exception.Reason);
     }
@@ -59,14 +43,9 @@ public sealed class StatementParserProcessTests
     [Fact]
     public async Task AbnormalExitIsASafeFailure()
     {
-        using var runner = new PdfParserRunner(
-            () => Shell("exit 7"),
-            TimeSpan.FromSeconds(5));
+        using PdfParserRunner runner = new PdfParserRunner(() => Shell("exit 7"), TimeSpan.FromSeconds(5));
 
-        var exception = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(
-                StatementFixtureBuilder.BuildHandAuthoredSmallPdf(),
-                new PdfChildRequestOptions(null, null, null, 5_000)));
+        var exception = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(StatementFixtureBuilder.BuildHandAuthoredSmallPdf(), new PdfChildRequestOptions(null, null, null, 5_000)));
 
         Assert.Equal(ParserReasons.UnsupportedLayout, exception.Reason);
     }
@@ -75,14 +54,9 @@ public sealed class StatementParserProcessTests
     public async Task NonZeroExitIsRejectedEvenWithSuccessShapedOutput()
     {
         const string json = "{\"ok\":true,\"statement\":{\"format\":\"standard_bank_pdf\",\"rows\":[],\"proposed_start_date\":null,\"proposed_end_date\":null,\"mapping_suggestions\":{},\"required_confirmations\":[],\"warnings\":[]}}";
-        using var runner = new PdfParserRunner(
-            () => Shell($"printf '%s' '{json}'; exit 7"),
-            TimeSpan.FromSeconds(5));
+        using PdfParserRunner runner = new PdfParserRunner(() => Shell($"printf '%s' '{json}'; exit 7"), TimeSpan.FromSeconds(5));
 
-        var exception = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(
-                new byte[] { 1 },
-                new PdfChildRequestOptions(null, null, null, 5_000)));
+        var exception = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(new byte[] { 1 }, new PdfChildRequestOptions(null, null, null, 5_000)));
 
         Assert.Equal(ParserReasons.UnsupportedLayout, exception.Reason);
     }
@@ -90,43 +64,33 @@ public sealed class StatementParserProcessTests
     [Fact]
     public async Task ChildWatchdogBoundsAStalledParser()
     {
-        var stalled = new TaskCompletionSource<ParsedStatement>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var input = new MemoryStream(BuildFrame(new byte[] { 1, 2, 3 }));
-        await using var output = new MemoryStream();
+        TaskCompletionSource<ParsedStatement> stalled = new TaskCompletionSource<ParsedStatement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using MemoryStream input = new MemoryStream(BuildFrame(new byte[] { 1, 2, 3 }));
+        await using MemoryStream output = new MemoryStream();
 
-        var run = PdfParserChild.RunAsync(
-            input,
-            output,
-            Stream.Null,
-            TimeSpan.FromMilliseconds(200),
-            (_, _) => stalled.Task.GetAwaiter().GetResult());
+        var run = PdfParserChild.RunAsync(input, output, Stream.Null, TimeSpan.FromMilliseconds(200), (_, _) => stalled.Task.GetAwaiter().GetResult());
 
         var exitCode = await run;
         Assert.Equal(0, exitCode);
         output.Position = 0;
-        var response = await JsonSerializer.DeserializeAsync<PdfChildResponse>(
-            output, PdfChildProtocol.JsonOptions);
+        var response = await JsonSerializer.DeserializeAsync<PdfChildResponse>(output, PdfChildProtocol.JsonOptions);
         Assert.NotNull(response);
         Assert.False(response!.Ok);
         Assert.Equal(ParserReasons.ProcessingLimit, response.Reason);
-        stalled.SetResult(new ParsedStatement(
-            StatementFormat.StandardBankPdf, [], null, null,
-            new Dictionary<string, string>(), [], []));
+        stalled.SetResult(new ParsedStatement(StatementFormat.StandardBankPdf, [], null, null, new Dictionary<string, string>(), [], []));
     }
 
     [Fact]
     public async Task TruncatedInputIsRejected()
     {
-        await using var input = new MemoryStream();
-        await using var output = new MemoryStream();
+        await using MemoryStream input = new MemoryStream();
+        await using MemoryStream output = new MemoryStream();
 
         var exitCode = await PdfParserChild.RunAsync(input, output, Stream.Null);
 
         Assert.Equal(0, exitCode);
         output.Position = 0;
-        var response = await JsonSerializer.DeserializeAsync<PdfChildResponse>(
-            output, PdfChildProtocol.JsonOptions);
+        var response = await JsonSerializer.DeserializeAsync<PdfChildResponse>(output, PdfChildProtocol.JsonOptions);
         Assert.NotNull(response);
         Assert.False(response!.Ok);
         Assert.Equal(ParserReasons.InvalidRequest, response.Reason);
@@ -145,21 +109,13 @@ public sealed class StatementParserProcessTests
         var pidFile = TempPath("descendant");
         try
         {
-            using var runner = new PdfParserRunner(
-                () => GroupLeaderStartInfo(
-                    $"sleep 20 & echo $! > '{pidFile}'; exit 0"),
-                TimeSpan.FromSeconds(2));
+            using PdfParserRunner runner = new PdfParserRunner(() => GroupLeaderStartInfo($"sleep 20 & echo $! > '{pidFile}'; exit 0"), TimeSpan.FromSeconds(2));
 
-            var exception = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-                runner.ParseAsync(
-                    new byte[] { 1 },
-                    new PdfChildRequestOptions(null, null, null, 5_000)));
+            var exception = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(new byte[] { 1 }, new PdfChildRequestOptions(null, null, null, 5_000)));
 
             Assert.Equal(ParserReasons.ProcessingLimit, exception.Reason);
             var descendantPid = await WaitForPidAsync(pidFile, TimeSpan.FromSeconds(5));
-            Assert.True(
-                await WaitForProcessExitAsync(descendantPid, TimeSpan.FromSeconds(3)),
-                $"descendant {descendantPid} survived root exit and group cleanup");
+            Assert.True(await WaitForProcessExitAsync(descendantPid, TimeSpan.FromSeconds(3)), $"descendant {descendantPid} survived root exit and group cleanup");
         }
         finally
         {
@@ -177,7 +133,7 @@ public sealed class StatementParserProcessTests
 
         var fifo = TempPath("fifo");
         var pidFile = TempPath("child");
-        using var helper = new Process
+        using Process helper = new Process
         {
             StartInfo = new ProcessStartInfo
             {
@@ -190,23 +146,17 @@ public sealed class StatementParserProcessTests
             },
         };
         helper.StartInfo.ArgumentList.Add("-c");
-        helper.StartInfo.ArgumentList.Add(
-            $"mkfifo '{fifo}'; {ChildCommand()} < '{fifo}' & echo $! > '{pidFile}'; " +
-            $"exec 3>'{fifo}'; printf '\\000\\000\\000\\020part' >&3; wait");
+        helper.StartInfo.ArgumentList.Add($"mkfifo '{fifo}'; {ChildCommand()} < '{fifo}' & echo $! > '{pidFile}'; " + $"exec 3>'{fifo}'; printf '\\000\\000\\000\\020part' >&3; wait");
 
         try
         {
             Assert.True(helper.Start());
             var childPid = await WaitForPidAsync(pidFile, TimeSpan.FromSeconds(15));
             await Task.Delay(300);
-            Assert.False(
-                ProcessHasExited(childPid),
-                $"parser child {childPid} exited before the parent was killed");
+            Assert.False(ProcessHasExited(childPid), $"parser child {childPid} exited before the parent was killed");
             helper.Kill(entireProcessTree: false);
 
-            Assert.True(
-                await WaitForProcessExitAsync(childPid, TimeSpan.FromSeconds(5)),
-                $"parser child {childPid} survived parent death after input closure");
+            Assert.True(await WaitForProcessExitAsync(childPid, TimeSpan.FromSeconds(5)), $"parser child {childPid} survived parent death after input closure");
         }
         finally
         {
@@ -224,7 +174,7 @@ public sealed class StatementParserProcessTests
     public async Task PublishedReleaseOutputLaunchesTheRealParserChild()
     {
         var directory = await _publishedServerDirectory.Value;
-        using var runner = new PdfParserRunner(
+        using PdfParserRunner runner = new PdfParserRunner(
             () => new ProcessStartInfo
             {
                 FileName = "dotnet",
@@ -242,52 +192,39 @@ public sealed class StatementParserProcessTests
             },
             TimeSpan.FromSeconds(20));
 
-        var result = await runner.ParseAsync(
-            StatementFixtureBuilder.BuildHandAuthoredSmallPdf(),
-            new PdfChildRequestOptions(
-                new DateOnly(2025, 2, 1),
-                new DateOnly(2025, 2, 28),
-                null,
-                20_000));
+        var result = await runner.ParseAsync(StatementFixtureBuilder.BuildHandAuthoredSmallPdf(), new PdfChildRequestOptions(new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null, 20_000));
 
         Assert.Equal(3, result.Rows.Count);
         Assert.Equal(-1000, result.Rows[0].AmountCents);
 
-        var imagePage = StatementFixtureBuilder.BuildTwoPagePdf(
-            StatementFixtureBuilder.HandAuthoredSmallPdfTexts(), null, secondPageIsImage: true);
-        var headerless = new List<PdfText>
+        var imagePage = StatementFixtureBuilder.BuildTwoPagePdf(StatementFixtureBuilder.HandAuthoredSmallPdfTexts(), null, secondPageIsImage: true);
+        List<PdfText> headerless = new List<PdfText>
         {
             new(40, 760, "2025/01/02"),
             new(100, 760, "Hand written continuation"),
             new(300, 760, "-20.00"),
         };
-        var headerlessPage = StatementFixtureBuilder.BuildTwoPagePdf(
-            StatementFixtureBuilder.HandAuthoredSmallPdfTexts(), headerless);
-        var missingDateTexts = new List<PdfText>(
+        var headerlessPage = StatementFixtureBuilder.BuildTwoPagePdf(StatementFixtureBuilder.HandAuthoredSmallPdfTexts(), headerless);
+        List<PdfText> missingDateTexts = new List<PdfText>(
             StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 706, "No date payment"),
             new(300, 706, "-20.00"),
         };
-        var missingDateBuilder = new MinimalPdfBuilder();
+        MinimalPdfBuilder missingDateBuilder = new MinimalPdfBuilder();
         missingDateBuilder.AddPage(missingDateTexts);
         var missingDatePage = missingDateBuilder.Build();
 
-        var options = new PdfChildRequestOptions(null, null, null, 20_000);
-        var imageFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(imagePage, options));
+        PdfChildRequestOptions options = new PdfChildRequestOptions(null, null, null, 20_000);
+        var imageFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(imagePage, options));
         Assert.Equal(ParserReasons.TextPdfRequired, imageFailure.Reason);
-        var headerlessFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(headerlessPage, options));
+        var headerlessFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(headerlessPage, options));
         Assert.Equal(ParserReasons.UnsupportedLayout, headerlessFailure.Reason);
         var missingDateResult = await runner.ParseAsync(missingDatePage, options);
         Assert.Equal(4, missingDateResult.Rows.Count);
-        Assert.Contains(
-            missingDateResult.Rows,
-            row => row.ValidationCodes.Contains(ValidationCodes.InvalidDate) &&
-                   row.RawValues["description"] == "No date payment");
+        Assert.Contains(missingDateResult.Rows, row => row.ValidationCodes.Contains(ValidationCodes.InvalidDate) && row.RawValues["description"] == "No date payment");
 
-        var headerTexts = new List<PdfText>
+        List<PdfText> headerTexts = new List<PdfText>
         {
             new(40, 780, "Date"),
             new(100, 780, "Description"),
@@ -297,50 +234,29 @@ public sealed class StatementParserProcessTests
             new(500, 780, "fees"),
             new(530, 780, "Balance"),
         };
-        var headerWithImage = StatementFixtureBuilder.BuildTwoPagePdf(
-            StatementFixtureBuilder.HandAuthoredSmallPdfTexts(),
-            headerTexts,
-            secondPageHasImage: true);
-        var headerImageFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(headerWithImage, options));
+        var headerWithImage = StatementFixtureBuilder.BuildTwoPagePdf(StatementFixtureBuilder.HandAuthoredSmallPdfTexts(), headerTexts, secondPageHasImage: true);
+        var headerImageFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(headerWithImage, options));
         Assert.Equal(ParserReasons.TextPdfRequired, headerImageFailure.Reason);
 
-        var badDate = StatementFixtureBuilder.BuildTwoPagePdf(
-            StatementFixtureBuilder.HandAuthoredSmallPdfTexts(),
-            [
-                new(40, 760, "BAD-DATE"),
-                new(100, 760, "Bank charge"),
-                new(300, 760, "-20.00"),
-            ]);
-        var badDateFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(badDate, options));
+        var badDate = StatementFixtureBuilder.BuildTwoPagePdf(StatementFixtureBuilder.HandAuthoredSmallPdfTexts(), [new(40, 760, "BAD-DATE"), new(100, 760, "Bank charge"), new(300, 760, "-20.00"),]);
+        var badDateFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(badDate, options));
         Assert.Equal(ParserReasons.UnsupportedLayout, badDateFailure.Reason);
 
-        var integerAmount = StatementFixtureBuilder.BuildTwoPagePdf(
-            StatementFixtureBuilder.HandAuthoredSmallPdfTexts(),
-            [
-                new(40, 760, "02 Jan 25"),
-                new(100, 760, "Bank charge"),
-                new(300, 760, "20"),
-            ]);
-        var integerFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(integerAmount, options));
+        var integerAmount = StatementFixtureBuilder.BuildTwoPagePdf(StatementFixtureBuilder.HandAuthoredSmallPdfTexts(), [new(40, 760, "02 Jan 25"), new(100, 760, "Bank charge"), new(300, 760, "20"),]);
+        var integerFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(integerAmount, options));
         Assert.Equal(ParserReasons.UnsupportedLayout, integerFailure.Reason);
 
-        var summaryCandidateTexts = new List<PdfText>(
+        List<PdfText> summaryCandidateTexts = new List<PdfText>(
             StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 706, "Summary Books purchase"),
             new(300, 706, "-20.00"),
         };
-        var summaryCandidateBuilder = new MinimalPdfBuilder();
+        MinimalPdfBuilder summaryCandidateBuilder = new MinimalPdfBuilder();
         summaryCandidateBuilder.AddPage(summaryCandidateTexts);
         var summaryCandidate = await runner.ParseAsync(summaryCandidateBuilder.Build(), options);
         Assert.Equal(4, summaryCandidate.Rows.Count);
-        Assert.Contains(
-            summaryCandidate.Rows,
-            row => row.ValidationCodes.Contains(ValidationCodes.InvalidDate) &&
-                   row.RawValues["description"] == "Summary Books purchase");
+        Assert.Contains(summaryCandidate.Rows, row => row.ValidationCodes.Contains(ValidationCodes.InvalidDate) && row.RawValues["description"] == "Summary Books purchase");
 
         foreach (var amount in new[] { "-1,000.00", "-1000.00", "20" })
         {
@@ -352,37 +268,34 @@ public sealed class StatementParserProcessTests
                     new(100, 760, "Bank charge"),
                     new(300, 760, amount),
                 ]);
-            var periodFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-                runner.ParseAsync(periodPage, options));
+            var periodFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(periodPage, options));
             Assert.Equal(ParserReasons.UnsupportedLayout, periodFailure.Reason);
         }
 
-        var totalTexts = new List<PdfText>(
+        List<PdfText> totalTexts = new List<PdfText>(
             StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 706, "Total payments"),
             new(300, 706, "1,234.56"),
         };
-        var totalBuilder = new MinimalPdfBuilder();
+        MinimalPdfBuilder totalBuilder = new MinimalPdfBuilder();
         totalBuilder.AddPage(totalTexts);
         var totalResult = await runner.ParseAsync(totalBuilder.Build(), options);
         Assert.Equal(3, totalResult.Rows.Count);
 
-        var residualTexts = new List<PdfText>(
+        List<PdfText> residualTexts = new List<PdfText>(
             StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 600, "Residual after valid content"),
         };
-        var residualBuilder = new MinimalPdfBuilder();
+        MinimalPdfBuilder residualBuilder = new MinimalPdfBuilder();
         residualBuilder.AddPage(residualTexts);
-        var residualFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(residualBuilder.Build(), options));
+        var residualFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(residualBuilder.Build(), options));
         Assert.Equal(ParserReasons.UnsupportedLayout, residualFailure.Reason);
 
-        var smallImage = new MinimalPdfBuilder();
+        MinimalPdfBuilder smallImage = new MinimalPdfBuilder();
         smallImage.AddPage(StatementFixtureBuilder.HandAuthoredSmallPdfTexts(), 1, 50, 50);
-        var smallImageFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(smallImage.Build(), options));
+        var smallImageFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(smallImage.Build(), options));
         Assert.Equal(ParserReasons.TextPdfRequired, smallImageFailure.Reason);
 
         var compatibleRepeat = await runner.ParseAsync(BuildCompatibleRepeatedHeaderPdf(), options);
@@ -391,9 +304,7 @@ public sealed class StatementParserProcessTests
 
         var residueHeader = await runner.ParseAsync(BuildHeaderResiduePdf(), options);
         Assert.Equal(3, residueHeader.Rows.Count);
-        Assert.Contains(
-            residueHeader.Rows,
-            row => row.ValidationCodes.Contains(ValidationCodes.InvalidDate));
+        Assert.Contains(residueHeader.Rows, row => row.ValidationCodes.Contains(ValidationCodes.InvalidDate));
 
         foreach (var conflicting in new[]
                  {
@@ -402,13 +313,11 @@ public sealed class StatementParserProcessTests
                      BuildToleratedShiftColumnChangePdf(),
                  })
         {
-            var conflictFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-                runner.ParseAsync(conflicting, options));
+            var conflictFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(conflicting, options));
             Assert.Equal(ParserReasons.UnsupportedLayout, conflictFailure.Reason);
         }
 
-        var metadataFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(BuildMetadataPreamblePdf(), options));
+        var metadataFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(BuildMetadataPreamblePdf(), options));
         Assert.Equal(ParserReasons.UnsupportedLayout, metadataFailure.Reason);
 
         foreach (var negative in new[]
@@ -417,29 +326,23 @@ public sealed class StatementParserProcessTests
                      BuildNegativeXTotalPdf(),
                  })
         {
-            var negativeFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-                runner.ParseAsync(negative, options));
+            var negativeFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(negative, options));
             Assert.Equal(ParserReasons.UnsupportedLayout, negativeFailure.Reason);
         }
 
-        var farContinuationFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(BuildFarContinuationPdf(), options));
+        var farContinuationFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(BuildFarContinuationPdf(), options));
         Assert.Equal(ParserReasons.UnsupportedLayout, farContinuationFailure.Reason);
 
-        var distantFirstFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(BuildDistantFirstContinuationPdf(), options));
+        var distantFirstFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(BuildDistantFirstContinuationPdf(), options));
         Assert.Equal(ParserReasons.UnsupportedLayout, distantFirstFailure.Reason);
 
-        var belowFooterFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(BuildBelowFooterContinuationPdf(), options));
+        var belowFooterFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(BuildBelowFooterContinuationPdf(), options));
         Assert.Equal(ParserReasons.UnsupportedLayout, belowFooterFailure.Reason);
 
-        var summaryClosureFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(BuildSummaryClosedContinuationPdf(), options));
+        var summaryClosureFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(BuildSummaryClosedContinuationPdf(), options));
         Assert.Equal(ParserReasons.UnsupportedLayout, summaryClosureFailure.Reason);
 
-        var midPageSummaryFailure = await Assert.ThrowsAsync<StatementRejectedException>(() =>
-            runner.ParseAsync(BuildMidPageSummaryPdf(), options));
+        var midPageSummaryFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(BuildMidPageSummaryPdf(), options));
         Assert.Equal(ParserReasons.UnsupportedLayout, midPageSummaryFailure.Reason);
 
         var sourceLineResult = await runner.ParseAsync(BuildSourceLinePdf(), options);
@@ -458,11 +361,7 @@ public sealed class StatementParserProcessTests
 
         var totalBeforeSummary = await runner.ParseAsync(BuildTotalBeforeSummaryPdf(), options);
         Assert.Equal(4, totalBeforeSummary.Rows.Count);
-        Assert.Contains(
-            "invalid_date",
-            Assert.Single(
-                totalBeforeSummary.Rows,
-                row => row.RawValues["description"] == "Total payments").ValidationCodes);
+        Assert.Contains("invalid_date", Assert.Single(totalBeforeSummary.Rows, row => row.RawValues["description"] == "Total payments").ValidationCodes);
 
         var fullSuffix = await runner.ParseAsync(BuildFullSuffixPdf(), options);
         Assert.Equal(3, fullSuffix.Rows.Count);
@@ -472,7 +371,7 @@ public sealed class StatementParserProcessTests
     public async Task PublishedChildDoesNotWriteSourceCanariesToStandardError()
     {
         var directory = await _publishedServerDirectory.Value;
-        using var process = new Process
+        using Process process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
@@ -500,21 +399,20 @@ public sealed class StatementParserProcessTests
 
         Assert.Equal(0, process.ExitCode);
         Assert.DoesNotContain("PRIVATE_ACCOUNT_7731", stderr, StringComparison.Ordinal);
-        var response = JsonSerializer.Deserialize<PdfChildResponse>(
-            stdout, PdfChildProtocol.JsonOptions);
+        var response = JsonSerializer.Deserialize<PdfChildResponse>(stdout, PdfChildProtocol.JsonOptions);
         Assert.NotNull(response);
         Assert.False(response!.Ok);
         Assert.Equal(ParserReasons.UnsupportedLayout, response.Reason);
     }
 
-    private static List<PdfText> ProcessHeader(double y,
-                                               params double[] xs)
+    private static List<PdfText> ProcessHeader(double y, params double[] xs)
     {
         var labels = new[]
         {
             "Date", "Description", "Payments", "Deposits", "Bank", "fees", "Balance",
         };
         Assert.Equal(labels.Length, xs.Length);
+
         return labels.Select((label, index) => new PdfText(xs[index], y, label)).ToList();
     }
 
@@ -536,8 +434,9 @@ public sealed class StatementParserProcessTests
         AddPaymentRow(texts, 760, "01 Feb 2025", "First row", "10.00");
         texts.AddRange(ProcessHeader(700, 40, 100, 300, 400, 470, 500, 530));
         AddPaymentRow(texts, 680, "02 Feb 2025", "Second row", "20.00");
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
+
         return pdf.Build();
     }
 
@@ -548,8 +447,9 @@ public sealed class StatementParserProcessTests
         texts.AddRange(ProcessHeader(700, 40, 100, 300, 400, 470, 500, 530));
         texts.Add(new PdfText(560, 700, "RESIDUE"));
         AddPaymentRow(texts, 680, "02 Feb 2025", "Second row", "20.00");
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
+
         return pdf.Build();
     }
 
@@ -559,8 +459,9 @@ public sealed class StatementParserProcessTests
         AddPaymentRow(texts, 760, "01 Feb 2025", "First row", "10.00");
         texts.AddRange(ProcessHeader(700, 40, 100, 220, 300, 400, 430, 500));
         AddPaymentRow(texts, 680, "02 Feb 2025", "Intended deposit", "20.00");
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
+
         return pdf.Build();
     }
 
@@ -569,28 +470,25 @@ public sealed class StatementParserProcessTests
         var texts = ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530);
         AddPaymentRow(texts, 760, "01 Feb 2025", "First row", "10.00");
         texts.AddRange(ProcessHeader(700, 40, 100, 220, 300, 400, 430, 500));
-        texts.AddRange(
-        [
-            new PdfText(40, 680, "02 Feb 2025"),
-            new PdfText(100, 680, "Balance only"),
-            new PdfText(500, 680, "9,999.99"),
-        ]);
-        var pdf = new MinimalPdfBuilder();
+        texts.AddRange([new PdfText(40, 680, "02 Feb 2025"), new PdfText(100, 680, "Balance only"), new PdfText(500, 680, "9,999.99"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
+
         return pdf.Build();
     }
 
     private static byte[] BuildMetadataPreamblePdf()
     {
-        var texts = new List<PdfText>
+        List<PdfText> texts = new List<PdfText>
         {
             new(40, 840, "Synthetic Bank"),
             new(40, 820, "Account: PRIVATE_ACCOUNT_7731"),
         };
         texts.AddRange(ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530));
         AddPaymentRow(texts, 760, "01 Feb 2025", "Valid row", "10.00");
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
+
         return pdf.Build();
     }
 
@@ -599,21 +497,23 @@ public sealed class StatementParserProcessTests
         var texts = ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530);
         AddPaymentRow(texts, 760, "01 Feb 2025", "Valid row", "10.00");
         texts.Add(new PdfText(-95, 760, "UNMAPPED_CANARY_4421"));
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
+
         return pdf.Build();
     }
 
     private static byte[] BuildNegativeXTotalPdf()
     {
-        var texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        List<PdfText> texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 706, "Total payments"),
             new(300, 706, "1,234.56"),
             new(-95, 706, "UNMAPPED_CANARY_4421"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
+
         return pdf.Build();
     }
 
@@ -622,17 +522,11 @@ public sealed class StatementParserProcessTests
         var first = ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530);
         AddPaymentRow(first, 760, "01 Feb 2025", "First row", "10.00");
         var second = ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530);
-        second.AddRange(
-        [
-            new PdfText(100, 770, "first fragment"),
-            new PdfText(100, 300, "Unrelated far text"),
-            new PdfText(40, 270, "02 Feb 2025"),
-            new PdfText(100, 270, "Second row"),
-            new PdfText(300, 270, "20.00"),
-        ]);
-        var pdf = new MinimalPdfBuilder();
+        second.AddRange([new PdfText(100, 770, "first fragment"), new PdfText(100, 300, "Unrelated far text"), new PdfText(40, 270, "02 Feb 2025"), new PdfText(100, 270, "Second row"), new PdfText(300, 270, "20.00"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(first);
         pdf.AddPage(second);
+
         return pdf.Build();
     }
 
@@ -641,16 +535,11 @@ public sealed class StatementParserProcessTests
         var first = ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530);
         AddPaymentRow(first, 760, "01 Feb 2025", "First row", "10.00");
         var second = ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530);
-        second.AddRange(
-        [
-            new PdfText(100, 300, "distant fragment"),
-            new PdfText(40, 270, "02 Feb 2025"),
-            new PdfText(100, 270, "Second row"),
-            new PdfText(300, 270, "20.00"),
-        ]);
-        var pdf = new MinimalPdfBuilder();
+        second.AddRange([new PdfText(100, 300, "distant fragment"), new PdfText(40, 270, "02 Feb 2025"), new PdfText(100, 270, "Second row"), new PdfText(300, 270, "20.00"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(first);
         pdf.AddPage(second);
+
         return pdf.Build();
     }
 
@@ -658,32 +547,28 @@ public sealed class StatementParserProcessTests
     {
         var first = ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530);
         AddPaymentRow(first, 760, "01 Feb 2025", "First row", "10.00");
-        var second = new List<PdfText> { new(100, 820, "Summary") };
+        List<PdfText> second = new List<PdfText> { new(100, 820, "Summary") };
         second.AddRange(ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530));
-        second.AddRange(
-        [
-            new PdfText(100, 770, "continued after summary"),
-            new PdfText(40, 752, "02 Feb 2025"),
-            new PdfText(100, 752, "Second row"),
-            new PdfText(300, 752, "20.00"),
-        ]);
-        var pdf = new MinimalPdfBuilder();
+        second.AddRange([new PdfText(100, 770, "continued after summary"), new PdfText(40, 752, "02 Feb 2025"), new PdfText(100, 752, "Second row"), new PdfText(300, 752, "20.00"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(first);
         pdf.AddPage(second);
+
         return pdf.Build();
     }
 
     private static byte[] BuildMidPageSummaryPdf()
     {
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(StatementFixtureBuilder.HandAuthoredSmallPdfTexts());
         pdf.AddPage([new PdfText(100, 400, "Summary")]);
+
         return pdf.Build();
     }
 
     private static byte[] BuildSourceLinePdf()
     {
-        var texts = new List<PdfText>
+        List<PdfText> texts = new List<PdfText>
         {
             new(40, 820, "01 Feb 2025"),
             new(100, 820, "First above"),
@@ -694,8 +579,9 @@ public sealed class StatementParserProcessTests
         };
         texts.AddRange(ProcessHeader(780, 40, 100, 300, 400, 470, 500, 530));
         AddPaymentRow(texts, 760, "03 Feb 2025", "Body row", "30.00");
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
+
         return pdf.Build();
     }
 
@@ -709,11 +595,11 @@ public sealed class StatementParserProcessTests
         };
         for (var index = 0; index < dates.Length; index++)
         {
-            AddPaymentRow(
-                texts, 760 - index * 18, dates[index], $"Boundary {index}", $"{index + 1}.00");
+            AddPaymentRow(texts, 760 - index * 18, dates[index], $"Boundary {index}", $"{index + 1}.00");
         }
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
+
         return pdf.Build();
     }
 
@@ -722,15 +608,11 @@ public sealed class StatementParserProcessTests
         var first = ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530);
         AddPaymentRow(first, 760, "01 Feb 2025", "First row", "10.00");
         var second = ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530);
-        second.AddRange(
-        [
-            new PdfText(100, 770, "continued"),
-            new PdfText(100, 30, "Page 2 of 2"),
-            new PdfText(100, 20, "Residual below footer"),
-        ]);
-        var pdf = new MinimalPdfBuilder();
+        second.AddRange([new PdfText(100, 770, "continued"), new PdfText(100, 30, "Page 2 of 2"), new PdfText(100, 20, "Residual below footer"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(first);
         pdf.AddPage(second);
+
         return pdf.Build();
     }
 
@@ -739,20 +621,16 @@ public sealed class StatementParserProcessTests
         var texts = ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530);
         AddPaymentRow(texts, 760, "01 Feb 2025", "First row", "10.00");
         texts.AddRange(ProcessHeader(700, 40, 100, 300, 404, 470, 500, 530));
-        texts.AddRange(
-        [
-            new PdfText(40, 680, "02 Feb 2025"),
-            new PdfText(100, 680, "Shifted boundary"),
-            new PdfText(359, 680, "10.00"),
-        ]);
-        var pdf = new MinimalPdfBuilder();
+        texts.AddRange([new PdfText(40, 680, "02 Feb 2025"), new PdfText(100, 680, "Shifted boundary"), new PdfText(359, 680, "10.00"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
+
         return pdf.Build();
     }
 
     private static byte[] BuildFullSuffixPdf()
     {
-        var texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        List<PdfText> texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 706, "Total payments"),
             new(300, 706, "1,234.56"),
@@ -760,21 +638,23 @@ public sealed class StatementParserProcessTests
             new(530, 688, "1,234.56"),
             new(100, 30, "Page 1 of 1"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
+
         return pdf.Build();
     }
 
     private static byte[] BuildTotalBeforeSummaryPdf()
     {
-        var first = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        List<PdfText> first = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
             new(100, 706, "Total payments"),
             new(300, 706, "1,234.56"),
         };
-        var pdf = new MinimalPdfBuilder();
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(first);
         pdf.AddPage([new PdfText(40, 780, "Summary")]);
+
         return pdf.Build();
     }
 
@@ -783,13 +663,11 @@ public sealed class StatementParserProcessTests
 
     private static async Task<string> PublishServerAsync()
     {
-        var project = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory, "../../../../../argus.Server.csproj"));
+        var project = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../argus.Server.csproj"));
         Assert.True(File.Exists(project), $"server project not found at {project}");
-        var output = Path.Combine(
-            Path.GetTempPath(), $"argus-published-{Guid.NewGuid():N}");
+        var output = Path.Combine(Path.GetTempPath(), $"argus-published-{Guid.NewGuid():N}");
 
-        using var process = new Process
+        using Process process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
@@ -813,9 +691,8 @@ public sealed class StatementParserProcessTests
         var stdout = await process.StandardOutput.ReadToEndAsync();
         var stderr = await process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
-        Assert.True(
-            process.ExitCode == 0,
-            $"dotnet publish failed with {process.ExitCode}:{Environment.NewLine}{stdout}{stderr}");
+        Assert.True(process.ExitCode == 0, $"dotnet publish failed with {process.ExitCode}:{Environment.NewLine}{stdout}{stderr}");
+
         return output;
     }
 
@@ -838,7 +715,7 @@ public sealed class StatementParserProcessTests
             return;
         }
 
-        using var process = new Process { StartInfo = RealChildStartInfo() };
+        using Process process = new Process { StartInfo = RealChildStartInfo() };
         Assert.True(process.Start());
         try
         {
@@ -856,8 +733,7 @@ public sealed class StatementParserProcessTests
         }
     }
 
-    private static async Task<int> WaitForProcessGroupAsync(int pid,
-                                                            TimeSpan timeout)
+    private static async Task<int> WaitForProcessGroupAsync(int pid, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
         var last = -1;
@@ -870,14 +746,16 @@ public sealed class StatementParserProcessTests
             {
                 return last;
             }
+
             await Task.Delay(25);
         }
+
         return last;
     }
 
     private static ProcessStartInfo RealChildStartInfo()
     {
-        var startInfo = new ProcessStartInfo
+        ProcessStartInfo startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
             UseShellExecute = false,
@@ -909,15 +787,15 @@ public sealed class StatementParserProcessTests
         }
         startInfo.ArgumentList.Add(serverAssembly);
         startInfo.ArgumentList.Add("--parse-statement-pdf");
+
         return startInfo;
     }
 
     private static string ChildCommand()
     {
         var startInfo = RealChildStartInfo();
-        return string.Join(
-            ' ',
-            new[] { "dotnet" }.Concat(startInfo.ArgumentList).Select(ShellQuote));
+
+        return string.Join(' ', new[] { "dotnet" }.Concat(startInfo.ArgumentList).Select(ShellQuote));
     }
 
     private static string ShellQuote(string value) =>
@@ -926,8 +804,7 @@ public sealed class StatementParserProcessTests
     private static string TempPath(string suffix) =>
         Path.Combine(Path.GetTempPath(), $"argus-{suffix}-{Guid.NewGuid():N}.tmp");
 
-    private static async Task<int> WaitForPidAsync(string path,
-                                                   TimeSpan timeout)
+    private static async Task<int> WaitForPidAsync(string path, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)
@@ -945,8 +822,7 @@ public sealed class StatementParserProcessTests
         throw new TimeoutException($"PID file {path} was not written");
     }
 
-    private static async Task<bool> WaitForProcessExitAsync(int pid,
-                                                            TimeSpan timeout)
+    private static async Task<bool> WaitForProcessExitAsync(int pid, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)
@@ -955,8 +831,10 @@ public sealed class StatementParserProcessTests
             {
                 return true;
             }
+
             await Task.Delay(50);
         }
+
         return ProcessHasExited(pid);
     }
 
@@ -966,6 +844,7 @@ public sealed class StatementParserProcessTests
         {
             return true;
         }
+
         try
         {
             var stat = File.ReadAllText($"/proc/{pid}/stat");
@@ -991,15 +870,14 @@ public sealed class StatementParserProcessTests
 
     private static byte[] BuildFrame(byte[] payload)
     {
-        var header = JsonSerializer.SerializeToUtf8Bytes(
-            new PdfChildRequestOptions(null, null, null, 30_000),
-            PdfChildProtocol.JsonOptions);
-        using var output = new MemoryStream();
+        var header = JsonSerializer.SerializeToUtf8Bytes(new PdfChildRequestOptions(null, null, null, 30_000), PdfChildProtocol.JsonOptions);
+        using MemoryStream output = new MemoryStream();
         Span<byte> length = stackalloc byte[4];
         System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(length, header.Length);
         output.Write(length);
         output.Write(header);
         output.Write(payload);
+
         return output.ToArray();
     }
 }

@@ -200,9 +200,21 @@ differences from the Rust sibling kit.
 
 - Use `backend/.editorconfig` for C#. Use Prettier for frontend source and test
   formatting and `frontend/eslint.config.mjs` for Next.js linting.
-- In C# declarations with more than one parameter, keep the first parameter on
+- Prefer explicit types over `var`, including `out` variables and tuple
+  deconstructions. The `.editorconfig` records this at suggestion level, so the
+  IDE applies it but `dotnet format --verify-no-changes` does not enforce it.
+- In C# declarations with four or more parameters, keep the first parameter on
   the declaration line and align the remaining parameters under it, one per
-  line. Wrap call sites as needed for readability.
+  line. Shorter lists can stay inline when readable. Wrap call sites as needed
+  for readability.
+- C# has no fixed maximum line length. Join statements when the result is at
+  most 240 characters. When a boolean condition or return expression spans
+  lines, break after `&&` or `||` and align the continuation under the first
+  operand.
+- Put a blank line after a guard clause that returns or continues, and before a
+  final `return`.
+- In a `catch` block, pass the caught exception as the first argument to the
+  logger.
 - Remove unused C# usings and sort the rest with `System` first.
 - Format and lint the code you touch. Keep a repository-wide formatting pass
   separate from feature changes. Load `argus-code-style` for cleanup and
