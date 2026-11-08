@@ -153,12 +153,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
 
     // --- Single metadata edits ---------------------------------------------
 
-    public async Task<TransactionMutationResult> PatchAsync(
-        Guid customerId,
-        Guid transactionId,
-        int expectedVersion,
-        TransactionAction action,
-        CancellationToken cancellationToken = default)
+    public async Task<TransactionMutationResult> PatchAsync(Guid customerId,
+                                                            Guid transactionId,
+                                                            int expectedVersion,
+                                                            TransactionAction action,
+                                                            CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await BeginWorkspaceTransactionAsync(
@@ -226,12 +225,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
 
     // --- Bulk preparation --------------------------------------------------
 
-    public async Task<TransactionOperationPrepareResponse> PrepareAsync(
-        Guid customerId,
-        Guid operationId,
-        TransactionSelectionPlan selection,
-        TransactionAction action,
-        CancellationToken cancellationToken = default)
+    public async Task<TransactionOperationPrepareResponse> PrepareAsync(Guid customerId,
+                                                                        Guid operationId,
+                                                                        TransactionSelectionPlan selection,
+                                                                        TransactionAction action,
+                                                                        CancellationToken cancellationToken = default)
     {
         var requestDigest = RequestDigest(selection, action);
 
@@ -268,13 +266,12 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         throw new TransactionStoreException(TransactionErrorCodes.OperationBusy);
     }
 
-    private async Task<TransactionOperationPrepareResponse> PrepareOnceAsync(
-        Guid customerId,
-        Guid operationId,
-        TransactionSelectionPlan selection,
-        TransactionAction action,
-        string requestDigest,
-        CancellationToken cancellationToken)
+    private async Task<TransactionOperationPrepareResponse> PrepareOnceAsync(Guid customerId,
+                                                                             Guid operationId,
+                                                                             TransactionSelectionPlan selection,
+                                                                             TransactionAction action,
+                                                                             string requestDigest,
+                                                                             CancellationToken cancellationToken)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await BeginWorkspaceTransactionAsync(
@@ -432,11 +429,10 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return new TransactionOperationPrepareResponse(summary, true);
     }
 
-    private async Task<TransactionOperationPrepareResponse?> ReadExistingOperationAsync(
-        Guid customerId,
-        Guid operationId,
-        string requestDigest,
-        CancellationToken cancellationToken)
+    private async Task<TransactionOperationPrepareResponse?> ReadExistingOperationAsync(Guid customerId,
+                                                                                        Guid operationId,
+                                                                                        string requestDigest,
+                                                                                        CancellationToken cancellationToken)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await BeginWorkspaceTransactionAsync(
@@ -513,12 +509,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return summary;
     }
 
-    public async Task<TransactionOperationApplyResponse> ApplyAsync(
-        Guid customerId,
-        Guid operationId,
-        string confirmationHash,
-        int expectedSelectedCount,
-        CancellationToken cancellationToken = default)
+    public async Task<TransactionOperationApplyResponse> ApplyAsync(Guid customerId,
+                                                                    Guid operationId,
+                                                                    string confirmationHash,
+                                                                    int expectedSelectedCount,
+                                                                    CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await BeginWorkspaceTransactionAsync(
@@ -868,69 +863,62 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
 
     // --- Mutation helpers --------------------------------------------------
 
-    private sealed record MemberRow(
-        Guid Id,
-        int Version,
-        Guid AccountId,
-        Guid StatementId,
-        Guid CategoryId,
-        bool HiddenByUser,
-        bool StatementHidden,
-        Guid[] TagIds);
+    private sealed record MemberRow(Guid Id,
+                                    int Version,
+                                    Guid AccountId,
+                                    Guid StatementId,
+                                    Guid CategoryId,
+                                    bool HiddenByUser,
+                                    bool StatementHidden,
+                                    Guid[] TagIds);
 
-    private sealed record ManifestRow(
-        Guid TransactionId,
-        int Version,
-        Guid AccountId,
-        Guid StatementId);
+    private sealed record ManifestRow(Guid TransactionId,
+                                      int Version,
+                                      Guid AccountId,
+                                      Guid StatementId);
 
-    private sealed record ActionTargets(
-        StoredTargets Stored,
-        TransactionCategoryRef? Category,
-        TransactionTagRef[] AddTags,
-        TransactionTagRef[] RemoveTags);
+    private sealed record ActionTargets(StoredTargets Stored,
+                                        TransactionCategoryRef? Category,
+                                        TransactionTagRef[] AddTags,
+                                        TransactionTagRef[] RemoveTags);
 
-    private sealed record StoredAction(
-        Guid? CategoryId,
-        Guid[] AddTagIds,
-        Guid[] RemoveTagIds,
-        bool? IsHiddenByUser);
+    private sealed record StoredAction(Guid? CategoryId,
+                                       Guid[] AddTagIds,
+                                       Guid[] RemoveTagIds,
+                                       bool? IsHiddenByUser);
 
-    private sealed record StoredCategoryStamp(
-        Guid Id,
-        string DisplayName,
-        string Kind,
-        bool IsArchived,
-        string UpdatedAt);
+    private sealed record StoredCategoryStamp(Guid Id,
+                                              string DisplayName,
+                                              string Kind,
+                                              bool IsArchived,
+                                              string UpdatedAt);
 
-    private sealed record StoredTagStamp(
-        Guid Id,
-        string DisplayName,
-        bool IsArchived,
-        string UpdatedAt);
+    private sealed record StoredTagStamp(Guid Id,
+                                         string DisplayName,
+                                         bool IsArchived,
+                                         string UpdatedAt);
 
     private sealed record StoredTargets(
         StoredCategoryStamp? Category,
         StoredTagStamp[] AddTags,
         StoredTagStamp[] RemoveTags);
 
-    private sealed record OperationHeader(
-        Guid CustomerId,
-        Guid OperationId,
-        string Status,
-        string SelectionMode,
-        string RequestDigest,
-        string? FilterDigest,
-        string? ConfirmationHash,
-        string ActionJson,
-        string TargetJson,
-        int SelectedCount,
-        int ChangedCount,
-        int UnchangedCount,
-        DateTime CapturedAt,
-        DateTime ExpiresAt,
-        DateTime? AppliedAt,
-        DateTime? TerminalAt);
+    private sealed record OperationHeader(Guid CustomerId,
+                                          Guid OperationId,
+                                          string Status,
+                                          string SelectionMode,
+                                          string RequestDigest,
+                                          string? FilterDigest,
+                                          string? ConfirmationHash,
+                                          string ActionJson,
+                                          string TargetJson,
+                                          int SelectedCount,
+                                          int ChangedCount,
+                                          int UnchangedCount,
+                                          DateTime CapturedAt,
+                                          DateTime ExpiresAt,
+                                          DateTime? AppliedAt,
+                                          DateTime? TerminalAt);
 
     private static async Task<NpgsqlTransaction> BeginWorkspaceTransactionAsync(
         NpgsqlConnection connection,
@@ -948,11 +936,10 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return transaction;
     }
 
-    private static async Task LockCustomerAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        CancellationToken cancellationToken)
+    private static async Task LockCustomerAsync(NpgsqlConnection connection,
+                                                NpgsqlTransaction transaction,
+                                                Guid customerId,
+                                                CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -964,12 +951,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         }
     }
 
-    private static async Task<Guid?> TransactionAccountIdAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid transactionId,
-        CancellationToken cancellationToken)
+    private static async Task<Guid?> TransactionAccountIdAsync(NpgsqlConnection connection,
+                                                               NpgsqlTransaction transaction,
+                                                               Guid customerId,
+                                                               Guid transactionId,
+                                                               CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -983,12 +969,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
     }
 
-    private static async Task<bool> LockAccountRowAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid accountId,
-        CancellationToken cancellationToken)
+    private static async Task<bool> LockAccountRowAsync(NpgsqlConnection connection,
+                                                        NpgsqlTransaction transaction,
+                                                        Guid customerId,
+                                                        Guid accountId,
+                                                        CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1002,12 +987,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return await command.ExecuteScalarAsync(cancellationToken) is not null;
     }
 
-    private static async Task<bool> LockTransactionRowAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid transactionId,
-        CancellationToken cancellationToken)
+    private static async Task<bool> LockTransactionRowAsync(NpgsqlConnection connection,
+                                                            NpgsqlTransaction transaction,
+                                                            Guid customerId,
+                                                            Guid transactionId,
+                                                            CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1021,12 +1005,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return await command.ExecuteScalarAsync(cancellationToken) is not null;
     }
 
-    private static async Task LockTransactionRowsAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid[] transactionIds,
-        CancellationToken cancellationToken)
+    private static async Task LockTransactionRowsAsync(NpgsqlConnection connection,
+                                                       NpgsqlTransaction transaction,
+                                                       Guid customerId,
+                                                       Guid[] transactionIds,
+                                                       CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1057,24 +1040,22 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         }
     }
 
-    private async Task<MemberRow?> ReadMemberByIdAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid transactionId,
-        CancellationToken cancellationToken)
+    private async Task<MemberRow?> ReadMemberByIdAsync(NpgsqlConnection connection,
+                                                       NpgsqlTransaction transaction,
+                                                       Guid customerId,
+                                                       Guid transactionId,
+                                                       CancellationToken cancellationToken)
     {
         var members = await ReadMembersAsync(
             connection, transaction, customerId, [transactionId], cancellationToken);
         return members.Count == 0 ? null : members[0];
     }
 
-    private async Task<List<MemberRow>> ReadMembersAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid[] transactionIds,
-        CancellationToken cancellationToken)
+    private async Task<List<MemberRow>> ReadMembersAsync(NpgsqlConnection connection,
+                                                         NpgsqlTransaction transaction,
+                                                         Guid customerId,
+                                                         Guid[] transactionIds,
+                                                         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1121,13 +1102,12 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             tags.GetValueOrDefault(row.Id) ?? [])).ToList();
     }
 
-    private async Task<List<MemberRow>> CaptureMatchingMembersAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        TransactionFilter filter,
-        int limit,
-        CancellationToken cancellationToken)
+    private async Task<List<MemberRow>> CaptureMatchingMembersAsync(NpgsqlConnection connection,
+                                                                    NpgsqlTransaction transaction,
+                                                                    Guid customerId,
+                                                                    TransactionFilter filter,
+                                                                    int limit,
+                                                                    CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1175,12 +1155,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             tags.GetValueOrDefault(row.Id) ?? [])).ToList();
     }
 
-    private static async Task<Dictionary<Guid, Guid[]>> LoadMemberTagIdsAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid[] transactionIds,
-        CancellationToken cancellationToken)
+    private static async Task<Dictionary<Guid, Guid[]>> LoadMemberTagIdsAsync(NpgsqlConnection connection,
+                                                                              NpgsqlTransaction transaction,
+                                                                              Guid customerId,
+                                                                              Guid[] transactionIds,
+                                                                              CancellationToken cancellationToken)
     {
         var result = new Dictionary<Guid, Guid[]>();
         if (transactionIds.Length == 0)
@@ -1222,13 +1201,12 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return result;
     }
 
-    private static async Task<ActionTargets> ValidateActionTargetsAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        TransactionAction action,
-        bool lockForShare,
-        CancellationToken cancellationToken)
+    private static async Task<ActionTargets> ValidateActionTargetsAsync(NpgsqlConnection connection,
+                                                                        NpgsqlTransaction transaction,
+                                                                        Guid customerId,
+                                                                        TransactionAction action,
+                                                                        bool lockForShare,
+                                                                        CancellationToken cancellationToken)
     {
         StoredCategoryStamp? storedCategory = null;
         TransactionCategoryRef? categoryRef = null;
@@ -1322,13 +1300,12 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             RefsFor(action.RemoveTagIds));
     }
 
-    private static async Task LockAndValidateTargetsAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        TransactionAction action,
-        StoredTargets stored,
-        CancellationToken cancellationToken)
+    private static async Task LockAndValidateTargetsAsync(NpgsqlConnection connection,
+                                                          NpgsqlTransaction transaction,
+                                                          Guid customerId,
+                                                          TransactionAction action,
+                                                          StoredTargets stored,
+                                                          CancellationToken cancellationToken)
     {
         if (action.CategoryId is not null)
         {
@@ -1437,11 +1414,10 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return (DateTime)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
-    private static async Task<bool> IsExpiredAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        DateTime expiresAt,
-        CancellationToken cancellationToken)
+    private static async Task<bool> IsExpiredAsync(NpgsqlConnection connection,
+                                                   NpgsqlTransaction transaction,
+                                                   DateTime expiresAt,
+                                                   CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1450,12 +1426,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return (bool)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
-    private static async Task CheckQuotaAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        int selectionCount,
-        CancellationToken cancellationToken)
+    private static async Task CheckQuotaAsync(NpgsqlConnection connection,
+                                              NpgsqlTransaction transaction,
+                                              Guid customerId,
+                                              int selectionCount,
+                                              CancellationToken cancellationToken)
     {
         long openOperations;
         await using (var open = connection.CreateCommand())
@@ -1496,23 +1471,22 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         }
     }
 
-    private static async Task InsertHeaderAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid operationId,
-        string selectionMode,
-        string requestDigest,
-        string? filterDigest,
-        string confirmationHash,
-        TransactionAction action,
-        StoredTargets targets,
-        int selectedCount,
-        int changedCount,
-        int unchangedCount,
-        DateTime capturedAt,
-        DateTime expiresAt,
-        CancellationToken cancellationToken)
+    private static async Task InsertHeaderAsync(NpgsqlConnection connection,
+                                                NpgsqlTransaction transaction,
+                                                Guid customerId,
+                                                Guid operationId,
+                                                string selectionMode,
+                                                string requestDigest,
+                                                string? filterDigest,
+                                                string confirmationHash,
+                                                TransactionAction action,
+                                                StoredTargets targets,
+                                                int selectedCount,
+                                                int changedCount,
+                                                int unchangedCount,
+                                                DateTime capturedAt,
+                                                DateTime expiresAt,
+                                                CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1555,13 +1529,12 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static async Task InsertManifestAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid operationId,
-        IReadOnlyList<MemberRow> members,
-        CancellationToken cancellationToken)
+    private static async Task InsertManifestAsync(NpgsqlConnection connection,
+                                                  NpgsqlTransaction transaction,
+                                                  Guid customerId,
+                                                  Guid operationId,
+                                                  IReadOnlyList<MemberRow> members,
+                                                  CancellationToken cancellationToken)
     {
         await using var importer = await connection.BeginBinaryImportAsync(
             """
@@ -1592,13 +1565,12 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         importer.Complete();
     }
 
-    private static async Task UpdateMembersAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid[] transactionIds,
-        TransactionAction action,
-        CancellationToken cancellationToken)
+    private static async Task UpdateMembersAsync(NpgsqlConnection connection,
+                                                 NpgsqlTransaction transaction,
+                                                 Guid customerId,
+                                                 Guid[] transactionIds,
+                                                 TransactionAction action,
+                                                 CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1630,13 +1602,12 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         }
     }
 
-    private static async Task MutateTagLinksAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid[] transactionIds,
-        TransactionAction action,
-        CancellationToken cancellationToken)
+    private static async Task MutateTagLinksAsync(NpgsqlConnection connection,
+                                                  NpgsqlTransaction transaction,
+                                                  Guid customerId,
+                                                  Guid[] transactionIds,
+                                                  TransactionAction action,
+                                                  CancellationToken cancellationToken)
     {
         if (action.AddTagIds.Length > 0)
         {
@@ -1715,13 +1686,12 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         throw new TransactionStoreException(TransactionErrorCodes.TagLimitExceeded);
     }
 
-    private static async Task EnsureRestoreAllowedAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        IReadOnlyCollection<MemberRow> members,
-        TransactionAction action,
-        CancellationToken cancellationToken)
+    private static async Task EnsureRestoreAllowedAsync(NpgsqlConnection connection,
+                                                        NpgsqlTransaction transaction,
+                                                        Guid customerId,
+                                                        IReadOnlyCollection<MemberRow> members,
+                                                        TransactionAction action,
+                                                        CancellationToken cancellationToken)
     {
         if (action.IsHiddenByUser != false)
         {
@@ -1766,12 +1736,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             new Dictionary<string, object?> { ["statements"] = links });
     }
 
-    private static async Task<List<ManifestRow>> ReadManifestAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid operationId,
-        CancellationToken cancellationToken)
+    private static async Task<List<ManifestRow>> ReadManifestAsync(NpgsqlConnection connection,
+                                                                   NpgsqlTransaction transaction,
+                                                                   Guid customerId,
+                                                                   Guid operationId,
+                                                                   CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1796,13 +1765,12 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return manifest;
     }
 
-    private static async Task<OperationHeader?> ReadHeaderAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid operationId,
-        bool forUpdate,
-        CancellationToken cancellationToken)
+    private static async Task<OperationHeader?> ReadHeaderAsync(NpgsqlConnection connection,
+                                                                NpgsqlTransaction transaction,
+                                                                Guid customerId,
+                                                                Guid operationId,
+                                                                bool forUpdate,
+                                                                CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1841,11 +1809,10 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             reader.IsDBNull(15) ? null : reader.GetFieldValue<DateTime>(15));
     }
 
-    private async Task<TransactionOperationSummaryResponse> BuildPreparedSummaryAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        OperationHeader header,
-        CancellationToken cancellationToken)
+    private async Task<TransactionOperationSummaryResponse> BuildPreparedSummaryAsync(NpgsqlConnection connection,
+                                                                                      NpgsqlTransaction transaction,
+                                                                                      OperationHeader header,
+                                                                                      CancellationToken cancellationToken)
     {
         var action = DeserializeAction(header.ActionJson);
         var stored = DeserializeTargets(header.TargetJson);
@@ -1866,13 +1833,12 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             resolved);
     }
 
-    private async Task<TransactionOperationActionResponse> ResolveActionAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        TransactionAction action,
-        StoredTargets stored,
-        CancellationToken cancellationToken)
+    private async Task<TransactionOperationActionResponse> ResolveActionAsync(NpgsqlConnection connection,
+                                                                              NpgsqlTransaction transaction,
+                                                                              Guid customerId,
+                                                                              TransactionAction action,
+                                                                              StoredTargets stored,
+                                                                              CancellationToken cancellationToken)
     {
         var stale = false;
         TransactionCategoryRef? category = null;
@@ -1978,12 +1944,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         header.TerminalAt is null ? null : FormatTimestamp(header.TerminalAt.Value),
         null);
 
-    private static async Task ExpireHeaderAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid operationId,
-        CancellationToken cancellationToken)
+    private static async Task ExpireHeaderAsync(NpgsqlConnection connection,
+                                                NpgsqlTransaction transaction,
+                                                Guid customerId,
+                                                Guid operationId,
+                                                CancellationToken cancellationToken)
     {
         await using (var items = connection.CreateCommand())
         {
@@ -2013,12 +1978,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         await update.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static async Task<DateTime> MarkAppliedAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid operationId,
-        CancellationToken cancellationToken)
+    private static async Task<DateTime> MarkAppliedAsync(NpgsqlConnection connection,
+                                                         NpgsqlTransaction transaction,
+                                                         Guid customerId,
+                                                         Guid operationId,
+                                                         CancellationToken cancellationToken)
     {
         await using (var items = connection.CreateCommand())
         {
@@ -2056,11 +2020,10 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         _ => new TransactionStoreException(TransactionErrorCodes.OperationExpired),
     };
 
-    private static TransactionOperationApplyResponse AppliedResponse(
-        OperationHeader header,
-        string confirmationHash,
-        int expectedSelectedCount,
-        bool replayed)
+    private static TransactionOperationApplyResponse AppliedResponse(OperationHeader header,
+                                                                     string confirmationHash,
+                                                                     int expectedSelectedCount,
+                                                                     bool replayed)
     {
         if (!string.Equals(header.ConfirmationHash, confirmationHash, StringComparison.Ordinal) ||
             header.SelectedCount != expectedSelectedCount)
@@ -2158,18 +2121,17 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return string.Join('\n', parts);
     }
 
-    private static string ConfirmationHash(
-        Guid customerId,
-        Guid operationId,
-        string selectionMode,
-        string membersDigest,
-        TransactionAction action,
-        string targetsCanonical,
-        DateTime capturedAt,
-        DateTime expiresAt,
-        int selectedCount,
-        int changedCount,
-        int unchangedCount)
+    private static string ConfirmationHash(Guid customerId,
+                                           Guid operationId,
+                                           string selectionMode,
+                                           string membersDigest,
+                                           TransactionAction action,
+                                           string targetsCanonical,
+                                           DateTime capturedAt,
+                                           DateTime expiresAt,
+                                           int selectedCount,
+                                           int changedCount,
+                                           int unchangedCount)
     {
         var payload = string.Join(
             '\n',
@@ -2207,12 +2169,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
 
     // --- Read helpers ------------------------------------------------------
 
-    private sealed record RowData(
-        TransactionResponse Response,
-        string NormalizedDescription,
-        Guid[] TagIds,
-        int? SourcePage,
-        int SourceRowNumber);
+    private sealed record RowData(TransactionResponse Response,
+                                  string NormalizedDescription,
+                                  Guid[] TagIds,
+                                  int? SourcePage,
+                                  int SourceRowNumber);
 
     private static async Task SetReadOnlyAsync(
         NpgsqlConnection connection,
@@ -2225,12 +2186,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static async Task ValidateFilterOwnershipAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        TransactionFilter filter,
-        CancellationToken cancellationToken)
+    private static async Task ValidateFilterOwnershipAsync(NpgsqlConnection connection,
+                                                           NpgsqlTransaction transaction,
+                                                           Guid customerId,
+                                                           TransactionFilter filter,
+                                                           CancellationToken cancellationToken)
     {
         if (filter.FinancialAccountId is not null)
         {
@@ -2258,13 +2218,12 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         }
     }
 
-    internal static async Task RequireOwnedAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction? transaction,
-        Guid customerId,
-        string table,
-        Guid id,
-        CancellationToken cancellationToken)
+    internal static async Task RequireOwnedAsync(NpgsqlConnection connection,
+                                                 NpgsqlTransaction? transaction,
+                                                 Guid customerId,
+                                                 string table,
+                                                 Guid id,
+                                                 CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -2278,16 +2237,15 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         }
     }
 
-    private async Task<List<RowData>> ReadRowsAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        TransactionFilter filter,
-        string orderClause,
-        int limit,
-        long offset,
-        bool includeVisibility,
-        CancellationToken cancellationToken)
+    private async Task<List<RowData>> ReadRowsAsync(NpgsqlConnection connection,
+                                                    NpgsqlTransaction transaction,
+                                                    Guid customerId,
+                                                    TransactionFilter filter,
+                                                    string orderClause,
+                                                    int limit,
+                                                    long offset,
+                                                    bool includeVisibility,
+                                                    CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -2322,12 +2280,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return rawRows.Select(raw => MapRow(raw, tags)).ToList();
     }
 
-    private async Task<List<RowData>> ReadRowsByIdsAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid[] ids,
-        CancellationToken cancellationToken)
+    private async Task<List<RowData>> ReadRowsByIdsAsync(NpgsqlConnection connection,
+                                                         NpgsqlTransaction transaction,
+                                                         Guid customerId,
+                                                         Guid[] ids,
+                                                         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -2359,28 +2316,27 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return rawRows.Select(raw => MapRow(raw, tags)).ToList();
     }
 
-    private sealed record RawRow(
-        Guid Id,
-        int Version,
-        DateOnly TransactionDate,
-        string Description,
-        string NormalizedDescription,
-        decimal Amount,
-        Guid AccountId,
-        string AccountName,
-        bool AccountArchived,
-        Guid CategoryId,
-        string CategoryName,
-        string CategoryKind,
-        bool CategorySystem,
-        bool CategoryArchived,
-        Guid StatementId,
-        string StatementLabel,
-        string StatementSourceType,
-        bool StatementHidden,
-        bool HiddenByUser,
-        int? SourcePage,
-        int SourceRowNumber);
+    private sealed record RawRow(Guid Id,
+                                 int Version,
+                                 DateOnly TransactionDate,
+                                 string Description,
+                                 string NormalizedDescription,
+                                 decimal Amount,
+                                 Guid AccountId,
+                                 string AccountName,
+                                 bool AccountArchived,
+                                 Guid CategoryId,
+                                 string CategoryName,
+                                 string CategoryKind,
+                                 bool CategorySystem,
+                                 bool CategoryArchived,
+                                 Guid StatementId,
+                                 string StatementLabel,
+                                 string StatementSourceType,
+                                 bool StatementHidden,
+                                 bool HiddenByUser,
+                                 int? SourcePage,
+                                 int SourceRowNumber);
 
     private const string RowColumns = """
         t.id, t.version, t.transaction_date, t.description, t.normalized_description, t.amount,
@@ -2459,12 +2415,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return new RowData(response, raw.NormalizedDescription, tagIds, raw.SourcePage, raw.SourceRowNumber);
     }
 
-    private static async Task<Dictionary<Guid, TransactionTagRef[]>> LoadAssignedTagsAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        IReadOnlyCollection<Guid> transactionIds,
-        CancellationToken cancellationToken)
+    private static async Task<Dictionary<Guid, TransactionTagRef[]>> LoadAssignedTagsAsync(NpgsqlConnection connection,
+                                                                                           NpgsqlTransaction transaction,
+                                                                                           Guid customerId,
+                                                                                           IReadOnlyCollection<Guid> transactionIds,
+                                                                                           CancellationToken cancellationToken)
     {
         var result = new Dictionary<Guid, TransactionTagRef[]>();
         if (transactionIds.Count == 0)
@@ -2508,11 +2463,10 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
     }
 
     private static async Task<IReadOnlyList<(Guid Id, string DisplayName, string[] Tokens)>>
-        LoadActiveTagsAsync(
-            NpgsqlConnection connection,
-            NpgsqlTransaction transaction,
-            Guid customerId,
-            CancellationToken cancellationToken)
+        LoadActiveTagsAsync(NpgsqlConnection connection,
+                            NpgsqlTransaction transaction,
+                            Guid customerId,
+                            CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;

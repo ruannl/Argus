@@ -4,38 +4,35 @@ using NpgsqlTypes;
 
 namespace argus.Server.Data;
 
-public sealed record FinancialAccountRecord(
-    Guid Id,
-    string DisplayName,
-    string? Institution,
-    string Currency,
-    bool IsArchived,
-    DateTime? ArchivedAt,
-    long TransactionCount,
-    DateTime CreatedAt,
-    DateTime UpdatedAt);
+public sealed record FinancialAccountRecord(Guid Id,
+                                            string DisplayName,
+                                            string? Institution,
+                                            string Currency,
+                                            bool IsArchived,
+                                            DateTime? ArchivedAt,
+                                            long TransactionCount,
+                                            DateTime CreatedAt,
+                                            DateTime UpdatedAt);
 
-public sealed record CategoryRecord(
-    Guid Id,
-    string DisplayName,
-    string Kind,
-    bool IsSystem,
-    bool IsDefault,
-    bool IsArchived,
-    DateTime? ArchivedAt,
-    int SortOrder,
-    long TransactionCount,
-    DateTime CreatedAt,
-    DateTime UpdatedAt);
+public sealed record CategoryRecord(Guid Id,
+                                    string DisplayName,
+                                    string Kind,
+                                    bool IsSystem,
+                                    bool IsDefault,
+                                    bool IsArchived,
+                                    DateTime? ArchivedAt,
+                                    int SortOrder,
+                                    long TransactionCount,
+                                    DateTime CreatedAt,
+                                    DateTime UpdatedAt);
 
-public sealed record MerchantTagRecord(
-    Guid Id,
-    string DisplayName,
-    bool IsArchived,
-    DateTime? ArchivedAt,
-    long TransactionCount,
-    DateTime CreatedAt,
-    DateTime UpdatedAt);
+public sealed record MerchantTagRecord(Guid Id,
+                                       string DisplayName,
+                                       bool IsArchived,
+                                       DateTime? ArchivedAt,
+                                       long TransactionCount,
+                                       DateTime CreatedAt,
+                                       DateTime UpdatedAt);
 
 public abstract record AccountOutcome
 {
@@ -65,8 +62,7 @@ public abstract record CategoryOutcome
 
 public abstract record CategoryDeleteOutcome
 {
-    public sealed record Success(long ReassignedTransactionCount, Guid UncategorisedCategoryId)
-        : CategoryDeleteOutcome;
+    public sealed record Success(long ReassignedTransactionCount, Guid UncategorisedCategoryId) : CategoryDeleteOutcome;
 
     public sealed record NotFound : CategoryDeleteOutcome;
 
@@ -153,11 +149,10 @@ public sealed class FinanceStore(Db db)
     /// empty, control-character, or oversized names. Display and normalized
     /// forms are returned together so both writers agree.
     /// </summary>
-    public static bool TryNormalizeName(
-        string? input,
-        out string displayName,
-        out string normalizedName,
-        int maxRunes = MaxNameRunes)
+    public static bool TryNormalizeName(string? input,
+                                        out string displayName,
+                                        out string normalizedName,
+                                        int maxRunes = MaxNameRunes)
     {
         displayName = string.Empty;
         normalizedName = string.Empty;
@@ -359,11 +354,10 @@ public sealed class FinanceStore(Db db)
         return accounts;
     }
 
-    public async Task<AccountOutcome> CreateAccountAsync(
-        Guid customerId,
-        string? displayName,
-        string? institution,
-        CancellationToken cancellationToken = default)
+    public async Task<AccountOutcome> CreateAccountAsync(Guid customerId,
+                                                         string? displayName,
+                                                         string? institution,
+                                                         CancellationToken cancellationToken = default)
     {
         if (!TryNormalizeName(displayName, out var name, out _) ||
             !TryNormalizeInstitution(institution, out var normalizedInstitution))
@@ -397,13 +391,12 @@ public sealed class FinanceStore(Db db)
     /// is false the stored institution is preserved; when it is true, null or an
     /// empty value clears it.
     /// </summary>
-    public async Task<AccountOutcome> UpdateAccountAsync(
-        Guid customerId,
-        Guid id,
-        string? displayName,
-        bool institutionProvided,
-        string? institution,
-        CancellationToken cancellationToken = default)
+    public async Task<AccountOutcome> UpdateAccountAsync(Guid customerId,
+                                                         Guid id,
+                                                         string? displayName,
+                                                         bool institutionProvided,
+                                                         string? institution,
+                                                         CancellationToken cancellationToken = default)
     {
         if (!TryNormalizeName(displayName, out var name, out _))
         {
@@ -449,11 +442,10 @@ public sealed class FinanceStore(Db db)
     }
 
     /// <summary>Archive or restore. Repeating the same transition is an idempotent success.</summary>
-    public async Task<AccountOutcome> SetAccountArchivedAsync(
-        Guid customerId,
-        Guid id,
-        bool archived,
-        CancellationToken cancellationToken = default)
+    public async Task<AccountOutcome> SetAccountArchivedAsync(Guid customerId,
+                                                              Guid id,
+                                                              bool archived,
+                                                              CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -494,12 +486,11 @@ public sealed class FinanceStore(Db db)
         return await FindAccountAsync(connection, null, customerId, id, cancellationToken);
     }
 
-    private static async Task<FinancialAccountRecord?> FindAccountAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction? transaction,
-        Guid customerId,
-        Guid id,
-        CancellationToken cancellationToken)
+    private static async Task<FinancialAccountRecord?> FindAccountAsync(NpgsqlConnection connection,
+                                                                        NpgsqlTransaction? transaction,
+                                                                        Guid customerId,
+                                                                        Guid id,
+                                                                        CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -514,12 +505,11 @@ public sealed class FinanceStore(Db db)
         return await reader.ReadAsync(cancellationToken) ? MapAccount(reader) : null;
     }
 
-    private static async Task<bool> LockAccountAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid id,
-        CancellationToken cancellationToken)
+    private static async Task<bool> LockAccountAsync(NpgsqlConnection connection,
+                                                     NpgsqlTransaction transaction,
+                                                     Guid customerId,
+                                                     Guid id,
+                                                     CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -560,11 +550,10 @@ public sealed class FinanceStore(Db db)
         return categories;
     }
 
-    public async Task<CategoryOutcome> CreateCategoryAsync(
-        Guid customerId,
-        string? displayName,
-        string? kind,
-        CancellationToken cancellationToken = default)
+    public async Task<CategoryOutcome> CreateCategoryAsync(Guid customerId,
+                                                           string? displayName,
+                                                           string? kind,
+                                                           CancellationToken cancellationToken = default)
     {
         await EnsureCategoriesSeededAsync(customerId, cancellationToken);
 
@@ -612,13 +601,12 @@ public sealed class FinanceStore(Db db)
         return created is null ? new CategoryOutcome.NotFound() : new CategoryOutcome.Success(created);
     }
 
-    public async Task<CategoryOutcome> UpdateCategoryAsync(
-        Guid customerId,
-        Guid id,
-        string? displayName,
-        string? kind,
-        bool confirmKindChange,
-        CancellationToken cancellationToken = default)
+    public async Task<CategoryOutcome> UpdateCategoryAsync(Guid customerId,
+                                                           Guid id,
+                                                           string? displayName,
+                                                           string? kind,
+                                                           bool confirmKindChange,
+                                                           CancellationToken cancellationToken = default)
     {
         await EnsureCategoriesSeededAsync(customerId, cancellationToken);
 
@@ -687,11 +675,10 @@ public sealed class FinanceStore(Db db)
     }
 
     /// <summary>Archive or restore. Repeating the same transition is an idempotent success.</summary>
-    public async Task<CategoryOutcome> SetCategoryArchivedAsync(
-        Guid customerId,
-        Guid id,
-        bool archived,
-        CancellationToken cancellationToken = default)
+    public async Task<CategoryOutcome> SetCategoryArchivedAsync(Guid customerId,
+                                                                Guid id,
+                                                                bool archived,
+                                                                CancellationToken cancellationToken = default)
     {
         await EnsureCategoriesSeededAsync(customerId, cancellationToken);
 
@@ -823,19 +810,17 @@ public sealed class FinanceStore(Db db)
         return new CategoryDeleteOutcome.Success(reassigned, uncategorisedId.Value);
     }
 
-    private sealed record CategoryState(
-        Guid Id,
-        string Kind,
-        bool IsSystem,
-        bool IsArchived,
-        DateTime? ArchivedAt);
+    private sealed record CategoryState(Guid Id,
+                                        string Kind,
+                                        bool IsSystem,
+                                        bool IsArchived,
+                                        DateTime? ArchivedAt);
 
-    private static async Task<CategoryState?> LockCategoryAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid id,
-        CancellationToken cancellationToken)
+    private static async Task<CategoryState?> LockCategoryAsync(NpgsqlConnection connection,
+                                                                NpgsqlTransaction transaction,
+                                                                Guid customerId,
+                                                                Guid id,
+                                                                CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -860,11 +845,10 @@ public sealed class FinanceStore(Db db)
             reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTime>(4));
     }
 
-    private static async Task<Guid?> FindUncategorisedIdAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        CancellationToken cancellationToken)
+    private static async Task<Guid?> FindUncategorisedIdAsync(NpgsqlConnection connection,
+                                                              NpgsqlTransaction transaction,
+                                                              Guid customerId,
+                                                              CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -883,12 +867,11 @@ public sealed class FinanceStore(Db db)
         return await FindCategoryAsync(connection, null, customerId, id, cancellationToken);
     }
 
-    private static async Task<CategoryRecord?> FindCategoryAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction? transaction,
-        Guid customerId,
-        Guid id,
-        CancellationToken cancellationToken)
+    private static async Task<CategoryRecord?> FindCategoryAsync(NpgsqlConnection connection,
+                                                                 NpgsqlTransaction? transaction,
+                                                                 Guid customerId,
+                                                                 Guid id,
+                                                                 CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -967,11 +950,10 @@ public sealed class FinanceStore(Db db)
             : new MerchantTagOutcome.Success(created);
     }
 
-    public async Task<MerchantTagOutcome> UpdateMerchantTagAsync(
-        Guid customerId,
-        Guid id,
-        string? displayName,
-        CancellationToken cancellationToken = default)
+    public async Task<MerchantTagOutcome> UpdateMerchantTagAsync(Guid customerId,
+                                                                 Guid id,
+                                                                 string? displayName,
+                                                                 CancellationToken cancellationToken = default)
     {
         if (!TryNormalizeName(displayName, out var name, out var normalizedName))
         {
@@ -1018,11 +1000,10 @@ public sealed class FinanceStore(Db db)
     }
 
     /// <summary>Archive or restore. Repeating the same transition is an idempotent success.</summary>
-    public async Task<MerchantTagOutcome> SetMerchantTagArchivedAsync(
-        Guid customerId,
-        Guid id,
-        bool archived,
-        CancellationToken cancellationToken = default)
+    public async Task<MerchantTagOutcome> SetMerchantTagArchivedAsync(Guid customerId,
+                                                                      Guid id,
+                                                                      bool archived,
+                                                                      CancellationToken cancellationToken = default)
     {
         await using var connection = await db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -1159,12 +1140,11 @@ public sealed class FinanceStore(Db db)
         return await FindMerchantTagAsync(connection, null, customerId, id, cancellationToken);
     }
 
-    private static async Task<MerchantTagRecord?> FindMerchantTagAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction? transaction,
-        Guid customerId,
-        Guid id,
-        CancellationToken cancellationToken)
+    private static async Task<MerchantTagRecord?> FindMerchantTagAsync(NpgsqlConnection connection,
+                                                                       NpgsqlTransaction? transaction,
+                                                                       Guid customerId,
+                                                                       Guid id,
+                                                                       CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1179,12 +1159,11 @@ public sealed class FinanceStore(Db db)
         return await reader.ReadAsync(cancellationToken) ? MapMerchantTag(reader) : null;
     }
 
-    private static async Task<bool> LockMerchantTagAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid id,
-        CancellationToken cancellationToken)
+    private static async Task<bool> LockMerchantTagAsync(NpgsqlConnection connection,
+                                                         NpgsqlTransaction transaction,
+                                                         Guid customerId,
+                                                         Guid id,
+                                                         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;

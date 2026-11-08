@@ -58,12 +58,11 @@ public static class PasswordHasher
         return CryptographicOperations.FixedTimeEquals(actual, expected);
     }
 
-    private static byte[] Derive(
-        byte[] password,
-        byte[] salt,
-        int memoryKib,
-        int iterations,
-        int parallelism)
+    private static byte[] Derive(byte[] password,
+                                 byte[] salt,
+                                 int memoryKib,
+                                 int iterations,
+                                 int parallelism)
     {
         using var argon2 = new Argon2id(password)
         {

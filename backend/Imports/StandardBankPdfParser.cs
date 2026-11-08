@@ -91,11 +91,10 @@ public static class StandardBankPdfParser
     // 842-point page. Y=400 is not a top-of-page role.
     private const double TopRegionBelowPageTop = 120.0;
 
-    public static ParsedStatement Parse(
-        byte[] bytes,
-        DateOnly? start,
-        DateOnly? end,
-        int? century)
+    public static ParsedStatement Parse(byte[] bytes,
+                                        DateOnly? start,
+                                        DateOnly? end,
+                                        int? century)
     {
         if (bytes.Length > ImportLimits.MaxFileBytes)
         {
@@ -144,11 +143,10 @@ public static class StandardBankPdfParser
         }
     }
 
-    private static ParsedStatement ParseDocument(
-        PdfDocument document,
-        DateOnly? start,
-        DateOnly? end,
-        int? century)
+    private static ParsedStatement ParseDocument(PdfDocument document,
+                                                 DateOnly? start,
+                                                 DateOnly? end,
+                                                 int? century)
     {
         if (document.IsEncrypted)
         {
@@ -516,18 +514,17 @@ public static class StandardBankPdfParser
             ["balance_ignored"]);
     }
 
-    private static PdfRowDraft AddCandidate(
-        PdfLine line,
-        int pageNumber,
-        string dateText,
-        string descriptionText,
-        string[] flowTexts,
-        DateOnly? start,
-        DateOnly? end,
-        int? century,
-        ref int eventIndex,
-        List<BodyEvent> events,
-        List<PdfRowDraft> candidateDrafts)
+    private static PdfRowDraft AddCandidate(PdfLine line,
+                                            int pageNumber,
+                                            string dateText,
+                                            string descriptionText,
+                                            string[] flowTexts,
+                                            DateOnly? start,
+                                            DateOnly? end,
+                                            int? century,
+                                            ref int eventIndex,
+                                            List<BodyEvent> events,
+                                            List<PdfRowDraft> candidateDrafts)
     {
         var dateMatch = _dateAnchor.Match(dateText);
         var draft = NewDraft(
@@ -550,24 +547,22 @@ public static class StandardBankPdfParser
         return draft;
     }
 
-    private static PdfRowDraft NewDraft(
-        int sourceLine,
-        int sourcePage,
-        string rawDate,
-        Match? dateMatch,
-        string description,
-        string[] flows,
-        double lineCenterY,
-        DateOnly? start,
-        DateOnly? end,
-        int? century) =>
+    private static PdfRowDraft NewDraft(int sourceLine,
+                                        int sourcePage,
+                                        string rawDate,
+                                        Match? dateMatch,
+                                        string description,
+                                        string[] flows,
+                                        double lineCenterY,
+                                        DateOnly? start,
+                                        DateOnly? end,
+                                        int? century) =>
         new(sourceLine, sourcePage, rawDate, dateMatch, description, flows, lineCenterY, start, end, century);
 
-    private static bool IsTerminalTotal(
-        string dateText,
-        string descriptionText,
-        string[] flowTexts,
-        string balanceText)
+    private static bool IsTerminalTotal(string dateText,
+                                        string descriptionText,
+                                        string[] flowTexts,
+                                        string balanceText)
     {
         if (dateText.Length > 0 || balanceText.Length > 0)
         {
@@ -629,11 +624,10 @@ public static class StandardBankPdfParser
         return true;
     }
 
-    private static bool TryConsumePeriodLine(
-        string text,
-        ref DateOnly? printedStart,
-        ref DateOnly? printedEnd,
-        ref bool periodConflict)
+    private static bool TryConsumePeriodLine(string text,
+                                             ref DateOnly? printedStart,
+                                             ref DateOnly? printedEnd,
+                                             ref bool periodConflict)
     {
         var match = _periodLine.Match(text);
         if (!match.Success)
@@ -715,11 +709,10 @@ public static class StandardBankPdfParser
         return _metadataLabels.Contains(label, StringComparer.Ordinal);
     }
 
-    private static bool IsSupportedContinuation(
-        PdfLine line,
-        PdfHeader header,
-        PdfRowDraft current,
-        bool crossPage)
+    private static bool IsSupportedContinuation(PdfLine line,
+                                                PdfHeader header,
+                                                PdfRowDraft current,
+                                                bool crossPage)
     {
         if (line.Words.Count == 0 ||
             !line.Words.All(word => header.InColumn(word, 1)))
@@ -835,11 +828,10 @@ public static class StandardBankPdfParser
         return matches;
     }
 
-    private static bool HeadersAreCompatible(
-        PdfHeader primary,
-        PdfHeader other,
-        IReadOnlyList<PdfLine> lines,
-        HashSet<int> headerLineIndices)
+    private static bool HeadersAreCompatible(PdfHeader primary,
+                                             PdfHeader other,
+                                             IReadOnlyList<PdfLine> lines,
+                                             HashSet<int> headerLineIndices)
     {
         if (!primary.IsCompatibleWith(other))
         {
@@ -889,15 +881,14 @@ public static class StandardBankPdfParser
         return -1;
     }
 
-    private static bool TryGetHeaderIndices(
-        IReadOnlyList<string> normalized,
-        out int dateIndex,
-        out int descriptionIndex,
-        out int paymentsIndex,
-        out int depositsIndex,
-        out int bankIndex,
-        out int feesIndex,
-        out int balanceIndex)
+    private static bool TryGetHeaderIndices(IReadOnlyList<string> normalized,
+                                            out int dateIndex,
+                                            out int descriptionIndex,
+                                            out int paymentsIndex,
+                                            out int depositsIndex,
+                                            out int bankIndex,
+                                            out int feesIndex,
+                                            out int balanceIndex)
     {
         dateIndex = descriptionIndex = paymentsIndex = depositsIndex = -1;
         bankIndex = feesIndex = balanceIndex = -1;
@@ -961,12 +952,11 @@ public static class StandardBankPdfParser
             CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
     }
 
-    private sealed record PdfWord(
-        string Text,
-        double Left,
-        double Right,
-        double Bottom,
-        double Top)
+    private sealed record PdfWord(string Text,
+                                  double Left,
+                                  double Right,
+                                  double Bottom,
+                                  double Top)
     {
         public double CenterY => (Bottom + Top) / 2.0;
 
@@ -1046,17 +1036,16 @@ public static class StandardBankPdfParser
         private readonly string _description;
         private readonly string[] _flows;
 
-        public PdfRowDraft(
-            int sourceLine,
-            int sourcePage,
-            string rawDate,
-            Match? dateMatch,
-            string description,
-            string[] flows,
-            double lineCenterY,
-            DateOnly? start,
-            DateOnly? end,
-            int? century)
+        public PdfRowDraft(int sourceLine,
+                           int sourcePage,
+                           string rawDate,
+                           Match? dateMatch,
+                           string description,
+                           string[] flows,
+                           double lineCenterY,
+                           DateOnly? start,
+                           DateOnly? end,
+                           int? century)
         {
             _sourceLine = sourceLine;
             _sourcePage = sourcePage;

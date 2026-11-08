@@ -13,14 +13,13 @@ namespace argus.Server.Http;
 /// requires the trusted-frontend proof first and then independently validates
 /// the acting user's opaque session.
 /// </summary>
-public sealed class AccountApi(
-    AppSettings settings,
-    Store store,
-    Policy policy,
-    RateLimiter rateLimiter,
-    IPwnedScreener pwned,
-    IMailer mailer,
-    ILoggerFactory loggerFactory)
+public sealed class AccountApi(AppSettings settings,
+                               Store store,
+                               Policy policy,
+                               RateLimiter rateLimiter,
+                               IPwnedScreener pwned,
+                               IMailer mailer,
+                               ILoggerFactory loggerFactory)
 {
     private static readonly Lazy<string> _dummyPasswordHash = new(() => PasswordHasher.Hash(Tokens.NewToken()));
 
@@ -551,15 +550,14 @@ public sealed class AccountApi(
     }
 }
 
-public sealed record AccountResponse(
-    Guid Id,
-    string Email,
-    bool EmailVerified,
-    bool SubscriberActive,
-    string? SubscriptionStartedAt,
-    string? NextBillingAt,
-    bool Lifetime,
-    bool Admin)
+public sealed record AccountResponse(Guid Id,
+                                     string Email,
+                                     bool EmailVerified,
+                                     bool SubscriberActive,
+                                     string? SubscriptionStartedAt,
+                                     string? NextBillingAt,
+                                     bool Lifetime,
+                                     bool Admin)
 {
     public static AccountResponse From(CustomerRecord customer) => new(
         customer.Id,

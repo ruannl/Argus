@@ -70,11 +70,10 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
         return id;
     }
 
-    protected async Task<Guid> SeedStatementAsync(
-        Guid customerId,
-        Guid accountId,
-        bool hidden = false,
-        string label = "Synthetic statement")
+    protected async Task<Guid> SeedStatementAsync(Guid customerId,
+                                                  Guid accountId,
+                                                  bool hidden = false,
+                                                  string label = "Synthetic statement")
     {
         var id = Guid.NewGuid();
         await ExecuteSqlParamsAsync(
@@ -99,19 +98,18 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
         return id;
     }
 
-    protected async Task<Guid> SeedTransactionAsync(
-        Guid customerId,
-        Guid accountId,
-        Guid statementId,
-        Guid categoryId,
-        DateOnly date,
-        string description,
-        decimal amount,
-        int sourceRowNumber = 1,
-        Guid[]? tagIds = null,
-        bool hidden = false,
-        int version = 1,
-        int? sourcePage = null)
+    protected async Task<Guid> SeedTransactionAsync(Guid customerId,
+                                                    Guid accountId,
+                                                    Guid statementId,
+                                                    Guid categoryId,
+                                                    DateOnly date,
+                                                    string description,
+                                                    decimal amount,
+                                                    int sourceRowNumber = 1,
+                                                    Guid[]? tagIds = null,
+                                                    bool hidden = false,
+                                                    int version = 1,
+                                                    int? sourcePage = null)
     {
         var id = Guid.NewGuid();
         await ExecuteSqlParamsAsync(

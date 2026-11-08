@@ -12,13 +12,12 @@ namespace argus.Server.Http;
 /// finance guard, bounds its body before buffering, and maps failures to safe
 /// fixed error codes. Financial source text never enters a log.
 /// </summary>
-public sealed class StatementImportApi(
-    FinanceGuard guard,
-    StatementImportStore store,
-    PdfParserRunner pdfRunner,
-    ParserAdmission parserAdmission,
-    RateLimiter rateLimiter,
-    ILoggerFactory loggerFactory)
+public sealed class StatementImportApi(FinanceGuard guard,
+                                       StatementImportStore store,
+                                       PdfParserRunner pdfRunner,
+                                       ParserAdmission parserAdmission,
+                                       RateLimiter rateLimiter,
+                                       ILoggerFactory loggerFactory)
 {
     private readonly ILogger _audit = loggerFactory.CreateLogger("audit");
     private readonly ILogger _logger = loggerFactory.CreateLogger("finance");
@@ -527,29 +526,27 @@ public sealed class StatementImportApi(
         });
 }
 
-public sealed record ImportOptionsRequest(
-    Guid? FinancialAccountId,
-    string? SourceKind,
-    ParserConfig? ParserConfig,
-    string? StartDate,
-    string? EndDate,
-    string? Currency,
-    bool? ConfirmZar,
-    bool? StatementOverride);
+public sealed record ImportOptionsRequest(Guid? FinancialAccountId,
+                                          string? SourceKind,
+                                          ParserConfig? ParserConfig,
+                                          string? StartDate,
+                                          string? EndDate,
+                                          string? Currency,
+                                          bool? ConfirmZar,
+                                          bool? StatementOverride);
 
 public sealed record ImportReviewPatchRequest(
     int? ExpectedReviewVersion,
     ReviewDecisionRequest[]? Decisions,
     bool? StatementOverride);
 
-public sealed record ReviewDecisionRequest(
-    Guid? RowId,
-    bool? Skip,
-    bool? Override,
-    string? WithinFileState,
-    string? WithinFileGroup,
-    string? WithinFileAction,
-    Guid[]? SelectedTagIds);
+public sealed record ReviewDecisionRequest(Guid? RowId,
+                                           bool? Skip,
+                                           bool? Override,
+                                           string? WithinFileState,
+                                           string? WithinFileGroup,
+                                           string? WithinFileAction,
+                                           Guid[]? SelectedTagIds);
 
 public sealed record ReviewVersionRequest(int? ExpectedReviewVersion);
 
@@ -562,17 +559,16 @@ public sealed record StatementMutationRequest(
     long? ExpectedTransactionCount,
     bool? Confirm);
 
-public sealed record PreviewRowResponse(
-    Guid RowId,
-    int SourceLine,
-    int? SourcePage,
-    int SourceRowNumber,
-    Dictionary<string, string?> RawValues,
-    string? TransactionDate,
-    string Description,
-    string? Amount,
-    string[] ValidationCodes,
-    string[] Warnings)
+public sealed record PreviewRowResponse(Guid RowId,
+                                        int SourceLine,
+                                        int? SourcePage,
+                                        int SourceRowNumber,
+                                        Dictionary<string, string?> RawValues,
+                                        string? TransactionDate,
+                                        string Description,
+                                        string? Amount,
+                                        string[] ValidationCodes,
+                                        string[] Warnings)
 {
     public static PreviewRowResponse From(ParsedStatementRow row) => new(
         row.RowId,
@@ -596,26 +592,25 @@ public sealed record ReviewResponse(
         ReviewPageResponse.From(detail.Page));
 }
 
-public sealed record ReviewSummaryResponse(
-    Guid Id,
-    Guid FinancialAccountId,
-    string SourceKind,
-    string? StartDate,
-    string? EndDate,
-    int Version,
-    string Status,
-    string ExpiresAt,
-    int TotalRows,
-    int ImportedCount,
-    int SuppressedCount,
-    int SkippedCount,
-    int InvalidUnskippedCount,
-    int WithinFilePendingCount,
-    int PossibleDuplicateCount,
-    int ExactOverrideCount,
-    bool StatementOverride,
-    int StatementOverrideCount,
-    string SummaryHash)
+public sealed record ReviewSummaryResponse(Guid Id,
+                                           Guid FinancialAccountId,
+                                           string SourceKind,
+                                           string? StartDate,
+                                           string? EndDate,
+                                           int Version,
+                                           string Status,
+                                           string ExpiresAt,
+                                           int TotalRows,
+                                           int ImportedCount,
+                                           int SuppressedCount,
+                                           int SkippedCount,
+                                           int InvalidUnskippedCount,
+                                           int WithinFilePendingCount,
+                                           int PossibleDuplicateCount,
+                                           int ExactOverrideCount,
+                                           bool StatementOverride,
+                                           int StatementOverrideCount,
+                                           string SummaryHash)
 {
     public static ReviewSummaryResponse From(ImportReviewSummaryRecord record) => new(
         record.Id,
@@ -639,11 +634,10 @@ public sealed record ReviewSummaryResponse(
         record.SummaryHash);
 }
 
-public sealed record ReviewPageResponse(
-    ReviewRowResponse[] Rows,
-    int Total,
-    int Page,
-    int PageSize)
+public sealed record ReviewPageResponse(ReviewRowResponse[] Rows,
+                                        int Total,
+                                        int Page,
+                                        int PageSize)
 {
     public static ReviewPageResponse From(ImportReviewPage page) => new(
         page.Rows.Select(ReviewRowResponse.From).ToArray(),
@@ -652,28 +646,27 @@ public sealed record ReviewPageResponse(
         page.PageSize);
 }
 
-public sealed record ReviewRowResponse(
-    Guid RowId,
-    int SourceLine,
-    int? SourcePage,
-    int SourceRowNumber,
-    Dictionary<string, string?> RawValues,
-    string? TransactionDate,
-    string Description,
-    string? Amount,
-    string[] ValidationCodes,
-    string[] Warnings,
-    string DuplicateState,
-    string[] DuplicateReasons,
-    Guid[] MatchingImportIds,
-    NearCandidateResponse[] NearCandidates,
-    int NearCandidateTotal,
-    string? WithinFileGroup,
-    string WithinFileState,
-    bool Skip,
-    bool Override,
-    Guid[] SuggestedTagIds,
-    Guid[] SelectedTagIds)
+public sealed record ReviewRowResponse(Guid RowId,
+                                       int SourceLine,
+                                       int? SourcePage,
+                                       int SourceRowNumber,
+                                       Dictionary<string, string?> RawValues,
+                                       string? TransactionDate,
+                                       string Description,
+                                       string? Amount,
+                                       string[] ValidationCodes,
+                                       string[] Warnings,
+                                       string DuplicateState,
+                                       string[] DuplicateReasons,
+                                       Guid[] MatchingImportIds,
+                                       NearCandidateResponse[] NearCandidates,
+                                       int NearCandidateTotal,
+                                       string? WithinFileGroup,
+                                       string WithinFileState,
+                                       bool Skip,
+                                       bool Override,
+                                       Guid[] SuggestedTagIds,
+                                       Guid[] SelectedTagIds)
 {
     public static ReviewRowResponse From(ImportReviewRowRecord row) => new(
         row.RowId,
@@ -699,15 +692,14 @@ public sealed record ReviewRowResponse(
         row.SelectedTagIds.ToArray());
 }
 
-public sealed record NearCandidateResponse(
-    string CandidateId,
-    string Source,
-    string? ImportId,
-    string TransactionDate,
-    string Amount,
-    string Description,
-    double Similarity,
-    string[] Reasons)
+public sealed record NearCandidateResponse(string CandidateId,
+                                           string Source,
+                                           string? ImportId,
+                                           string TransactionDate,
+                                           string Amount,
+                                           string Description,
+                                           double Similarity,
+                                           string[] Reasons)
 {
     public static NearCandidateResponse From(ImportNearCandidateRecord record) => new(
         record.CandidateId,
@@ -720,19 +712,18 @@ public sealed record NearCandidateResponse(
         record.Reasons.ToArray());
 }
 
-public sealed record OpenReviewResponse(
-    Guid Id,
-    Guid FinancialAccountId,
-    string SourceKind,
-    string? StartDate,
-    string? EndDate,
-    int Version,
-    string ExpiresAt,
-    int TotalRows,
-    int ImportedCount,
-    int SuppressedCount,
-    int SkippedCount,
-    string CreatedAt)
+public sealed record OpenReviewResponse(Guid Id,
+                                        Guid FinancialAccountId,
+                                        string SourceKind,
+                                        string? StartDate,
+                                        string? EndDate,
+                                        int Version,
+                                        string ExpiresAt,
+                                        int TotalRows,
+                                        int ImportedCount,
+                                        int SuppressedCount,
+                                        int SkippedCount,
+                                        string CreatedAt)
 {
     public static OpenReviewResponse From(ImportOpenReviewSummary record) => new(
         record.Id,
@@ -749,25 +740,24 @@ public sealed record OpenReviewResponse(
         Timestamps.Format(record.CreatedAt));
 }
 
-public sealed record StatementSummaryResponse(
-    Guid Id,
-    Guid FinancialAccountId,
-    string SourceType,
-    string StatementLabel,
-    string StartDate,
-    string EndDate,
-    int TotalRows,
-    int ImportedCount,
-    int SuppressedCount,
-    int SkippedCount,
-    int PossibleDuplicateCount,
-    int ExactOverrideCount,
-    int StatementOverrideCount,
-    bool IsHidden,
-    int Version,
-    long LiveHiddenCount,
-    string CreatedAt,
-    string UpdatedAt)
+public sealed record StatementSummaryResponse(Guid Id,
+                                              Guid FinancialAccountId,
+                                              string SourceType,
+                                              string StatementLabel,
+                                              string StartDate,
+                                              string EndDate,
+                                              int TotalRows,
+                                              int ImportedCount,
+                                              int SuppressedCount,
+                                              int SkippedCount,
+                                              int PossibleDuplicateCount,
+                                              int ExactOverrideCount,
+                                              int StatementOverrideCount,
+                                              bool IsHidden,
+                                              int Version,
+                                              long LiveHiddenCount,
+                                              string CreatedAt,
+                                              string UpdatedAt)
 {
     public static StatementSummaryResponse From(ImportStatementSummary record) => new(
         record.Id,
@@ -790,16 +780,15 @@ public sealed record StatementSummaryResponse(
         Timestamps.Format(record.UpdatedAt));
 }
 
-public sealed record StatementRowResponse(
-    Guid Id,
-    int SourceRowNumber,
-    int? SourcePage,
-    string TransactionDate,
-    string Description,
-    string Amount,
-    bool IsHiddenByUser,
-    bool EffectiveHidden,
-    TagResponse[] Tags)
+public sealed record StatementRowResponse(Guid Id,
+                                          int SourceRowNumber,
+                                          int? SourcePage,
+                                          string TransactionDate,
+                                          string Description,
+                                          string Amount,
+                                          bool IsHiddenByUser,
+                                          bool EffectiveHidden,
+                                          TagResponse[] Tags)
 {
     public static StatementRowResponse From(ImportStatementRowRecord record) => new(
         record.Id,

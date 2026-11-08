@@ -4,19 +4,17 @@ using System.Text;
 
 namespace argus.Server.Tests;
 
-public sealed record StatementFixtureRow(
-    string Date,
-    string Description,
-    long? Cents,
-    string[] ValidationCodes,
-    int? Page);
+public sealed record StatementFixtureRow(string Date,
+                                         string Description,
+                                         long? Cents,
+                                         string[] ValidationCodes,
+                                         int? Page);
 
-public sealed record StatementFixture(
-    byte[] Bytes,
-    IReadOnlyList<StatementFixtureRow> Rows,
-    DateOnly? PeriodStart,
-    DateOnly? PeriodEnd,
-    int ContinuationCount);
+public sealed record StatementFixture(byte[] Bytes,
+                                      IReadOnlyList<StatementFixtureRow> Rows,
+                                      DateOnly? PeriodStart,
+                                      DateOnly? PeriodEnd,
+                                      int ContinuationCount);
 
 /// <summary>
 /// Synthetic statement fixtures. No real bank data is present; every value is
@@ -86,13 +84,12 @@ public static class StatementFixtureBuilder
         return csv with { Bytes = output.ToArray() };
     }
 
-    public static StatementFixture BuildStandardBankPdf(
-        int pageCount,
-        int rowCount,
-        int continuationCount,
-        bool includePeriod = true,
-        bool crossYear = false,
-        bool reorderedStreams = true)
+    public static StatementFixture BuildStandardBankPdf(int pageCount,
+                                                        int rowCount,
+                                                        int continuationCount,
+                                                        bool includePeriod = true,
+                                                        bool crossYear = false,
+                                                        bool reorderedStreams = true)
     {
         var periodStart = crossYear ? new DateOnly(2023, 12, 15) : new DateOnly(2025, 1, 1);
         var periodEnd = crossYear ? new DateOnly(2024, 1, 15) : new DateOnly(2025, 1, 31);
@@ -230,11 +227,10 @@ public static class StatementFixtureBuilder
     /// is text; the second is either text or a full-page image. It never
     /// contains real account data.
     /// </summary>
-    public static byte[] BuildTwoPagePdf(
-        IReadOnlyList<PdfText> firstPage,
-        IReadOnlyList<PdfText>? secondPage,
-        bool secondPageIsImage = false,
-        bool secondPageHasImage = false)
+    public static byte[] BuildTwoPagePdf(IReadOnlyList<PdfText> firstPage,
+                                         IReadOnlyList<PdfText>? secondPage,
+                                         bool secondPageIsImage = false,
+                                         bool secondPageHasImage = false)
     {
         var pageCount = secondPage is not null || secondPageIsImage ? 2 : 1;
         var hasImage = secondPageIsImage || secondPageHasImage;
@@ -494,11 +490,10 @@ public sealed class MinimalPdfBuilder
 
     public void AddPage(IEnumerable<PdfText> texts) => AddPage(texts, 0, 0, 0);
 
-    public void AddPage(
-        IEnumerable<PdfText> texts,
-        int imageCount,
-        double imageWidth,
-        double imageHeight)
+    public void AddPage(IEnumerable<PdfText> texts,
+                        int imageCount,
+                        double imageWidth,
+                        double imageHeight)
     {
         var builder = new StringBuilder();
         foreach (var text in texts)
@@ -634,9 +629,8 @@ public sealed class MinimalPdfBuilder
         return builder.ToString();
     }
 
-    private sealed record PageContent(
-        string Text,
-        int ImageCount,
-        double ImageWidth,
-        double ImageHeight);
+    private sealed record PageContent(string Text,
+                                      int ImageCount,
+                                      double ImageWidth,
+                                      double ImageHeight);
 }

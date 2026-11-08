@@ -9,11 +9,10 @@ namespace argus.Server.Http;
 /// Guarded transaction workspace transport. Search text only ever arrives in a
 /// bounded request body; responses are no-store at the application middleware.
 /// </summary>
-public sealed class TransactionApi(
-    FinanceGuard guard,
-    TransactionStore store,
-    RateLimiter rateLimiter,
-    ILoggerFactory loggerFactory)
+public sealed class TransactionApi(FinanceGuard guard,
+                                   TransactionStore store,
+                                   RateLimiter rateLimiter,
+                                   ILoggerFactory loggerFactory)
 {
     private readonly ILogger _logger = loggerFactory.CreateLogger("finance");
 

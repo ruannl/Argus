@@ -2,11 +2,10 @@ using System.Text;
 
 namespace argus.Server.Imports;
 
-public sealed record CsvRecord(
-    int StartLine,
-    int EndLine,
-    IReadOnlyList<string> Fields,
-    bool Malformed);
+public sealed record CsvRecord(int StartLine,
+                               int EndLine,
+                               IReadOnlyList<string> Fields,
+                               bool Malformed);
 
 /// <summary>
 /// Strict RFC-4180-style reader used by both CSV presets. It tracks physical
@@ -15,11 +14,10 @@ public sealed record CsvRecord(
 /// </summary>
 public static class CsvRecordReader
 {
-    public static IReadOnlyList<CsvRecord> Read(
-        string text,
-        char delimiter,
-        int maxRecords = int.MaxValue,
-        CancellationToken cancellationToken = default)
+    public static IReadOnlyList<CsvRecord> Read(string text,
+                                                char delimiter,
+                                                int maxRecords = int.MaxValue,
+                                                CancellationToken cancellationToken = default)
     {
         var records = new List<CsvRecord>();
         var fields = new List<string>();

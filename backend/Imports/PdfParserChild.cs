@@ -13,12 +13,11 @@ public static class PdfParserChild
     private const int HeaderLengthBytes = 4;
     private const int MaxHeaderBytes = 64 * 1024;
 
-    public static async Task<int> RunAsync(
-        Stream input,
-        Stream output,
-        Stream error,
-        TimeSpan? hardDeadline = null,
-        Func<byte[], PdfChildRequestOptions, ParsedStatement>? parser = null)
+    public static async Task<int> RunAsync(Stream input,
+                                           Stream output,
+                                           Stream error,
+                                           TimeSpan? hardDeadline = null,
+                                           Func<byte[], PdfChildRequestOptions, ParsedStatement>? parser = null)
     {
         try
         {

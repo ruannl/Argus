@@ -35,11 +35,10 @@ public static class BillingEvents
     /// an unknown event type, missing fields, or an unparseable activated
     /// billing date are malformed.
     /// </summary>
-    public static bool TryParseEvent(
-        string payload,
-        out string eventType,
-        out Guid customerId,
-        out DateTime? nextBillingAt)
+    public static bool TryParseEvent(string payload,
+                                     out string eventType,
+                                     out Guid customerId,
+                                     out DateTime? nextBillingAt)
     {
         eventType = string.Empty;
         customerId = Guid.Empty;

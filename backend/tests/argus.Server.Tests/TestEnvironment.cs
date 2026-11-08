@@ -57,21 +57,19 @@ public sealed class CapturingMailer : IMailer
     private readonly object _gate = new();
     private readonly List<(string Kind, string Recipient, string Token)> _sent = [];
 
-    public Task SendVerificationAsync(
-        string recipient,
-        string rawToken,
-        string frontendUrl,
-        CancellationToken cancellationToken = default)
+    public Task SendVerificationAsync(string recipient,
+                                      string rawToken,
+                                      string frontendUrl,
+                                      CancellationToken cancellationToken = default)
     {
         Record("verification", recipient, rawToken);
         return Task.CompletedTask;
     }
 
-    public Task SendPasswordResetAsync(
-        string recipient,
-        string rawToken,
-        string frontendUrl,
-        CancellationToken cancellationToken = default)
+    public Task SendPasswordResetAsync(string recipient,
+                                       string rawToken,
+                                       string frontendUrl,
+                                       CancellationToken cancellationToken = default)
     {
         Record("reset", recipient, rawToken);
         return Task.CompletedTask;
@@ -171,11 +169,10 @@ public sealed class CapturingLoggerProvider : ILoggerProvider
         }
     }
 
-    internal void Record(
-        string category,
-        LogLevel level,
-        string message,
-        Exception? exception)
+    internal void Record(string category,
+                         LogLevel level,
+                         string message,
+                         Exception? exception)
     {
         lock (_gate)
         {
@@ -191,12 +188,11 @@ public sealed class CapturingLoggerProvider : ILoggerProvider
 
         public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None;
 
-        public void Log<TState>(
-            LogLevel logLevel,
-            EventId eventId,
-            TState state,
-            Exception? exception,
-            Func<TState, Exception?, string> formatter) =>
+        public void Log<TState>(LogLevel logLevel,
+                                EventId eventId,
+                                TState state,
+                                Exception? exception,
+                                Func<TState, Exception?, string> formatter) =>
             provider.Record(category, logLevel, formatter(state, exception), exception);
     }
 }

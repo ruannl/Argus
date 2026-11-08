@@ -10,139 +10,130 @@ using NpgsqlTypes;
 
 namespace argus.Server.Data;
 
-public sealed record ImportAccountRecord(
-    Guid Id,
-    string DisplayName,
-    string Currency,
-    bool IsArchived,
-    long ImportVersion);
+public sealed record ImportAccountRecord(Guid Id,
+                                         string DisplayName,
+                                         string Currency,
+                                         bool IsArchived,
+                                         long ImportVersion);
 
-public sealed record ImportNearCandidateRecord(
-    string CandidateId,
-    string Source,
-    string? ImportId,
-    string TransactionDate,
-    string Amount,
-    string Description,
-    double Similarity,
-    string[] Reasons);
+public sealed record ImportNearCandidateRecord(string CandidateId,
+                                               string Source,
+                                               string? ImportId,
+                                               string TransactionDate,
+                                               string Amount,
+                                               string Description,
+                                               double Similarity,
+                                               string[] Reasons);
 
-public sealed record ImportReviewRowRecord(
-    Guid RowId,
-    int SourceLine,
-    int? SourcePage,
-    int SourceRowNumber,
-    Dictionary<string, string?> RawValues,
-    DateOnly? TransactionDate,
-    string Description,
-    string NormalizedDescription,
-    long? AmountCents,
-    string[] ValidationCodes,
-    string[] Warnings,
-    string? SourceIdNamespace,
-    string? SourceIdValue,
-    string DuplicateState,
-    string[] DuplicateReasons,
-    Guid[] MatchingTransactionIds,
-    Guid[] MatchingImportIds,
-    ImportNearCandidateRecord[] NearCandidates,
-    int NearCandidateTotal,
-    string? WithinFileGroup,
-    string WithinFileState,
-    bool Skip,
-    bool Override,
-    Guid[] SuggestedTagIds,
-    Guid[] SelectedTagIds);
+public sealed record ImportReviewRowRecord(Guid RowId,
+                                           int SourceLine,
+                                           int? SourcePage,
+                                           int SourceRowNumber,
+                                           Dictionary<string, string?> RawValues,
+                                           DateOnly? TransactionDate,
+                                           string Description,
+                                           string NormalizedDescription,
+                                           long? AmountCents,
+                                           string[] ValidationCodes,
+                                           string[] Warnings,
+                                           string? SourceIdNamespace,
+                                           string? SourceIdValue,
+                                           string DuplicateState,
+                                           string[] DuplicateReasons,
+                                           Guid[] MatchingTransactionIds,
+                                           Guid[] MatchingImportIds,
+                                           ImportNearCandidateRecord[] NearCandidates,
+                                           int NearCandidateTotal,
+                                           string? WithinFileGroup,
+                                           string WithinFileState,
+                                           bool Skip,
+                                           bool Override,
+                                           Guid[] SuggestedTagIds,
+                                           Guid[] SelectedTagIds);
 
-public sealed record ImportReviewSummaryRecord(
-    Guid Id,
-    Guid FinancialAccountId,
-    string SourceKind,
-    DateOnly? StartDate,
-    DateOnly? EndDate,
-    int Version,
-    string Status,
-    DateTime ExpiresAt,
-    long AccountImportVersion,
-    string StatementFingerprint,
-    string SummaryHash,
-    int TotalRows,
-    int ImportedCount,
-    int SuppressedCount,
-    int SkippedCount,
-    int InvalidUnskippedCount,
-    int WithinFilePendingCount,
-    int PossibleDuplicateCount,
-    int ExactOverrideCount,
-    bool StatementOverride,
-    int StatementOverrideCount,
-    long PayloadBytes,
-    DateTime CreatedAt,
-    DateTime UpdatedAt);
+public sealed record ImportReviewSummaryRecord(Guid Id,
+                                               Guid FinancialAccountId,
+                                               string SourceKind,
+                                               DateOnly? StartDate,
+                                               DateOnly? EndDate,
+                                               int Version,
+                                               string Status,
+                                               DateTime ExpiresAt,
+                                               long AccountImportVersion,
+                                               string StatementFingerprint,
+                                               string SummaryHash,
+                                               int TotalRows,
+                                               int ImportedCount,
+                                               int SuppressedCount,
+                                               int SkippedCount,
+                                               int InvalidUnskippedCount,
+                                               int WithinFilePendingCount,
+                                               int PossibleDuplicateCount,
+                                               int ExactOverrideCount,
+                                               bool StatementOverride,
+                                               int StatementOverrideCount,
+                                               long PayloadBytes,
+                                               DateTime CreatedAt,
+                                               DateTime UpdatedAt);
 
-public sealed record ImportReviewPage(
-    IReadOnlyList<ImportReviewRowRecord> Rows,
-    int Total,
-    int Page,
-    int PageSize);
+public sealed record ImportReviewPage(IReadOnlyList<ImportReviewRowRecord> Rows,
+                                      int Total,
+                                      int Page,
+                                      int PageSize);
 
 public sealed record ImportReviewDetail(
     ImportReviewSummaryRecord Summary,
     ImportReviewPage Page);
 
-public sealed record ImportOpenReviewSummary(
-    Guid Id,
-    Guid FinancialAccountId,
-    string SourceKind,
-    DateOnly? StartDate,
-    DateOnly? EndDate,
-    int Version,
-    DateTime ExpiresAt,
-    int TotalRows,
-    int ImportedCount,
-    int SuppressedCount,
-    int SkippedCount,
-    DateTime CreatedAt);
+public sealed record ImportOpenReviewSummary(Guid Id,
+                                             Guid FinancialAccountId,
+                                             string SourceKind,
+                                             DateOnly? StartDate,
+                                             DateOnly? EndDate,
+                                             int Version,
+                                             DateTime ExpiresAt,
+                                             int TotalRows,
+                                             int ImportedCount,
+                                             int SuppressedCount,
+                                             int SkippedCount,
+                                             DateTime CreatedAt);
 
-public sealed record ImportStatementSummary(
-    Guid Id,
-    Guid FinancialAccountId,
-    string SourceType,
-    string StatementLabel,
-    DateOnly StartDate,
-    DateOnly EndDate,
-    int TotalRows,
-    int ImportedCount,
-    int SuppressedCount,
-    int SkippedCount,
-    int PossibleDuplicateCount,
-    int ExactOverrideCount,
-    int StatementOverrideCount,
-    bool IsHidden,
-    int Version,
-    long LiveHiddenCount,
-    DateTime CreatedAt,
-    DateTime UpdatedAt);
+public sealed record ImportStatementSummary(Guid Id,
+                                            Guid FinancialAccountId,
+                                            string SourceType,
+                                            string StatementLabel,
+                                            DateOnly StartDate,
+                                            DateOnly EndDate,
+                                            int TotalRows,
+                                            int ImportedCount,
+                                            int SuppressedCount,
+                                            int SkippedCount,
+                                            int PossibleDuplicateCount,
+                                            int ExactOverrideCount,
+                                            int StatementOverrideCount,
+                                            bool IsHidden,
+                                            int Version,
+                                            long LiveHiddenCount,
+                                            DateTime CreatedAt,
+                                            DateTime UpdatedAt);
 
 public sealed record ImportTagRecord(Guid Id, string DisplayName);
 
-public sealed record ImportStatementRowRecord(
-    Guid Id,
-    int SourceRowNumber,
-    int? SourcePage,
-    DateOnly TransactionDate,
-    string Description,
-    long AmountCents,
-    bool IsHiddenByUser,
-    bool EffectiveHidden,
-    IReadOnlyList<ImportTagRecord> Tags);
+public sealed record ImportStatementRowRecord(Guid Id,
+                                              int SourceRowNumber,
+                                              int? SourcePage,
+                                              DateOnly TransactionDate,
+                                              string Description,
+                                              long AmountCents,
+                                              bool IsHiddenByUser,
+                                              bool EffectiveHidden,
+                                              IReadOnlyList<ImportTagRecord> Tags);
 
-public sealed record ImportStatementDetail(
-    ImportStatementSummary Summary,
-    IReadOnlyList<ImportStatementRowRecord> Rows,
-    int Page,
-    int PageSize,
-    long ExpectedTransactionCount);
+public sealed record ImportStatementDetail(ImportStatementSummary Summary,
+                                           IReadOnlyList<ImportStatementRowRecord> Rows,
+                                           int Page,
+                                           int PageSize,
+                                           long ExpectedTransactionCount);
 
 public sealed record ImportHistoryPage(
     IReadOnlyList<ImportStatementSummary> Items,
@@ -154,14 +145,13 @@ public sealed record ImportCommitResult(ImportStatementSummary Summary, bool Rep
 
 public sealed record ImportAbandonResult(bool Committed, ImportCommitResult? Commit);
 
-public sealed record ImportDecision(
-    Guid RowId,
-    bool? Skip,
-    bool? Override,
-    string? WithinFileState,
-    string? WithinFileGroup,
-    string? WithinFileAction,
-    Guid[]? SelectedTagIds);
+public sealed record ImportDecision(Guid RowId,
+                                    bool? Skip,
+                                    bool? Override,
+                                    string? WithinFileState,
+                                    string? WithinFileGroup,
+                                    string? WithinFileAction,
+                                    Guid[]? SelectedTagIds);
 
 public sealed class ImportStoreException(string error) : Exception(error)
 {
@@ -229,15 +219,14 @@ public sealed class StatementImportStore
         return await GetAccountAsync(connection, null, customerId, accountId, false, cancellationToken);
     }
 
-    public async Task<ImportReviewDetail> CreateReviewAsync(
-        Guid customerId,
-        Guid accountId,
-        StatementSourceKind sourceKind,
-        ParserConfig config,
-        DateOnly startDate,
-        DateOnly endDate,
-        ParsedStatement parsed,
-        CancellationToken cancellationToken = default)
+    public async Task<ImportReviewDetail> CreateReviewAsync(Guid customerId,
+                                                            Guid accountId,
+                                                            StatementSourceKind sourceKind,
+                                                            ParserConfig config,
+                                                            DateOnly startDate,
+                                                            DateOnly endDate,
+                                                            ParsedStatement parsed,
+                                                            CancellationToken cancellationToken = default)
     {
         if (parsed.Rows.Count == 0)
         {
@@ -380,12 +369,11 @@ public sealed class StatementImportStore
         return items;
     }
 
-    public async Task<ImportReviewDetail> GetReviewAsync(
-        Guid customerId,
-        Guid reviewId,
-        int page,
-        int pageSize,
-        CancellationToken cancellationToken = default)
+    public async Task<ImportReviewDetail> GetReviewAsync(Guid customerId,
+                                                         Guid reviewId,
+                                                         int page,
+                                                         int pageSize,
+                                                         CancellationToken cancellationToken = default)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, ImportLimits.MaxPageSize);
@@ -410,13 +398,12 @@ public sealed class StatementImportStore
         return new ImportReviewDetail(summary, new ImportReviewPage(rows, total, page, pageSize));
     }
 
-    public async Task<ImportReviewSummaryRecord> PatchReviewAsync(
-        Guid customerId,
-        Guid reviewId,
-        int expectedVersion,
-        IReadOnlyList<ImportDecision> decisions,
-        bool? statementOverride,
-        CancellationToken cancellationToken = default)
+    public async Task<ImportReviewSummaryRecord> PatchReviewAsync(Guid customerId,
+                                                                  Guid reviewId,
+                                                                  int expectedVersion,
+                                                                  IReadOnlyList<ImportDecision> decisions,
+                                                                  bool? statementOverride,
+                                                                  CancellationToken cancellationToken = default)
     {
         if (decisions.Count > ImportLimits.MaxReviewDecisionsPerRequest)
         {
@@ -635,11 +622,10 @@ public sealed class StatementImportStore
         };
     }
 
-    public async Task<ImportReviewSummaryRecord> RefreshReviewAsync(
-        Guid customerId,
-        Guid reviewId,
-        int expectedVersion,
-        CancellationToken cancellationToken = default)
+    public async Task<ImportReviewSummaryRecord> RefreshReviewAsync(Guid customerId,
+                                                                    Guid reviewId,
+                                                                    int expectedVersion,
+                                                                    CancellationToken cancellationToken = default)
     {
         await using var connection = await _db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -744,11 +730,10 @@ public sealed class StatementImportStore
         };
     }
 
-    public async Task<ImportAbandonResult> AbandonReviewAsync(
-        Guid customerId,
-        Guid reviewId,
-        int expectedVersion,
-        CancellationToken cancellationToken = default)
+    public async Task<ImportAbandonResult> AbandonReviewAsync(Guid customerId,
+                                                              Guid reviewId,
+                                                              int expectedVersion,
+                                                              CancellationToken cancellationToken = default)
     {
         await using var connection = await _db.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -887,14 +872,13 @@ public sealed class StatementImportStore
 
     // --- Duplicate snapshot ------------------------------------------------
 
-    private async Task<DuplicateSnapshot> ComputeDuplicateSnapshotAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid accountId,
-        IReadOnlyList<ParsedStatementRow> parsedRows,
-        IReadOnlyDictionary<Guid, RowDecision>? decisions,
-        CancellationToken cancellationToken)
+    private async Task<DuplicateSnapshot> ComputeDuplicateSnapshotAsync(NpgsqlConnection connection,
+                                                                        NpgsqlTransaction transaction,
+                                                                        Guid customerId,
+                                                                        Guid accountId,
+                                                                        IReadOnlyList<ParsedStatementRow> parsedRows,
+                                                                        IReadOnlyDictionary<Guid, RowDecision>? decisions,
+                                                                        CancellationToken cancellationToken)
     {
         var incoming = parsedRows
             .Select((row, index) => ToIncoming(row, index))
@@ -977,11 +961,10 @@ public sealed class StatementImportStore
         // treated as a new occurrence.
         var canonicalByKey = new Dictionary<string, (DateOnly Date, long Cents, string Description)>(
             StringComparer.Ordinal);
-        void CheckCanonical(
-            string key,
-            DateOnly date,
-            long cents,
-            string description)
+        void CheckCanonical(string key,
+                            DateOnly date,
+                            long cents,
+                            string description)
         {
             if (canonicalByKey.TryGetValue(key, out var first))
             {
@@ -1401,13 +1384,12 @@ public sealed class StatementImportStore
 
     // --- Persistence helpers ------------------------------------------------
 
-    private static async Task<ImportAccountRecord?> GetAccountAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction? transaction,
-        Guid customerId,
-        Guid accountId,
-        bool forUpdate,
-        CancellationToken cancellationToken)
+    private static async Task<ImportAccountRecord?> GetAccountAsync(NpgsqlConnection connection,
+                                                                    NpgsqlTransaction? transaction,
+                                                                    Guid customerId,
+                                                                    Guid accountId,
+                                                                    bool forUpdate,
+                                                                    CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1430,22 +1412,20 @@ public sealed class StatementImportStore
             : null;
     }
 
-    private static async Task<ImportAccountRecord> LockAccountAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid accountId,
-        CancellationToken cancellationToken)
+    private static async Task<ImportAccountRecord> LockAccountAsync(NpgsqlConnection connection,
+                                                                    NpgsqlTransaction transaction,
+                                                                    Guid customerId,
+                                                                    Guid accountId,
+                                                                    CancellationToken cancellationToken)
     {
         var account = await GetAccountAsync(connection, transaction, customerId, accountId, true, cancellationToken);
         return account ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
     }
 
-    private static async Task LockQuotaAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        CancellationToken cancellationToken)
+    private static async Task LockQuotaAsync(NpgsqlConnection connection,
+                                             NpgsqlTransaction transaction,
+                                             Guid customerId,
+                                             CancellationToken cancellationToken)
     {
         await using (var insert = connection.CreateCommand())
         {
@@ -1463,12 +1443,11 @@ public sealed class StatementImportStore
         await command.ExecuteScalarAsync(cancellationToken);
     }
 
-    private static async Task<long> EnforceQuotaAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        long payloadBytes,
-        CancellationToken cancellationToken)
+    private static async Task<long> EnforceQuotaAsync(NpgsqlConnection connection,
+                                                      NpgsqlTransaction transaction,
+                                                      Guid customerId,
+                                                      long payloadBytes,
+                                                      CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1490,12 +1469,11 @@ public sealed class StatementImportStore
         return used;
     }
 
-    private static async Task<Guid?> ReviewAccountIdAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid reviewId,
-        CancellationToken cancellationToken)
+    private static async Task<Guid?> ReviewAccountIdAsync(NpgsqlConnection connection,
+                                                          NpgsqlTransaction transaction,
+                                                          Guid customerId,
+                                                          Guid reviewId,
+                                                          CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1506,13 +1484,12 @@ public sealed class StatementImportStore
         return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
     }
 
-    private static async Task<ImportReviewSummaryRecord?> ReadReviewHeaderAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction? transaction,
-        Guid customerId,
-        Guid reviewId,
-        bool forUpdate,
-        CancellationToken cancellationToken)
+    private static async Task<ImportReviewSummaryRecord?> ReadReviewHeaderAsync(NpgsqlConnection connection,
+                                                                                NpgsqlTransaction? transaction,
+                                                                                Guid customerId,
+                                                                                Guid reviewId,
+                                                                                bool forUpdate,
+                                                                                CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1565,13 +1542,12 @@ public sealed class StatementImportStore
             reader.GetFieldValue<DateTime>(23));
     }
 
-    private static async Task<IReadOnlyList<ImportReviewRowRecord>> ReadReviewRowsAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction? transaction,
-        Guid reviewId,
-        int page,
-        int pageSize,
-        CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<ImportReviewRowRecord>> ReadReviewRowsAsync(NpgsqlConnection connection,
+                                                                                        NpgsqlTransaction? transaction,
+                                                                                        Guid reviewId,
+                                                                                        int page,
+                                                                                        int pageSize,
+                                                                                        CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1626,11 +1602,10 @@ public sealed class StatementImportStore
         return rows;
     }
 
-    private static async Task<int> CountReviewRowsAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction? transaction,
-        Guid reviewId,
-        CancellationToken cancellationToken)
+    private static async Task<int> CountReviewRowsAsync(NpgsqlConnection connection,
+                                                        NpgsqlTransaction? transaction,
+                                                        Guid reviewId,
+                                                        CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1639,25 +1614,24 @@ public sealed class StatementImportStore
         return (int)(long)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
-    private static async Task InsertReviewAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid reviewId,
-        Guid customerId,
-        Guid accountId,
-        string sourceKind,
-        ParserConfig config,
-        DateOnly startDate,
-        DateOnly endDate,
-        DateTime now,
-        DateTime expiresAt,
-        long accountImportVersion,
-        string statementFingerprint,
-        string summaryHash,
-        RowCounts counts,
-        long payloadBytes,
-        IReadOnlyList<ImportReviewRowRecord> rows,
-        CancellationToken cancellationToken)
+    private static async Task InsertReviewAsync(NpgsqlConnection connection,
+                                                NpgsqlTransaction transaction,
+                                                Guid reviewId,
+                                                Guid customerId,
+                                                Guid accountId,
+                                                string sourceKind,
+                                                ParserConfig config,
+                                                DateOnly startDate,
+                                                DateOnly endDate,
+                                                DateTime now,
+                                                DateTime expiresAt,
+                                                long accountImportVersion,
+                                                string statementFingerprint,
+                                                string summaryHash,
+                                                RowCounts counts,
+                                                long payloadBytes,
+                                                IReadOnlyList<ImportReviewRowRecord> rows,
+                                                CancellationToken cancellationToken)
     {
         await using (var insert = connection.CreateCommand())
         {
@@ -1797,14 +1771,13 @@ public sealed class StatementImportStore
         }
     }
 
-    private static async Task SetWithinFileGroupAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid reviewId,
-        string group,
-        string state,
-        bool skip,
-        CancellationToken cancellationToken)
+    private static async Task SetWithinFileGroupAsync(NpgsqlConnection connection,
+                                                      NpgsqlTransaction transaction,
+                                                      Guid reviewId,
+                                                      string group,
+                                                      string state,
+                                                      bool skip,
+                                                      CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1821,15 +1794,14 @@ public sealed class StatementImportStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static async Task UpdateRowDecisionsAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid rowId,
-        bool skip,
-        bool overrideValue,
-        string withinFileState,
-        Guid[] selectedTagIds,
-        CancellationToken cancellationToken)
+    private static async Task UpdateRowDecisionsAsync(NpgsqlConnection connection,
+                                                      NpgsqlTransaction transaction,
+                                                      Guid rowId,
+                                                      bool skip,
+                                                      bool overrideValue,
+                                                      string withinFileState,
+                                                      Guid[] selectedTagIds,
+                                                      CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1851,11 +1823,10 @@ public sealed class StatementImportStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static async Task UpdateDuplicateSnapshotAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        ImportReviewRowRecord row,
-        CancellationToken cancellationToken)
+    private static async Task UpdateDuplicateSnapshotAsync(NpgsqlConnection connection,
+                                                           NpgsqlTransaction transaction,
+                                                           ImportReviewRowRecord row,
+                                                           CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1895,12 +1866,11 @@ public sealed class StatementImportStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static async Task<(long OpenReviews, long UsedPayload)> QuotaUsageExcludingAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid reviewId,
-        CancellationToken cancellationToken)
+    private static async Task<(long OpenReviews, long UsedPayload)> QuotaUsageExcludingAsync(NpgsqlConnection connection,
+                                                                                             NpgsqlTransaction transaction,
+                                                                                             Guid customerId,
+                                                                                             Guid reviewId,
+                                                                                             CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1919,16 +1889,15 @@ public sealed class StatementImportStore
         return (reader.GetInt64(0), reader.GetInt64(1));
     }
 
-    private static async Task UpdateReviewSummaryAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid reviewId,
-        int version,
-        RowCounts counts,
-        string summaryHash,
-        bool statementOverride,
-        long payloadBytes,
-        CancellationToken cancellationToken)
+    private static async Task UpdateReviewSummaryAsync(NpgsqlConnection connection,
+                                                       NpgsqlTransaction transaction,
+                                                       Guid reviewId,
+                                                       int version,
+                                                       RowCounts counts,
+                                                       string summaryHash,
+                                                       bool statementOverride,
+                                                       long payloadBytes,
+                                                       CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1963,12 +1932,11 @@ public sealed class StatementImportStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static async Task UpdateReviewAccountVersionAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid reviewId,
-        long accountImportVersion,
-        CancellationToken cancellationToken)
+    private static async Task UpdateReviewAccountVersionAsync(NpgsqlConnection connection,
+                                                              NpgsqlTransaction transaction,
+                                                              Guid reviewId,
+                                                              long accountImportVersion,
+                                                              CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -1979,14 +1947,13 @@ public sealed class StatementImportStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static async Task<IReadOnlyList<ExistingRow>> QueryExistingAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid accountId,
-        string predicate,
-        Action<NpgsqlCommand> configure,
-        CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<ExistingRow>> QueryExistingAsync(NpgsqlConnection connection,
+                                                                             NpgsqlTransaction transaction,
+                                                                             Guid customerId,
+                                                                             Guid accountId,
+                                                                             string predicate,
+                                                                             Action<NpgsqlCommand> configure,
+                                                                             CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -2077,12 +2044,11 @@ public sealed class StatementImportStore
         return new RowCounts(total, imported, suppressed, skipped, possibleDuplicates, exactOverrides);
     }
 
-    private static string ComputeSummaryHash(
-        Guid reviewId,
-        int version,
-        IReadOnlyList<ImportReviewRowRecord> rows,
-        RowCounts counts,
-        bool statementOverride)
+    private static string ComputeSummaryHash(Guid reviewId,
+                                             int version,
+                                             IReadOnlyList<ImportReviewRowRecord> rows,
+                                             RowCounts counts,
+                                             bool statementOverride)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         void Add(string value)
@@ -2140,12 +2106,11 @@ public sealed class StatementImportStore
 
     // --- Commit and terminal lifecycle -------------------------------------
 
-    public async Task<ImportCommitResult> CommitReviewAsync(
-        Guid customerId,
-        Guid reviewId,
-        int expectedVersion,
-        string confirmedSummaryHash,
-        CancellationToken cancellationToken = default)
+    public async Task<ImportCommitResult> CommitReviewAsync(Guid customerId,
+                                                            Guid reviewId,
+                                                            int expectedVersion,
+                                                            string confirmedSummaryHash,
+                                                            CancellationToken cancellationToken = default)
     {
         // A denied commit must not seed finance data. Prove the operation
         // belongs to this customer before category initialization; the normal
@@ -2531,11 +2496,10 @@ public sealed class StatementImportStore
         return new ImportCommitResult(summary, false);
     }
 
-    private static async Task ThrowIfCommitExpiredAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        DateTime expiresAt,
-        CancellationToken cancellationToken)
+    private static async Task ThrowIfCommitExpiredAsync(NpgsqlConnection connection,
+                                                        NpgsqlTransaction transaction,
+                                                        DateTime expiresAt,
+                                                        CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -2547,13 +2511,12 @@ public sealed class StatementImportStore
         }
     }
 
-    private async Task<ImportCommitResult> ReplayReceiptAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid reviewId,
-        string requestDigest,
-        CancellationToken cancellationToken)
+    private async Task<ImportCommitResult> ReplayReceiptAsync(NpgsqlConnection connection,
+                                                              NpgsqlTransaction transaction,
+                                                              Guid customerId,
+                                                              Guid reviewId,
+                                                              string requestDigest,
+                                                              CancellationToken cancellationToken)
     {
         var receipt = await ReadReceiptAsync(
             connection, transaction, customerId, reviewId, true, cancellationToken)
@@ -2572,13 +2535,12 @@ public sealed class StatementImportStore
         return new ImportCommitResult(summary, true);
     }
 
-    public async Task<ImportHistoryPage> ListHistoryAsync(
-        Guid customerId,
-        Guid? accountId,
-        string? state,
-        string? cursor,
-        int limit,
-        CancellationToken cancellationToken = default)
+    public async Task<ImportHistoryPage> ListHistoryAsync(Guid customerId,
+                                                          Guid? accountId,
+                                                          string? state,
+                                                          string? cursor,
+                                                          int limit,
+                                                          CancellationToken cancellationToken = default)
     {
         limit = Math.Clamp(limit, 1, 100);
         state = state is "visible" or "hidden" ? state : "all";
@@ -2637,12 +2599,11 @@ public sealed class StatementImportStore
             items, EncodeCursor(items[^1].CreatedAt, items[^1].Id));
     }
 
-    public async Task<ImportStatementDetail> GetStatementAsync(
-        Guid customerId,
-        Guid statementId,
-        int page,
-        int pageSize,
-        CancellationToken cancellationToken = default)
+    public async Task<ImportStatementDetail> GetStatementAsync(Guid customerId,
+                                                               Guid statementId,
+                                                               int page,
+                                                               int pageSize,
+                                                               CancellationToken cancellationToken = default)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, ImportLimits.MaxPageSize);
@@ -2666,14 +2627,13 @@ public sealed class StatementImportStore
         }
     }
 
-    public async Task<ImportStatementSummary> SetStatementVisibilityAsync(
-        Guid customerId,
-        Guid statementId,
-        bool hidden,
-        int expectedVersion,
-        long expectedTransactionCount,
-        bool confirm,
-        CancellationToken cancellationToken = default)
+    public async Task<ImportStatementSummary> SetStatementVisibilityAsync(Guid customerId,
+                                                                          Guid statementId,
+                                                                          bool hidden,
+                                                                          int expectedVersion,
+                                                                          long expectedTransactionCount,
+                                                                          bool confirm,
+                                                                          CancellationToken cancellationToken = default)
     {
         if (!confirm)
         {
@@ -2744,13 +2704,12 @@ public sealed class StatementImportStore
         return updated;
     }
 
-    public async Task<ImportDeleteResult> DeleteStatementAsync(
-        Guid customerId,
-        Guid statementId,
-        int expectedVersion,
-        long expectedTransactionCount,
-        bool confirm,
-        CancellationToken cancellationToken = default)
+    public async Task<ImportDeleteResult> DeleteStatementAsync(Guid customerId,
+                                                               Guid statementId,
+                                                               int expectedVersion,
+                                                               long expectedTransactionCount,
+                                                               bool confirm,
+                                                               CancellationToken cancellationToken = default)
     {
         if (!confirm)
         {
@@ -2991,12 +2950,11 @@ public sealed class StatementImportStore
         return (bool)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
-    private static async Task<Guid?> ReceiptAccountIdAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid operationId,
-        CancellationToken cancellationToken)
+    private static async Task<Guid?> ReceiptAccountIdAsync(NpgsqlConnection connection,
+                                                           NpgsqlTransaction transaction,
+                                                           Guid customerId,
+                                                           Guid operationId,
+                                                           CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3009,13 +2967,12 @@ public sealed class StatementImportStore
         return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
     }
 
-    private static async Task<ReceiptRecord?> ReadReceiptAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid operationId,
-        bool forUpdate,
-        CancellationToken cancellationToken)
+    private static async Task<ReceiptRecord?> ReadReceiptAsync(NpgsqlConnection connection,
+                                                               NpgsqlTransaction transaction,
+                                                               Guid customerId,
+                                                               Guid operationId,
+                                                               bool forUpdate,
+                                                               CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3044,12 +3001,11 @@ public sealed class StatementImportStore
             : null;
     }
 
-    private static async Task<ReceiptRecord?> ReadDeletionReceiptAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid statementId,
-        CancellationToken cancellationToken)
+    private static async Task<ReceiptRecord?> ReadDeletionReceiptAsync(NpgsqlConnection connection,
+                                                                       NpgsqlTransaction transaction,
+                                                                       Guid customerId,
+                                                                       Guid statementId,
+                                                                       CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3073,12 +3029,11 @@ public sealed class StatementImportStore
             : null;
     }
 
-    private static async Task<ReceiptRecord?> ReadReceiptByStatementAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid statementId,
-        CancellationToken cancellationToken)
+    private static async Task<ReceiptRecord?> ReadReceiptByStatementAsync(NpgsqlConnection connection,
+                                                                          NpgsqlTransaction transaction,
+                                                                          Guid customerId,
+                                                                          Guid statementId,
+                                                                          CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3103,12 +3058,11 @@ public sealed class StatementImportStore
             : null;
     }
 
-    private static async Task<Guid?> StatementAccountIdAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid statementId,
-        CancellationToken cancellationToken)
+    private static async Task<Guid?> StatementAccountIdAsync(NpgsqlConnection connection,
+                                                             NpgsqlTransaction transaction,
+                                                             Guid customerId,
+                                                             Guid statementId,
+                                                             CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3119,12 +3073,11 @@ public sealed class StatementImportStore
         return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
     }
 
-    private static async Task<ImportStatementSummary?> LockStatementAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid statementId,
-        CancellationToken cancellationToken)
+    private static async Task<ImportStatementSummary?> LockStatementAsync(NpgsqlConnection connection,
+                                                                          NpgsqlTransaction transaction,
+                                                                          Guid customerId,
+                                                                          Guid statementId,
+                                                                          CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3149,12 +3102,11 @@ public sealed class StatementImportStore
         return await reader.ReadAsync(cancellationToken) ? MapStatementSummary(reader) : null;
     }
 
-    private static async Task<long> StatementTransactionCountAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid statementId,
-        CancellationToken cancellationToken)
+    private static async Task<long> StatementTransactionCountAsync(NpgsqlConnection connection,
+                                                                   NpgsqlTransaction transaction,
+                                                                   Guid customerId,
+                                                                   Guid statementId,
+                                                                   CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3165,12 +3117,11 @@ public sealed class StatementImportStore
         return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
-    private static async Task<ImportStatementSummary?> ReadStatementSummaryAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction? transaction,
-        Guid customerId,
-        Guid statementId,
-        CancellationToken cancellationToken)
+    private static async Task<ImportStatementSummary?> ReadStatementSummaryAsync(NpgsqlConnection connection,
+                                                                                 NpgsqlTransaction? transaction,
+                                                                                 Guid customerId,
+                                                                                 Guid statementId,
+                                                                                 CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3214,14 +3165,13 @@ public sealed class StatementImportStore
         reader.GetFieldValue<DateTime>(16),
         reader.GetFieldValue<DateTime>(17));
 
-    private static async Task<IReadOnlyList<ImportStatementRowRecord>> ReadStatementRowsAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction? transaction,
-        Guid customerId,
-        Guid statementId,
-        int page,
-        int pageSize,
-        CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<ImportStatementRowRecord>> ReadStatementRowsAsync(NpgsqlConnection connection,
+                                                                                              NpgsqlTransaction? transaction,
+                                                                                              Guid customerId,
+                                                                                              Guid statementId,
+                                                                                              int page,
+                                                                                              int pageSize,
+                                                                                              CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3299,11 +3249,10 @@ public sealed class StatementImportStore
             tags.GetValueOrDefault(row.Id) ?? [])).ToArray();
     }
 
-    private static async Task<IReadOnlyList<(Guid Id, string[] Tokens)>> LoadActiveTagsAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<(Guid Id, string[] Tokens)>> LoadActiveTagsAsync(NpgsqlConnection connection,
+                                                                                             NpgsqlTransaction transaction,
+                                                                                             Guid customerId,
+                                                                                             CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3325,11 +3274,10 @@ public sealed class StatementImportStore
         return tags;
     }
 
-    private static async Task<Guid?> FindSystemCategoryAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        CancellationToken cancellationToken)
+    private static async Task<Guid?> FindSystemCategoryAsync(NpgsqlConnection connection,
+                                                             NpgsqlTransaction transaction,
+                                                             Guid customerId,
+                                                             CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3339,12 +3287,11 @@ public sealed class StatementImportStore
         return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
     }
 
-    private static async Task<bool> TagsAvailableAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid[] tagIds,
-        CancellationToken cancellationToken)
+    private static async Task<bool> TagsAvailableAsync(NpgsqlConnection connection,
+                                                       NpgsqlTransaction transaction,
+                                                       Guid customerId,
+                                                       Guid[] tagIds,
+                                                       CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3365,13 +3312,12 @@ public sealed class StatementImportStore
         return available == tagIds.Length;
     }
 
-    private static async Task<IReadOnlyList<Guid>> FingerprintMatchesAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid accountId,
-        string fingerprint,
-        CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<Guid>> FingerprintMatchesAsync(NpgsqlConnection connection,
+                                                                           NpgsqlTransaction transaction,
+                                                                           Guid customerId,
+                                                                           Guid accountId,
+                                                                           string fingerprint,
+                                                                           CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3393,13 +3339,12 @@ public sealed class StatementImportStore
         return ids;
     }
 
-    private static async Task<int> NextFingerprintOccurrenceAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid accountId,
-        string fingerprint,
-        CancellationToken cancellationToken)
+    private static async Task<int> NextFingerprintOccurrenceAsync(NpgsqlConnection connection,
+                                                                  NpgsqlTransaction transaction,
+                                                                  Guid customerId,
+                                                                  Guid accountId,
+                                                                  string fingerprint,
+                                                                  CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3415,13 +3360,12 @@ public sealed class StatementImportStore
         return (int)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
-    private static async Task<Dictionary<string, int>> MaxOccurrencesAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid accountId,
-        string[] identityKeys,
-        CancellationToken cancellationToken)
+    private static async Task<Dictionary<string, int>> MaxOccurrencesAsync(NpgsqlConnection connection,
+                                                                           NpgsqlTransaction transaction,
+                                                                           Guid customerId,
+                                                                           Guid accountId,
+                                                                           string[] identityKeys,
+                                                                           CancellationToken cancellationToken)
     {
         var result = new Dictionary<string, int>(StringComparer.Ordinal);
         if (identityKeys.Length == 0)
@@ -3485,51 +3429,47 @@ public sealed class StatementImportStore
         }
     }
 
-    private sealed record RowCounts(
-        int TotalRows,
-        int Imported,
-        int Suppressed,
-        int Skipped,
-        int PossibleDuplicates,
-        int ExactOverrides);
+    private sealed record RowCounts(int TotalRows,
+                                    int Imported,
+                                    int Suppressed,
+                                    int Skipped,
+                                    int PossibleDuplicates,
+                                    int ExactOverrides);
 
     private sealed record DuplicateSnapshot(IReadOnlyList<ImportReviewRowRecord> Rows);
 
     private sealed record RowDecision(bool Skip, bool Override);
 
-    private sealed record IncomingRow(
-        int Index,
-        Guid RowId,
-        int SourceRowNumber,
-        DateOnly Date,
-        long Cents,
-        string NormalizedDescription,
-        string Description,
-        string IdentityKey,
-        string? Namespace,
-        string? Value);
+    private sealed record IncomingRow(int Index,
+                                      Guid RowId,
+                                      int SourceRowNumber,
+                                      DateOnly Date,
+                                      long Cents,
+                                      string NormalizedDescription,
+                                      string Description,
+                                      string IdentityKey,
+                                      string? Namespace,
+                                      string? Value);
 
-    private sealed record ExistingRow(
-        Guid Id,
-        string IdentityKey,
-        int OccurrenceIndex,
-        DateOnly Date,
-        long Cents,
-        string NormalizedDescription,
-        string Description,
-        string? Namespace,
-        string? Value,
-        Guid StatementImportId);
+    private sealed record ExistingRow(Guid Id,
+                                      string IdentityKey,
+                                      int OccurrenceIndex,
+                                      DateOnly Date,
+                                      long Cents,
+                                      string NormalizedDescription,
+                                      string Description,
+                                      string? Namespace,
+                                      string? Value,
+                                      Guid StatementImportId);
 
-    private sealed record Candidate(
-        string CandidateId,
-        string Source,
-        string? ImportId,
-        DateOnly Date,
-        long Cents,
-        string Description,
-        double Similarity,
-        string[] Reasons);
+    private sealed record Candidate(string CandidateId,
+                                    string Source,
+                                    string? ImportId,
+                                    DateOnly Date,
+                                    long Cents,
+                                    string Description,
+                                    double Similarity,
+                                    string[] Reasons);
 
     private sealed class MutableSnapshot(ParsedStatementRow row)
     {
@@ -3544,15 +3484,14 @@ public sealed class StatementImportStore
         public string WithinFileState { get; set; } = "none";
     }
 
-    private sealed record ReceiptRecord(
-        Guid Id,
-        Guid CustomerId,
-        Guid OperationId,
-        Guid FinancialAccountId,
-        string RequestDigest,
-        string State,
-        Guid? StatementImportId,
-        string ResultJson,
-        string? DeletionDigest,
-        long? DeletionExpectedCount);
+    private sealed record ReceiptRecord(Guid Id,
+                                        Guid CustomerId,
+                                        Guid OperationId,
+                                        Guid FinancialAccountId,
+                                        string RequestDigest,
+                                        string State,
+                                        Guid? StatementImportId,
+                                        string ResultJson,
+                                        string? DeletionDigest,
+                                        long? DeletionExpectedCount);
 }

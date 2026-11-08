@@ -146,12 +146,11 @@ public static class StatementDates
         return true;
     }
 
-    public static bool TryParseTwoDigitYearWithFormat(
-        string value,
-        string format,
-        out int day,
-        out int month,
-        out int year2)
+    public static bool TryParseTwoDigitYearWithFormat(string value,
+                                                      string format,
+                                                      out int day,
+                                                      out int month,
+                                                      out int year2)
     {
         day = 0;
         month = 0;
@@ -167,11 +166,10 @@ public static class StatementDates
         return true;
     }
 
-    public static bool TryParseTwoDigitYear(
-        string value,
-        out int day,
-        out int month,
-        out int year2)
+    public static bool TryParseTwoDigitYear(string value,
+                                            out int day,
+                                            out int month,
+                                            out int year2)
     {
         day = 0;
         month = 0;
@@ -213,13 +211,12 @@ public static class StatementDates
     /// Resolves a two-digit year only when exactly one century fits the confirmed
     /// statement period, or when the customer supplied an explicit century.
     /// </summary>
-    public static (DateOnly? Date, bool CenturyRequired) Resolve(
-        int day,
-        int month,
-        int year2,
-        DateOnly? start,
-        DateOnly? end,
-        int? century)
+    public static (DateOnly? Date, bool CenturyRequired) Resolve(int day,
+                                                                 int month,
+                                                                 int year2,
+                                                                 DateOnly? start,
+                                                                 DateOnly? end,
+                                                                 int? century)
     {
         if (start is null || end is null)
         {
@@ -314,13 +311,12 @@ public static class StatementAmounts
         return true;
     }
 
-    public static bool TryParseMagnitude(
-        string? raw,
-        string decimalSeparator,
-        string thousandsSeparator,
-        out long cents,
-        out bool hasPositiveSign,
-        out bool hasNegativeSign)
+    public static bool TryParseMagnitude(string? raw,
+                                         string decimalSeparator,
+                                         string thousandsSeparator,
+                                         out long cents,
+                                         out bool hasPositiveSign,
+                                         out bool hasNegativeSign)
     {
         cents = 0;
         hasPositiveSign = false;

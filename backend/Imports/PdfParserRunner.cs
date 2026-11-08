@@ -222,11 +222,10 @@ public sealed class PdfParserRunner : IDisposable
             TaskScheduler.Default);
     }
 
-    private static async Task WriteInputAsync(
-        Stream stdin,
-        byte[] header,
-        byte[] bytes,
-        CancellationToken cancellationToken)
+    private static async Task WriteInputAsync(Stream stdin,
+                                              byte[] header,
+                                              byte[] bytes,
+                                              CancellationToken cancellationToken)
     {
         var length = new byte[4];
         BinaryPrimitives.WriteInt32BigEndian(length, header.Length);

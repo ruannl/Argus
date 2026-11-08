@@ -457,11 +457,10 @@ public sealed class Store(Db db)
     /// Applies a provider-agnostic billing event. Unknown customers are a no-op
     /// success: webhook deliveries are retried, and existence must not leak.
     /// </summary>
-    public async Task ApplyBillingEventAsync(
-        string eventType,
-        Guid customerId,
-        DateTime? nextBillingAt,
-        CancellationToken cancellationToken = default)
+    public async Task ApplyBillingEventAsync(string eventType,
+                                             Guid customerId,
+                                             DateTime? nextBillingAt,
+                                             CancellationToken cancellationToken = default)
     {
         string? sql = eventType switch
         {
@@ -496,11 +495,10 @@ public sealed class Store(Db db)
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static void AddTokenParameters(
-        NpgsqlCommand command,
-        Guid customerId,
-        string token,
-        TimeSpan ttl)
+    private static void AddTokenParameters(NpgsqlCommand command,
+                                           Guid customerId,
+                                           string token,
+                                           TimeSpan ttl)
     {
         command.Parameters.AddWithValue("id", Guid.NewGuid());
         command.Parameters.AddWithValue("customer_id", customerId);

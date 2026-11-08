@@ -647,13 +647,12 @@ public sealed class TransactionQueryTests(KitFactory factory, ITestOutputHelper 
         output.WriteLine("P3-20K plan: {0}", string.Join(" | ", planLines.Take(12)));
     }
 
-    private async Task SeedPerformanceRowsAsync(
-        Guid customerId,
-        Guid accountId,
-        Guid statementId,
-        Guid categoryId,
-        int count,
-        int firstRow)
+    private async Task SeedPerformanceRowsAsync(Guid customerId,
+                                                Guid accountId,
+                                                Guid statementId,
+                                                Guid categoryId,
+                                                int count,
+                                                int firstRow)
     {
         await ExecuteSqlParamsAsync(
             """

@@ -97,11 +97,10 @@ public static class CsvStatementParsers
         }
     }
 
-    public static ParsedStatement ParseFnb(
-        byte[] rawBytes,
-        DateOnly? start,
-        DateOnly? end,
-        CancellationToken cancellationToken = default)
+    public static ParsedStatement ParseFnb(byte[] rawBytes,
+                                           DateOnly? start,
+                                           DateOnly? end,
+                                           CancellationToken cancellationToken = default)
     {
         var (csvBytes, format) = UnwrapFnbArchive(rawBytes, cancellationToken);
         var text = DecodeUtf8(csvBytes, cancellationToken);
@@ -268,22 +267,20 @@ public static class CsvStatementParsers
         }
     }
 
-    public static ParsedStatement ParseGeneric(
-        byte[] rawBytes,
-        ParserConfig config,
-        DateOnly? start,
-        DateOnly? end,
-        CancellationToken cancellationToken = default) =>
+    public static ParsedStatement ParseGeneric(byte[] rawBytes,
+                                               ParserConfig config,
+                                               DateOnly? start,
+                                               DateOnly? end,
+                                               CancellationToken cancellationToken = default) =>
         ParseGeneric(
             DecodeUtf8(rawBytes, cancellationToken), config, start, end, null, cancellationToken);
 
-    private static ParsedStatement ParseGeneric(
-        string text,
-        ParserConfig config,
-        DateOnly? start,
-        DateOnly? end,
-        IReadOnlyDictionary<string, string>? existingSuggestions,
-        CancellationToken cancellationToken)
+    private static ParsedStatement ParseGeneric(string text,
+                                                ParserConfig config,
+                                                DateOnly? start,
+                                                DateOnly? end,
+                                                IReadOnlyDictionary<string, string>? existingSuggestions,
+                                                CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var delimiter = ResolveDelimiter(config.Delimiter);
@@ -1050,11 +1047,10 @@ public static class CsvStatementParsers
         "yy/MM/dd",
     ];
 
-    private sealed record GenericCandidate(
-        char Delimiter,
-        IReadOnlyList<CsvRecord> Records,
-        int Score,
-        int CommonFieldCount);
+    private sealed record GenericCandidate(char Delimiter,
+                                           IReadOnlyList<CsvRecord> Records,
+                                           int Score,
+                                           int CommonFieldCount);
 
     private sealed record GenericDetection(
         ParserConfig Config,

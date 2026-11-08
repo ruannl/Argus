@@ -124,12 +124,11 @@ public static class JsonBody
     /// <c>display_name</c> (required string) and <c>institution</c> (optional
     /// string or null) are accepted; any other property is unknown.
     /// </summary>
-    public readonly record struct AccountPatchParseResult(
-        bool Parsed,
-        bool UnknownField,
-        string? DisplayName,
-        bool InstitutionProvided,
-        string? Institution);
+    public readonly record struct AccountPatchParseResult(bool Parsed,
+                                                          bool UnknownField,
+                                                          string? DisplayName,
+                                                          bool InstitutionProvided,
+                                                          string? Institution);
 
     public static async Task<AccountPatchParseResult> ReadAccountPatchAsync(
         HttpRequest request,

@@ -7,17 +7,15 @@ namespace argus.Server.Mail;
 
 public interface IMailer
 {
-    Task SendVerificationAsync(
-        string recipient,
-        string rawToken,
-        string frontendUrl,
-        CancellationToken cancellationToken = default);
+    Task SendVerificationAsync(string recipient,
+                               string rawToken,
+                               string frontendUrl,
+                               CancellationToken cancellationToken = default);
 
-    Task SendPasswordResetAsync(
-        string recipient,
-        string rawToken,
-        string frontendUrl,
-        CancellationToken cancellationToken = default);
+    Task SendPasswordResetAsync(string recipient,
+                                string rawToken,
+                                string frontendUrl,
+                                CancellationToken cancellationToken = default);
 
     Task SendAlreadyRegisteredAsync(
         string recipient,
@@ -42,11 +40,10 @@ public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> log
 
     private static readonly HttpClient _client = new() { Timeout = Timeout.InfiniteTimeSpan };
 
-    public Task SendVerificationAsync(
-        string recipient,
-        string rawToken,
-        string frontendUrl,
-        CancellationToken cancellationToken = default)
+    public Task SendVerificationAsync(string recipient,
+                                      string rawToken,
+                                      string frontendUrl,
+                                      CancellationToken cancellationToken = default)
     {
         var link = $"{frontendUrl.TrimEnd('/')}/verify?token={Uri.EscapeDataString(rawToken)}";
         return SendAsync(
@@ -57,11 +54,10 @@ public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> log
             cancellationToken);
     }
 
-    public Task SendPasswordResetAsync(
-        string recipient,
-        string rawToken,
-        string frontendUrl,
-        CancellationToken cancellationToken = default)
+    public Task SendPasswordResetAsync(string recipient,
+                                       string rawToken,
+                                       string frontendUrl,
+                                       CancellationToken cancellationToken = default)
     {
         var link = $"{frontendUrl.TrimEnd('/')}/reset?token={Uri.EscapeDataString(rawToken)}";
         return SendAsync(
@@ -96,12 +92,11 @@ public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> log
             cancellationToken);
     }
 
-    private async Task SendAsync(
-        string recipient,
-        string subject,
-        string text,
-        string html,
-        CancellationToken cancellationToken)
+    private async Task SendAsync(string recipient,
+                                 string subject,
+                                 string text,
+                                 string html,
+                                 CancellationToken cancellationToken)
     {
         var pad = Task.Delay(AntiEnumerationPadMs, CancellationToken.None);
         try

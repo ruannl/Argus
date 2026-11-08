@@ -13,21 +13,19 @@ public sealed class TransactionConcurrencyTests(KitFactory factory) : Transactio
 {
     private const string PreparePath = "/v1/finance/transactions/operations/prepare";
 
-    private Task<HttpResponseMessage> PrepareResponseAsync(
-        string session,
-        Guid operationId,
-        object selection,
-        object changes) =>
+    private Task<HttpResponseMessage> PrepareResponseAsync(string session,
+                                                           Guid operationId,
+                                                           object selection,
+                                                           object changes) =>
         SendAsync(Post(
             PreparePath,
             Json(new { operation_id = operationId, selection, changes }),
             session: session));
 
-    private async Task<JsonElement> PrepareAsync(
-        string session,
-        Guid operationId,
-        object selection,
-        object changes)
+    private async Task<JsonElement> PrepareAsync(string session,
+                                                 Guid operationId,
+                                                 object selection,
+                                                 object changes)
     {
         var response = await PrepareResponseAsync(session, operationId, selection, changes);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -333,13 +331,12 @@ public sealed class TransactionConcurrencyTests(KitFactory factory) : Transactio
             """));
     }
 
-    private async Task<(string Hash, DateTime ExpiresAt)> SetCoherentShortExpiryAsync(
-        Guid customerId,
-        Guid operationId,
-        Guid rowId,
-        Guid targetId,
-        Guid tagId,
-        string originalHash)
+    private async Task<(string Hash, DateTime ExpiresAt)> SetCoherentShortExpiryAsync(Guid customerId,
+                                                                                      Guid operationId,
+                                                                                      Guid rowId,
+                                                                                      Guid targetId,
+                                                                                      Guid tagId,
+                                                                                      string originalHash)
     {
         var db = Factory.CreateDb();
         await using var connection = await db.OpenAsync();
@@ -443,12 +440,11 @@ public sealed class TransactionConcurrencyTests(KitFactory factory) : Transactio
         return (int)(await pid.ExecuteScalarAsync())!;
     }
 
-    private static async Task<int> LockFinanceRowForTestAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid customerId,
-        Guid id,
-        string table)
+    private static async Task<int> LockFinanceRowForTestAsync(NpgsqlConnection connection,
+                                                              NpgsqlTransaction transaction,
+                                                              Guid customerId,
+                                                              Guid id,
+                                                              string table)
     {
         if (table is not ("financial_accounts" or "merchant_tags"))
         {

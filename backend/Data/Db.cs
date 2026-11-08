@@ -4,19 +4,18 @@ using Npgsql;
 
 namespace argus.Server.Data;
 
-public sealed record CustomerRecord(
-    Guid Id,
-    string CanonicalEmail,
-    string PasswordHash,
-    DateTime? EmailVerifiedAt,
-    DateTime? SubscriberActivatedAt,
-    DateTime? NextBillingAt,
-    bool IsLifetime,
-    bool IsAdmin,
-    DateTime CreatedAt,
-    DateTime UpdatedAt,
-    int FailedLoginCount,
-    DateTime? LockedUntil);
+public sealed record CustomerRecord(Guid Id,
+                                    string CanonicalEmail,
+                                    string PasswordHash,
+                                    DateTime? EmailVerifiedAt,
+                                    DateTime? SubscriberActivatedAt,
+                                    DateTime? NextBillingAt,
+                                    bool IsLifetime,
+                                    bool IsAdmin,
+                                    DateTime CreatedAt,
+                                    DateTime UpdatedAt,
+                                    int FailedLoginCount,
+                                    DateTime? LockedUntil);
 
 public abstract record ResetRequestOutcome
 {
@@ -312,15 +311,14 @@ public sealed class Db
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private sealed class BackfillTransaction(
-        Guid id,
-        Guid customerId,
-        Guid accountId,
-        DateOnly date,
-        long cents,
-        string normalized,
-        string identityKey,
-        DateTime createdAt)
+    private sealed class BackfillTransaction(Guid id,
+                                             Guid customerId,
+                                             Guid accountId,
+                                             DateOnly date,
+                                             long cents,
+                                             string normalized,
+                                             string identityKey,
+                                             DateTime createdAt)
     {
         public Guid Id { get; } = id;
         public Guid CustomerId { get; } = customerId;
@@ -332,14 +330,13 @@ public sealed class Db
         public DateTime CreatedAt { get; } = createdAt;
     }
 
-    private sealed class BackfillStatement(
-        Guid id,
-        Guid customerId,
-        Guid accountId,
-        DateOnly startDate,
-        DateOnly endDate,
-        DateTime createdAt,
-        List<ParsedStatementRow> rows)
+    private sealed class BackfillStatement(Guid id,
+                                           Guid customerId,
+                                           Guid accountId,
+                                           DateOnly startDate,
+                                           DateOnly endDate,
+                                           DateTime createdAt,
+                                           List<ParsedStatementRow> rows)
     {
         public Guid Id { get; } = id;
         public Guid CustomerId { get; } = customerId;

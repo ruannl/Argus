@@ -108,14 +108,13 @@ public sealed class TransactionFaultTests
         return (await BodyAsync(login)).GetProperty("token").GetString()!;
     }
 
-    private sealed record Workspace(
-        Guid CustomerId,
-        Guid AccountId,
-        Guid SourceCategoryId,
-        Guid TargetCategoryId,
-        Guid TagId,
-        Guid StatementId,
-        Guid RowId);
+    private sealed record Workspace(Guid CustomerId,
+                                    Guid AccountId,
+                                    Guid SourceCategoryId,
+                                    Guid TargetCategoryId,
+                                    Guid TagId,
+                                    Guid StatementId,
+                                    Guid RowId);
 
     private static async Task<Workspace> SeedWorkspaceAsync(
         KitFactory factory,
@@ -210,11 +209,10 @@ public sealed class TransactionFaultTests
         return request;
     }
 
-    private static async Task<JsonElement> PrepareAsync(
-        HttpClient client,
-        string session,
-        Workspace workspace,
-        Guid operationId)
+    private static async Task<JsonElement> PrepareAsync(HttpClient client,
+                                                        string session,
+                                                        Workspace workspace,
+                                                        Guid operationId)
     {
         var response = await client.SendAsync(Post(
             "/v1/finance/transactions/operations/prepare",

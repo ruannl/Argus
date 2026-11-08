@@ -10,11 +10,10 @@ namespace argus.Server;
 /// </summary>
 public static class Seed
 {
-    public static async Task RunAsync(
-        Db db,
-        AppSettings settings,
-        ILogger logger,
-        CancellationToken cancellationToken = default)
+    public static async Task RunAsync(Db db,
+                                      AppSettings settings,
+                                      ILogger logger,
+                                      CancellationToken cancellationToken = default)
     {
         await db.MigrateAsync(cancellationToken);
         var financeStore = new FinanceStore(db);
@@ -38,15 +37,14 @@ public static class Seed
             cancellationToken);
     }
 
-    private static async Task SeedAccountAsync(
-        Db db,
-        FinanceStore financeStore,
-        ILogger logger,
-        string? pinnedPassword,
-        string email,
-        bool isAdmin,
-        bool isLifetime,
-        CancellationToken cancellationToken)
+    private static async Task SeedAccountAsync(Db db,
+                                               FinanceStore financeStore,
+                                               ILogger logger,
+                                               string? pinnedPassword,
+                                               string email,
+                                               bool isAdmin,
+                                               bool isLifetime,
+                                               CancellationToken cancellationToken)
     {
         var password = string.IsNullOrEmpty(pinnedPassword) ? Tokens.NewToken() : pinnedPassword;
         var passwordHash = PasswordHasher.Hash(password);

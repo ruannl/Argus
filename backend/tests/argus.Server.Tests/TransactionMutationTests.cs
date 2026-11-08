@@ -10,22 +10,20 @@ public sealed class TransactionMutationTests(KitFactory factory, ITestOutputHelp
 {
     private const string PreparePath = "/v1/finance/transactions/operations/prepare";
 
-    private Task<HttpResponseMessage> PrepareResponseAsync(
-        string session,
-        Guid operationId,
-        object selection,
-        object changes) =>
+    private Task<HttpResponseMessage> PrepareResponseAsync(string session,
+                                                           Guid operationId,
+                                                           object selection,
+                                                           object changes) =>
         SendAsync(Post(
             PreparePath,
             Json(new { operation_id = operationId, selection, changes }),
             session: session));
 
-    private async Task<JsonElement> PrepareAsync(
-        string session,
-        Guid operationId,
-        object selection,
-        object changes,
-        HttpStatusCode expected = HttpStatusCode.Created)
+    private async Task<JsonElement> PrepareAsync(string session,
+                                                 Guid operationId,
+                                                 object selection,
+                                                 object changes,
+                                                 HttpStatusCode expected = HttpStatusCode.Created)
     {
         var response = await PrepareResponseAsync(session, operationId, selection, changes);
         Assert.Equal(expected, response.StatusCode);
@@ -1048,13 +1046,12 @@ public sealed class TransactionMutationTests(KitFactory factory, ITestOutputHelp
             $"SELECT COUNT(*) FROM transactions WHERE customer_id = '{customerId}' AND version > 1"));
     }
 
-    private async Task SeedBulkTransactionsAsync(
-        Guid customerId,
-        Guid accountId,
-        Guid statementId,
-        Guid categoryA,
-        Guid categoryB,
-        int count)
+    private async Task SeedBulkTransactionsAsync(Guid customerId,
+                                                 Guid accountId,
+                                                 Guid statementId,
+                                                 Guid categoryA,
+                                                 Guid categoryB,
+                                                 int count)
     {
         await ExecuteSqlParamsAsync(
             """

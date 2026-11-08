@@ -24,12 +24,11 @@ public sealed class StatementImportConcurrencyTests(KitFactory factory) : ApiTes
         return (await BodyAsync(response)).GetProperty("id").GetGuid();
     }
 
-    private async Task<JsonElement> PrepareAsync(
-        string session,
-        Guid accountId,
-        byte[] file,
-        DateOnly start,
-        DateOnly end)
+    private async Task<JsonElement> PrepareAsync(string session,
+                                                 Guid accountId,
+                                                 byte[] file,
+                                                 DateOnly start,
+                                                 DateOnly end)
     {
         var options = Json(new
         {
@@ -443,13 +442,12 @@ public sealed class StatementImportConcurrencyTests(KitFactory factory) : ApiTes
         return (await BodyAsync(response)).GetProperty("id").GetGuid();
     }
 
-    private async Task<JsonElement> PrepareGenericAsync(
-        string session,
-        Guid accountId,
-        byte[] file,
-        DateOnly start,
-        DateOnly end,
-        object config)
+    private async Task<JsonElement> PrepareGenericAsync(string session,
+                                                        Guid accountId,
+                                                        byte[] file,
+                                                        DateOnly start,
+                                                        DateOnly end,
+                                                        object config)
     {
         var options = Json(new
         {

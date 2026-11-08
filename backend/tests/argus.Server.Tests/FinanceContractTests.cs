@@ -92,11 +92,10 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         return (Guid)(await command.ExecuteScalarAsync())!;
     }
 
-    private async Task<Guid> InsertTransactionAsync(
-        Guid customerId,
-        Guid accountId,
-        Guid categoryId,
-        decimal amount = -100.00m)
+    private async Task<Guid> InsertTransactionAsync(Guid customerId,
+                                                    Guid accountId,
+                                                    Guid categoryId,
+                                                    decimal amount = -100.00m)
     {
         var statementId = Guid.NewGuid();
         var transactionId = Guid.NewGuid();

@@ -30,11 +30,10 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         return (await BodyAsync(response)).GetProperty("id").GetGuid();
     }
 
-    private async Task<JsonElement> InspectAsync(
-        string session,
-        Guid accountId,
-        byte[] file,
-        string sourceKind = "fnb")
+    private async Task<JsonElement> InspectAsync(string session,
+                                                 Guid accountId,
+                                                 byte[] file,
+                                                 string sourceKind = "fnb")
     {
         var options = Json(new
         {
@@ -46,14 +45,13 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         return await BodyAsync(response);
     }
 
-    private async Task<JsonElement> PrepareAsync(
-        string session,
-        Guid accountId,
-        byte[] file,
-        DateOnly start,
-        DateOnly end,
-        string sourceKind = "fnb",
-        object? parserConfig = null)
+    private async Task<JsonElement> PrepareAsync(string session,
+                                                 Guid accountId,
+                                                 byte[] file,
+                                                 DateOnly start,
+                                                 DateOnly end,
+                                                 string sourceKind = "fnb",
+                                                 object? parserConfig = null)
     {
         var options = Json(new
         {
@@ -1595,8 +1593,11 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         return labels.Select((label, index) => new PdfText(xs[index], y, label)).ToList();
     }
 
-    private static void AddPdfPaymentRow(
-        List<PdfText> texts, double y, string date, string description, string payment) =>
+    private static void AddPdfPaymentRow(List<PdfText> texts,
+                                         double y,
+                                         string date,
+                                         string description,
+                                         string payment) =>
         texts.AddRange(
         [
             new PdfText(40, y, date),

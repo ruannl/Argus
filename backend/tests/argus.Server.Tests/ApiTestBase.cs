@@ -38,23 +38,21 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
 
     protected static string Json(object value) => JsonSerializer.Serialize(value);
 
-    protected static HttpRequestMessage Get(
-        string path,
-        string? secret = TestEnvironment.ApiSecret,
-        string? session = null,
-        string? origin = null)
+    protected static HttpRequestMessage Get(string path,
+                                            string? secret = TestEnvironment.ApiSecret,
+                                            string? session = null,
+                                            string? origin = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, path);
         AddHeaders(request, secret, session, origin);
         return request;
     }
 
-    protected static HttpRequestMessage Post(
-        string path,
-        string json,
-        string? secret = TestEnvironment.ApiSecret,
-        string? session = null,
-        string? origin = null)
+    protected static HttpRequestMessage Post(string path,
+                                             string json,
+                                             string? secret = TestEnvironment.ApiSecret,
+                                             string? session = null,
+                                             string? origin = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
@@ -64,12 +62,11 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         return request;
     }
 
-    protected static HttpRequestMessage Patch(
-        string path,
-        string json,
-        string? secret = TestEnvironment.ApiSecret,
-        string? session = null,
-        string? origin = null)
+    protected static HttpRequestMessage Patch(string path,
+                                              string json,
+                                              string? secret = TestEnvironment.ApiSecret,
+                                              string? session = null,
+                                              string? origin = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Patch, path)
         {
@@ -79,23 +76,21 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         return request;
     }
 
-    protected static HttpRequestMessage Delete(
-        string path,
-        string? secret = TestEnvironment.ApiSecret,
-        string? session = null,
-        string? origin = null)
+    protected static HttpRequestMessage Delete(string path,
+                                               string? secret = TestEnvironment.ApiSecret,
+                                               string? session = null,
+                                               string? origin = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Delete, path);
         AddHeaders(request, secret, session, origin);
         return request;
     }
 
-    protected static HttpRequestMessage DeleteJson(
-        string path,
-        string json,
-        string? secret = TestEnvironment.ApiSecret,
-        string? session = null,
-        string? origin = null)
+    protected static HttpRequestMessage DeleteJson(string path,
+                                                   string json,
+                                                   string? secret = TestEnvironment.ApiSecret,
+                                                   string? session = null,
+                                                   string? origin = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Delete, path)
         {
@@ -105,14 +100,13 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         return request;
     }
 
-    protected static HttpRequestMessage MultipartPost(
-        string path,
-        byte[] file,
-        string optionsJson,
-        string? secret = TestEnvironment.ApiSecret,
-        string? session = null,
-        string? origin = null,
-        string filename = "statement.bin")
+    protected static HttpRequestMessage MultipartPost(string path,
+                                                      byte[] file,
+                                                      string optionsJson,
+                                                      string? secret = TestEnvironment.ApiSecret,
+                                                      string? session = null,
+                                                      string? origin = null,
+                                                      string filename = "statement.bin")
     {
         var content = new MultipartFormDataContent();
         content.Add(new StringContent(optionsJson, Encoding.UTF8, "application/json"), "options");
@@ -122,11 +116,10 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         return request;
     }
 
-    private static void AddHeaders(
-        HttpRequestMessage request,
-        string? secret,
-        string? session,
-        string? origin)
+    private static void AddHeaders(HttpRequestMessage request,
+                                   string? secret,
+                                   string? session,
+                                   string? origin)
     {
         if (secret is not null)
         {

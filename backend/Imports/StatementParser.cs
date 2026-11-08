@@ -27,15 +27,14 @@ public static class StatementParser
             token => Task.Run(() => parse(token), token),
             cancellationToken);
 
-    public static async Task<ParsedStatement> InspectAsync(
-        byte[] bytes,
-        StatementSourceKind sourceKind,
-        ParserConfig? config,
-        DateOnly? start,
-        DateOnly? end,
-        PdfParserRunner pdfRunner,
-        ParserAdmission admission,
-        CancellationToken cancellationToken = default)
+    public static async Task<ParsedStatement> InspectAsync(byte[] bytes,
+                                                           StatementSourceKind sourceKind,
+                                                           ParserConfig? config,
+                                                           DateOnly? start,
+                                                           DateOnly? end,
+                                                           PdfParserRunner pdfRunner,
+                                                           ParserAdmission admission,
+                                                           CancellationToken cancellationToken = default)
     {
         EnsureSourceKindEnabled(sourceKind);
         if (bytes.Length > ImportLimits.MaxFileBytes)
@@ -66,15 +65,14 @@ public static class StatementParser
         };
     }
 
-    public static async Task<ParsedStatement> PrepareAsync(
-        byte[] bytes,
-        StatementSourceKind sourceKind,
-        ParserConfig? config,
-        DateOnly start,
-        DateOnly end,
-        PdfParserRunner pdfRunner,
-        ParserAdmission admission,
-        CancellationToken cancellationToken = default)
+    public static async Task<ParsedStatement> PrepareAsync(byte[] bytes,
+                                                           StatementSourceKind sourceKind,
+                                                           ParserConfig? config,
+                                                           DateOnly start,
+                                                           DateOnly end,
+                                                           PdfParserRunner pdfRunner,
+                                                           ParserAdmission admission,
+                                                           CancellationToken cancellationToken = default)
     {
         EnsureSourceKindEnabled(sourceKind);
         if (bytes.Length > ImportLimits.MaxFileBytes)

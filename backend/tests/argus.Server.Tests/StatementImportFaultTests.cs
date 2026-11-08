@@ -288,11 +288,10 @@ public sealed class StatementImportFaultTests
         return (await BodyAsync(response)).GetProperty("id").GetGuid();
     }
 
-    private static async Task<JsonElement> PrepareAsync(
-        HttpClient client,
-        string session,
-        Guid accountId,
-        byte[] file)
+    private static async Task<JsonElement> PrepareAsync(HttpClient client,
+                                                        string session,
+                                                        Guid accountId,
+                                                        byte[] file)
     {
         var options = JsonSerializer.Serialize(new
         {
@@ -313,11 +312,10 @@ public sealed class StatementImportFaultTests
         return await BodyAsync(response);
     }
 
-    private static Task<HttpResponseMessage> CommitAsync(
-        HttpClient client,
-        string session,
-        Guid reviewId,
-        JsonElement review)
+    private static Task<HttpResponseMessage> CommitAsync(HttpClient client,
+                                                         string session,
+                                                         Guid reviewId,
+                                                         JsonElement review)
     {
         var summary = review.TryGetProperty("summary", out var nested) ? nested : review;
         var body = JsonSerializer.Serialize(new
@@ -329,11 +327,10 @@ public sealed class StatementImportFaultTests
             HttpMethod.Post, $"/v1/finance/imports/reviews/{reviewId}/commit", body, session));
     }
 
-    private static HttpRequestMessage Request(
-        HttpMethod method,
-        string path,
-        string? json,
-        string? session = null)
+    private static HttpRequestMessage Request(HttpMethod method,
+                                              string path,
+                                              string? json,
+                                              string? session = null)
     {
         var request = new HttpRequestMessage(method, path);
         request.Headers.Add(Brand.ApplicationSecretHeader, TestEnvironment.ApiSecret);

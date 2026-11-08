@@ -517,8 +517,11 @@ public sealed class StatementParserProcessTests
         return labels.Select((label, index) => new PdfText(xs[index], y, label)).ToList();
     }
 
-    private static void AddPaymentRow(
-        List<PdfText> texts, double y, string date, string description, string payment) =>
+    private static void AddPaymentRow(List<PdfText> texts,
+                                      double y,
+                                      string date,
+                                      string description,
+                                      string payment) =>
         texts.AddRange(
         [
             new PdfText(40, y, date),

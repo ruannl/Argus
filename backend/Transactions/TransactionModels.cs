@@ -35,18 +35,17 @@ public enum TransactionVisibility
 }
 
 /// <summary>Validated, owned-scope transaction filter. Search stays in bodies only.</summary>
-public sealed record TransactionFilter(
-    string? Search,
-    DateOnly? StartDate,
-    DateOnly? EndDate,
-    Guid? FinancialAccountId,
-    Guid? StatementImportId,
-    Guid? CategoryId,
-    Guid? MerchantTagId,
-    bool Untagged,
-    string? CategoryKind,
-    string? Direction,
-    TransactionVisibility Visibility)
+public sealed record TransactionFilter(string? Search,
+                                       DateOnly? StartDate,
+                                       DateOnly? EndDate,
+                                       Guid? FinancialAccountId,
+                                       Guid? StatementImportId,
+                                       Guid? CategoryId,
+                                       Guid? MerchantTagId,
+                                       bool Untagged,
+                                       string? CategoryKind,
+                                       string? Direction,
+                                       TransactionVisibility Visibility)
 {
     public static TransactionFilter Default { get; } = new(
         null, null, null, null, null, null, null, false, null, null, TransactionVisibility.Visible);
@@ -76,12 +75,11 @@ public sealed record TransactionFilter(
 }
 
 /// <summary>The full validated query plan after field and enum whitelisting.</summary>
-public sealed record TransactionQueryPlan(
-    TransactionFilter Filter,
-    int Page,
-    int PageSize,
-    string SortBy,
-    string SortDirection);
+public sealed record TransactionQueryPlan(TransactionFilter Filter,
+                                          int Page,
+                                          int PageSize,
+                                          string SortBy,
+                                          string SortDirection);
 
 /// <summary>Single-tag or Untagged filter; never both.</summary>
 public enum MerchantTagFilterKind
@@ -93,72 +91,65 @@ public enum MerchantTagFilterKind
 
 public sealed record TransactionAccountRef(Guid Id, string DisplayName, bool IsArchived);
 
-public sealed record TransactionCategoryRef(
-    Guid Id,
-    string DisplayName,
-    string Kind,
-    bool IsSystem,
-    bool IsArchived);
+public sealed record TransactionCategoryRef(Guid Id,
+                                            string DisplayName,
+                                            string Kind,
+                                            bool IsSystem,
+                                            bool IsArchived);
 
 public sealed record TransactionTagRef(Guid Id, string DisplayName, bool IsArchived);
 
-public sealed record TransactionStatementRef(
-    Guid Id,
-    string StatementLabel,
-    string SourceType,
-    bool IsHidden);
+public sealed record TransactionStatementRef(Guid Id,
+                                             string StatementLabel,
+                                             string SourceType,
+                                             bool IsHidden);
 
 /// <summary>
 /// Public transaction row. Amounts travel as exact invariant strings with two
 /// fractional digits; callers never receive a JSON number for money.
 /// </summary>
-public sealed record TransactionResponse(
-    Guid Id,
-    int Version,
-    string TransactionDate,
-    string Description,
-    string Amount,
-    string Currency,
-    string Direction,
-    TransactionAccountRef FinancialAccount,
-    TransactionCategoryRef Category,
-    TransactionTagRef[] MerchantTags,
-    TransactionStatementRef StatementImport,
-    bool IsHiddenByUser,
-    bool EffectiveHidden,
-    string HiddenReason);
+public sealed record TransactionResponse(Guid Id,
+                                         int Version,
+                                         string TransactionDate,
+                                         string Description,
+                                         string Amount,
+                                         string Currency,
+                                         string Direction,
+                                         TransactionAccountRef FinancialAccount,
+                                         TransactionCategoryRef Category,
+                                         TransactionTagRef[] MerchantTags,
+                                         TransactionStatementRef StatementImport,
+                                         bool IsHiddenByUser,
+                                         bool EffectiveHidden,
+                                         string HiddenReason);
 
-public sealed record TransactionPageResult(
-    TransactionResponse[] Transactions,
-    long InventoryCount,
-    long MatchingVisibleCount,
-    long MatchingHiddenCount,
-    long MatchingTotal,
-    long FilteredTotal,
-    int Page,
-    int PageSize,
-    string SortBy,
-    string SortDirection);
+public sealed record TransactionPageResult(TransactionResponse[] Transactions,
+                                           long InventoryCount,
+                                           long MatchingVisibleCount,
+                                           long MatchingHiddenCount,
+                                           long MatchingTotal,
+                                           long FilteredTotal,
+                                           int Page,
+                                           int PageSize,
+                                           string SortBy,
+                                           string SortDirection);
 
-public sealed record TransactionDetailResult(
-    TransactionResponse Transaction,
-    TransactionTagRef[] SuggestedTags,
-    bool HasMoreSuggestions,
-    int? SourcePage,
-    int SourceRowNumber);
+public sealed record TransactionDetailResult(TransactionResponse Transaction,
+                                             TransactionTagRef[] SuggestedTags,
+                                             bool HasMoreSuggestions,
+                                             int? SourcePage,
+                                             int SourceRowNumber);
 
-public sealed record TransactionMutationResult(
-    TransactionResponse Transaction,
-    int SelectedCount,
-    int ChangedCount,
-    int UnchangedCount);
+public sealed record TransactionMutationResult(TransactionResponse Transaction,
+                                               int SelectedCount,
+                                               int ChangedCount,
+                                               int UnchangedCount);
 
 /// <summary>Validated metadata action shared by single edits and bulk operations.</summary>
-public sealed record TransactionAction(
-    Guid? CategoryId,
-    Guid[] AddTagIds,
-    Guid[] RemoveTagIds,
-    bool? IsHiddenByUser)
+public sealed record TransactionAction(Guid? CategoryId,
+                                       Guid[] AddTagIds,
+                                       Guid[] RemoveTagIds,
+                                       bool? IsHiddenByUser)
 {
     public bool IsEmpty =>
         CategoryId is null && AddTagIds.Length == 0 && RemoveTagIds.Length == 0 &&
@@ -448,30 +439,27 @@ public static class TransactionRequestParser
 
 // --- Raw HTTP bodies --------------------------------------------------------
 
-public sealed record TransactionFiltersRequest(
-    string? Search,
-    string? StartDate,
-    string? EndDate,
-    Guid? FinancialAccountId,
-    Guid? StatementImportId,
-    Guid? CategoryId,
-    string? MerchantTag,
-    string? CategoryKind,
-    string? Direction,
-    string? Visibility);
+public sealed record TransactionFiltersRequest(string? Search,
+                                               string? StartDate,
+                                               string? EndDate,
+                                               Guid? FinancialAccountId,
+                                               Guid? StatementImportId,
+                                               Guid? CategoryId,
+                                               string? MerchantTag,
+                                               string? CategoryKind,
+                                               string? Direction,
+                                               string? Visibility);
 
-public sealed record TransactionQueryRequest(
-    TransactionFiltersRequest? Filters,
-    int? Page,
-    int? PageSize,
-    string? SortBy,
-    string? SortDirection);
+public sealed record TransactionQueryRequest(TransactionFiltersRequest? Filters,
+                                             int? Page,
+                                             int? PageSize,
+                                             string? SortBy,
+                                             string? SortDirection);
 
-public sealed record TransactionChangesRequest(
-    Guid? CategoryId,
-    Guid[]? AddTagIds,
-    Guid[]? RemoveTagIds,
-    bool? IsHiddenByUser);
+public sealed record TransactionChangesRequest(Guid? CategoryId,
+                                               Guid[]? AddTagIds,
+                                               Guid[]? RemoveTagIds,
+                                               bool? IsHiddenByUser);
 
 public sealed record TransactionSelectionItem(Guid? Id, int? ExpectedVersion);
 
@@ -499,39 +487,36 @@ public sealed record EmptyBodyRequest();
 
 // --- Responses --------------------------------------------------------------
 
-public sealed record TransactionOperationActionResponse(
-    TransactionCategoryRef? Category,
-    TransactionTagRef[] AddTags,
-    TransactionTagRef[] RemoveTags,
-    bool? IsHiddenByUser,
-    bool Stale);
+public sealed record TransactionOperationActionResponse(TransactionCategoryRef? Category,
+                                                        TransactionTagRef[] AddTags,
+                                                        TransactionTagRef[] RemoveTags,
+                                                        bool? IsHiddenByUser,
+                                                        bool Stale);
 
-public sealed record TransactionOperationSummaryResponse(
-    Guid OperationId,
-    string Status,
-    string SelectionMode,
-    string CapturedAt,
-    string ExpiresAt,
-    int SelectedCount,
-    int ChangedCount,
-    int UnchangedCount,
-    string? ConfirmationHash,
-    string? AppliedAt,
-    string? TerminalAt,
-    TransactionOperationActionResponse? Action);
+public sealed record TransactionOperationSummaryResponse(Guid OperationId,
+                                                         string Status,
+                                                         string SelectionMode,
+                                                         string CapturedAt,
+                                                         string ExpiresAt,
+                                                         int SelectedCount,
+                                                         int ChangedCount,
+                                                         int UnchangedCount,
+                                                         string? ConfirmationHash,
+                                                         string? AppliedAt,
+                                                         string? TerminalAt,
+                                                         TransactionOperationActionResponse? Action);
 
 public sealed record TransactionOperationPrepareResponse(
     TransactionOperationSummaryResponse Operation,
     bool Created);
 
-public sealed record TransactionOperationApplyResponse(
-    Guid OperationId,
-    string Status,
-    int SelectedCount,
-    int ChangedCount,
-    int UnchangedCount,
-    string? AppliedAt,
-    bool Replayed);
+public sealed record TransactionOperationApplyResponse(Guid OperationId,
+                                                       string Status,
+                                                       int SelectedCount,
+                                                       int ChangedCount,
+                                                       int UnchangedCount,
+                                                       string? AppliedAt,
+                                                       bool Replayed);
 
 public sealed class TransactionStoreException : Exception
 {

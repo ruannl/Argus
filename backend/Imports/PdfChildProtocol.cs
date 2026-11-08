@@ -3,35 +3,32 @@ using System.Text.Json.Serialization;
 
 namespace argus.Server.Imports;
 
-public sealed record PdfChildRequestOptions(
-    DateOnly? StartDate,
-    DateOnly? EndDate,
-    int? Century,
-    int DeadlineMilliseconds);
+public sealed record PdfChildRequestOptions(DateOnly? StartDate,
+                                            DateOnly? EndDate,
+                                            int? Century,
+                                            int DeadlineMilliseconds);
 
-public sealed record PdfChildRow(
-    Guid RowId,
-    int SourceLine,
-    int? SourcePage,
-    int SourceRowNumber,
-    Dictionary<string, string?> RawValues,
-    string? TransactionDate,
-    string Description,
-    string NormalizedDescription,
-    long? AmountCents,
-    string[] ValidationCodes,
-    string[] Warnings,
-    string? SourceIdNamespace,
-    string? SourceIdValue);
+public sealed record PdfChildRow(Guid RowId,
+                                 int SourceLine,
+                                 int? SourcePage,
+                                 int SourceRowNumber,
+                                 Dictionary<string, string?> RawValues,
+                                 string? TransactionDate,
+                                 string Description,
+                                 string NormalizedDescription,
+                                 long? AmountCents,
+                                 string[] ValidationCodes,
+                                 string[] Warnings,
+                                 string? SourceIdNamespace,
+                                 string? SourceIdValue);
 
-public sealed record PdfChildStatement(
-    string Format,
-    PdfChildRow[] Rows,
-    string? ProposedStartDate,
-    string? ProposedEndDate,
-    Dictionary<string, string> MappingSuggestions,
-    string[] RequiredConfirmations,
-    string[] Warnings);
+public sealed record PdfChildStatement(string Format,
+                                       PdfChildRow[] Rows,
+                                       string? ProposedStartDate,
+                                       string? ProposedEndDate,
+                                       Dictionary<string, string> MappingSuggestions,
+                                       string[] RequiredConfirmations,
+                                       string[] Warnings);
 
 public sealed record PdfChildResponse(
     bool Ok,

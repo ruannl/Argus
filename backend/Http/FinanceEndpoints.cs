@@ -350,11 +350,10 @@ public sealed class FinanceApi(
             }
         }, "categories_delete");
 
-    private IResult CategoryResult(
-        CategoryOutcome outcome,
-        Guid customerId,
-        string auditEvent,
-        bool created)
+    private IResult CategoryResult(CategoryOutcome outcome,
+                                   Guid customerId,
+                                   string auditEvent,
+                                   bool created)
     {
         switch (outcome)
         {
@@ -529,11 +528,10 @@ public sealed class FinanceApi(
             }
         }, "merchant_tags_delete");
 
-    private IResult MerchantTagResult(
-        MerchantTagOutcome outcome,
-        Guid customerId,
-        string auditEvent,
-        bool created)
+    private IResult MerchantTagResult(MerchantTagOutcome outcome,
+                                      Guid customerId,
+                                      string auditEvent,
+                                      bool created)
     {
         switch (outcome)
         {
@@ -566,15 +564,14 @@ public sealed class FinanceApi(
             : null;
 }
 
-public sealed record FinanceAccountResponse(
-    Guid Id,
-    string DisplayName,
-    string? Institution,
-    string Currency,
-    bool IsArchived,
-    long TransactionCount,
-    string CreatedAt,
-    string UpdatedAt)
+public sealed record FinanceAccountResponse(Guid Id,
+                                            string DisplayName,
+                                            string? Institution,
+                                            string Currency,
+                                            bool IsArchived,
+                                            long TransactionCount,
+                                            string CreatedAt,
+                                            string UpdatedAt)
 {
     public static FinanceAccountResponse From(FinancialAccountRecord account) => new(
         account.Id,
@@ -587,16 +584,15 @@ public sealed record FinanceAccountResponse(
         Timestamps.Format(account.UpdatedAt));
 }
 
-public sealed record FinanceCategoryResponse(
-    Guid Id,
-    string DisplayName,
-    string Kind,
-    bool IsSystem,
-    bool IsDefault,
-    bool IsArchived,
-    long TransactionCount,
-    string CreatedAt,
-    string UpdatedAt)
+public sealed record FinanceCategoryResponse(Guid Id,
+                                             string DisplayName,
+                                             string Kind,
+                                             bool IsSystem,
+                                             bool IsDefault,
+                                             bool IsArchived,
+                                             long TransactionCount,
+                                             string CreatedAt,
+                                             string UpdatedAt)
 {
     public static FinanceCategoryResponse From(CategoryRecord category) => new(
         category.Id,
@@ -610,13 +606,12 @@ public sealed record FinanceCategoryResponse(
         Timestamps.Format(category.UpdatedAt));
 }
 
-public sealed record FinanceMerchantTagResponse(
-    Guid Id,
-    string DisplayName,
-    bool IsArchived,
-    long TransactionCount,
-    string CreatedAt,
-    string UpdatedAt)
+public sealed record FinanceMerchantTagResponse(Guid Id,
+                                                string DisplayName,
+                                                bool IsArchived,
+                                                long TransactionCount,
+                                                string CreatedAt,
+                                                string UpdatedAt)
 {
     public static FinanceMerchantTagResponse From(MerchantTagRecord tag) => new(
         tag.Id,
