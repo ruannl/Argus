@@ -932,7 +932,10 @@ public sealed class TransactionMutationTests(KitFactory factory, ITestOutputHelp
         };
         var addTag = await CreateTagAsync(session, "Bulk add tag");
 
+        var seedWatch = Stopwatch.StartNew();
         await SeedBulkTransactionsAsync(customerId, accountId, statementId, expenseId, systemId, 50_000);
+        seedWatch.Stop();
+        var denseWatch = Stopwatch.StartNew();
         await ExecuteSqlParamsAsync(
             """
             INSERT INTO transaction_merchant_tags (customer_id, transaction_id, merchant_tag_id)
@@ -945,6 +948,8 @@ public sealed class TransactionMutationTests(KitFactory factory, ITestOutputHelp
             ("customer_id", customerId),
             ("statement_id", statementId),
             ("tag_ids", denseTags));
+        denseWatch.Stop();
+        var addWatch = Stopwatch.StartNew();
         await ExecuteSqlParamsAsync(
             """
             INSERT INTO transaction_merchant_tags (customer_id, transaction_id, merchant_tag_id)
@@ -957,6 +962,12 @@ public sealed class TransactionMutationTests(KitFactory factory, ITestOutputHelp
             ("customer_id", customerId),
             ("statement_id", statementId),
             ("add_tag", addTag));
+        addWatch.Stop();
+        output.WriteLine(
+            "P3-N5 setup seed_ms={0} dense_links_ms={1} add_links_ms={2}",
+            seedWatch.ElapsedMilliseconds,
+            denseWatch.ElapsedMilliseconds,
+            addWatch.ElapsedMilliseconds);
 
         var prepareWatch = Stopwatch.StartNew();
         var operation = await PrepareAsync(
