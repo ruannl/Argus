@@ -1,5 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { redirect } from "next/navigation";
 
 vi.mock("@/auth", () => ({
   auth: vi.fn(),
@@ -10,6 +12,13 @@ vi.mock("@/lib/server/account-actions", () => ({
 }));
 
 vi.mock("@/lib/server/backend-client", () => ({
+  AccountReadError: class AccountReadError extends Error {
+    readonly kind: string;
+    constructor(kind: string) {
+      super("Account check failed.");
+      this.kind = kind;
+    }
+  },
   getCurrentAccount: vi.fn(),
   getTransaction: vi.fn(),
   listCategories: vi.fn(),
@@ -28,13 +37,16 @@ vi.mock("@/lib/server/transaction-actions", () => ({
 
 import TransactionDetailPage from "@/app/transactions/[id]/page";
 import { auth } from "@/auth";
+import { testRouter } from "../../../vitest.setup";
 import {
+  AccountReadError,
   getCurrentAccount,
   getTransaction,
   listCategories,
   listMerchantTags,
 } from "@/lib/server/backend-client";
 import type { TransactionDetail } from "@/lib/server/backend-client";
+import { endSessionAction } from "@/lib/server/account-actions";
 
 const account = {
   id: "account-id",
@@ -91,7 +103,9 @@ function renderDetailPage() {
 
 describe("standalone transaction detail page", () => {
   beforeEach(() => {
+    window.history.replaceState(null, "", `/transactions/${transactionId}`);
     vi.mocked(auth).mockReset();
+    vi.mocked(endSessionAction).mockReset();
     vi.mocked(getCurrentAccount).mockReset();
     vi.mocked(getTransaction).mockReset();
     vi.mocked(listCategories).mockReset();
@@ -136,6 +150,26 @@ describe("standalone transaction detail page", () => {
     expect(screen.queryByText(/service is unavailable/i)).not.toBeInTheDocument();
   });
 
+  it("retains the downstream detail rate-limit state after account preflight", async () => {
+    signedIn();
+    vi.mocked(getTransaction).mockResolvedValue({ ok: false, kind: "rate_limited" });
+
+    render(await renderDetailPage());
+
+    expect(screen.getByText(/Too many requests right now/)).toBeInTheDocument();
+    expect(endSessionAction).not.toHaveBeenCalled();
+  });
+
+  it("still clears the session on downstream detail denial", async () => {
+    signedIn();
+    vi.mocked(getTransaction).mockResolvedValue({ ok: false, kind: "unauthorized" });
+
+    render(await renderDetailPage());
+
+    expect(screen.getByText("Your session has expired. Please sign in again.")).toBeInTheDocument();
+    await waitFor(() => expect(endSessionAction).toHaveBeenCalledTimes(1));
+  });
+
   it("disables classification when taxonomy loading fails but the row loads", async () => {
     signedIn();
     vi.mocked(getTransaction).mockResolvedValue({ ok: true, value: detail });
@@ -146,5 +180,64 @@ describe("standalone transaction detail page", () => {
     expect(screen.getByText(/Some categories or tags could not be loaded/i)).toBeInTheDocument();
     expect(screen.getByLabelText("Category")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Save classification" })).toBeDisabled();
+  });
+
+  it.each(["unavailable", "rate_limited"] as const)(
+    "does not revoke the session or load protected detail on a %s /v1/me read",
+    async (kind) => {
+      const user = userEvent.setup();
+      signedIn();
+      vi.mocked(getCurrentAccount).mockRejectedValue(new AccountReadError(kind));
+
+      render(await renderDetailPage());
+
+      expect(screen.getByRole("heading", { name: "Transaction detail unavailable" })).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        kind === "rate_limited" ? /Wait a few minutes/ : /does not prove your session expired/,
+      );
+      expect(endSessionAction).not.toHaveBeenCalled();
+      expect(getTransaction).not.toHaveBeenCalled();
+      expect(listCategories).not.toHaveBeenCalled();
+      expect(listMerchantTags).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole("button", { name: "Retry account check" }));
+      expect(testRouter.refresh).toHaveBeenCalledTimes(1);
+      expect(window.location.pathname).toBe(`/transactions/${transactionId}`);
+    },
+  );
+
+  it("clears only a confirmed unauthorized account session", async () => {
+    signedIn();
+    vi.mocked(getCurrentAccount).mockRejectedValue(new AccountReadError("unauthorized"));
+
+    render(await renderDetailPage());
+
+    expect(screen.getByText("Your session has expired. Please sign in again.")).toBeInTheDocument();
+    await waitFor(() => expect(endSessionAction).toHaveBeenCalledTimes(1));
+    expect(getTransaction).not.toHaveBeenCalled();
+  });
+
+  it("uses safe unavailable copy on untyped preflight failures", async () => {
+    signedIn();
+    vi.mocked(getCurrentAccount).mockRejectedValue(new Error("PRIVATE-CANARY backend origin"));
+
+    render(await renderDetailPage());
+
+    expect(screen.getByRole("heading", { name: "Transaction detail unavailable" })).toBeInTheDocument();
+    expect(screen.queryByText(/PRIVATE-CANARY/)).not.toBeInTheDocument();
+    expect(endSessionAction).not.toHaveBeenCalled();
+    expect(getTransaction).not.toHaveBeenCalled();
+  });
+
+  it("redirects before an account check when no server session exists", async () => {
+    vi.mocked(auth).mockResolvedValue(null as never);
+    vi.mocked(redirect).mockImplementation(() => {
+      throw new Error("NEXT_REDIRECT");
+    });
+
+    await expect(renderDetailPage()).rejects.toThrow("NEXT_REDIRECT");
+    expect(redirect).toHaveBeenCalledWith("/login");
+    expect(getCurrentAccount).not.toHaveBeenCalled();
+    expect(getTransaction).not.toHaveBeenCalled();
   });
 });

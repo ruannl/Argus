@@ -118,7 +118,7 @@ operator approval.
 
 ## Verification evidence (corrected baseline, 2026-11-07)
 
-The following battery ran after the Plan 3 implementation was corrected and the
+The following historical battery ran after the Plan 3 implementation was corrected and the
 in-scope whole-tree review findings were addressed (W2, M1–M3, M5 and the M6
 evidence record). The whole-tree review's W1 (pre-existing login/password-reset
 race), M4 (shared account preflight) and L1 (import expiry policy) are outside
@@ -243,6 +243,84 @@ a screenshot-injection artifact rather than the Server Function logger. The
 clean canary run above took no screenshots and recorded no hydration-mismatch
 line. Do not take a screenshot during a privacy canary; use
 `page.screenshot({ caret: "initial" })` if one is required.
+
+## Revision 3: credential-bound login (W1)
+
+Login verifies the password against an encoded hash before entering a database
+transaction. Session issuance then locks that customer's credential row,
+compares the **same encoded hash**, clears successful-login failure counters,
+inserts the hashed session token and commits as one unit. Password reset updates
+that row and revokes sessions transactionally. If reset commits first, issuance
+returns the existing `invalid_credentials` without clearing counters, inserting
+a session or logging success. If issuance commits first, reset revokes that
+session before reset succeeds. No credential-generation column or schema change
+was added; the former customer-ID-only production issuance method was removed.
+The unverified-session finance-guard test now inserts its intentionally invalid
+test fixture directly in the isolated test database.
+
+**Focused evidence (2026-11-07, dedicated `argus_test`):** the actual HTTP
+old-hash/read → reset-commit → issuance regression failed before the correction
+(`401` expected, `200` observed; `/tmp/opencode/w1-before.txt`) and passes
+afterward. The inverse issuance-first test observes the real PostgreSQL
+advisory/credential-row wait, then verifies reset revocation. A cancellation
+test observes a credential-row wait and verifies no session or success-counter
+effect. All three tests passed. The Phase 5 account/finance/billing filter
+passed **33/33**; both backend format checks and Release build passed with zero
+warnings. This is real HTTP/PostgreSQL test evidence, not a live development
+service observation. The combined full battery remains pending until the other
+revision-3 corrections are complete.
+
+## Revision 3: transaction account preflight (M4)
+
+The two transaction routes check the server-held session with `/v1/me` before
+loading account or transaction data. A canonical `401` with error
+`unauthorized` retains the existing sign-in and session-clearing path. A `429`
+asks the user to wait and retry. A transport failure, unexpected status or body,
+unreadable response, or bodyless `403` displays an account-check failure and an
+explicit Retry without clearing the session. A retry refreshes the same route,
+including its filters, operation ID or detail ID; it neither applies nor retires
+an operation. Errors do not expose backend bodies, tokens, origins or exceptions.
+The shared account client accepts the expected fields plus additional response
+fields. Seven other page callers keep their prior catch behavior; a broader
+authentication change remains outside this correction.
+
+**Evidence (2026-11-08):** focused client and transaction-page tests passed
+**113/113** across five files. Lint passed; the full frontend suite passed
+**249/249** across 28 files; the production build passed; Playwright passed all
+**17/17** existing smoke tests. New compatibility regressions for unexpected
+`401` bodies and extra success fields failed against the interrupted code before
+the correction and passed afterward. These client and component tests use mocks;
+the Playwright suite is unauthenticated. They do not establish a live backend
+outage or actual browser-cookie persistence.
+
+## Revision 3: import expiry reference (L1)
+
+Plan 2 revision 6 owns the import expiry policy. Its bounded correction now
+rechecks the persisted review deadline after tag validation and immediately
+before commit, using fresh PostgreSQL time. An expired attempt rolls back;
+previously committed receipts remain replayable. The statement-import runbook
+records the full behavior and the **69/69** focused import results.
+
+Two earlier full backend runs each passed **307/308**, with different existing
+transaction tests timing out. Those tests passed when rerun separately. A third,
+monitored full run passed **308/308**, and a fourth full run repeated
+**308/308** on 2026-11-08. A later isolated run of the existing three-variant
+transaction expiry-wait test failed one variant, so repeated full-suite passes
+do not establish that the test is stable.
+
+During investigation, a bounded clock probe observed the host and PostgreSQL
+wall clocks move backward by about **1.37 seconds** while the host monotonic
+clock advanced roughly **1.0–1.2 seconds**. The system time service reported an
+offset of approximately **−2.48 seconds**. A backward wall-clock adjustment can
+extend an expiry test's wall-clock wait relative to its monotonic timeout, but
+the probe does not prove the cause of either full-run failure. In particular,
+the 50,000-row fixture timeout remains unexplained. No system clock, time
+service, development database or development service was changed.
+
+The 2026-11-08 repeat battery also passed frontend lint and build, **249/249**
+Vitest tests and **17/17** unauthenticated Playwright smoke tests. Those remain
+synthetic/component and unauthenticated smoke evidence, not a live outage or
+cookie-persistence observation.
 
 ## Known boundaries
 

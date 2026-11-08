@@ -154,6 +154,35 @@ only. The original filename is not displayed in the UI.
    committed import. Expiry cleanup locks the review header before deleting its
    child rows, matching the commit/edit lock order.
 
+### Absolute commit expiry (revision 6)
+
+The initial expiry check rejects an already-expired review; it does not reserve
+the right to commit. After selected tag locks and validation, the commit checks
+the persisted deadline again using PostgreSQL `clock_timestamp()`. It checks
+once more immediately before committing, after tentative writes and the existing
+test seam. A database time equal to or later than the deadline returns
+`410 review_expired` and rolls back the attempt, including the statement, rows,
+tag links, receipt, account version change and review-payload purge. These
+checks also apply without tags and when every incoming row is suppressed. The
+final check admits the commit; it does not promise that disk flush or the HTTP
+response finishes before the deadline.
+
+The original review payload remains until normal cleanup; it cannot authorize
+new effects after expiry. A receipt from an earlier successful commit is
+resolved before these checks, so the same request can still replay that result
+after the original review deadline. Do not extend the deadline or delete a
+receipt to recover an operation; prepare a new review for new work.
+
+**Focused evidence (2026-11-08):** the selected-tag lock regression observed an
+actual PostgreSQL wait and deadline crossing. Before the fix it returned `201`
+where `410` was required; after the fix it returns `review_expired` without
+durable effects. Four additional post-tag/final-commit scenarios also returned
+`201` before correction; the corrected suite covers both boundaries, tagged and
+untagged reviews, and fully suppressed imports. A new test replays the original
+receipt after its deadline through a fresh test host. The three import test
+classes passed **69/69** against the dedicated `argus_test` database. This is
+test-host and PostgreSQL evidence, not a live development-service exercise.
+
 ### Counts
 
 `total_rows = imported_count + suppressed_count + skipped_count` on every
@@ -195,7 +224,7 @@ review version and summary hash to one result.
 - A connection loss around commit is an unknown outcome until the receipt is
   read. Retry the same commit; do not create a new review.
 - A failure before commit rolls back every statement, transaction, tag link,
-  and receipt, leaving the review retryable.
+  and receipt. The review is retryable only while it remains valid.
 - Deleting a statement marks its receipt `Deleted`. An old commit retry returns
   `410 import_deleted`; it never recreates data. A fresh review can import the
   deleted occurrences again.

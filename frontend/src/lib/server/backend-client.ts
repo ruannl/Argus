@@ -26,6 +26,40 @@ export type CurrentAccount = {
   admin: boolean;
 };
 
+export type AccountReadErrorKind = "unauthorized" | "rate_limited" | "unavailable";
+
+/** Sanitized /v1/me failure; never includes a backend body, URL or token. */
+export class AccountReadError extends Error {
+  readonly kind: AccountReadErrorKind;
+
+  constructor(kind: AccountReadErrorKind) {
+    super("Account check failed.");
+    this.name = "AccountReadError";
+    this.kind = kind;
+  }
+}
+
+function isCurrentAccount(value: unknown): value is CurrentAccount {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const account = value as Record<string, unknown>;
+  const keys = [
+    "id", "email", "email_verified", "subscriber_active",
+    "subscription_started_at", "next_billing_at", "lifetime", "admin",
+  ];
+  if (keys.some((key) => !Object.prototype.hasOwnProperty.call(account, key))) {
+    return false;
+  }
+  return typeof account.id === "string" && account.id.length > 0 &&
+    typeof account.email === "string" &&
+    typeof account.email_verified === "boolean" &&
+    typeof account.subscriber_active === "boolean" &&
+    (account.subscription_started_at === null || typeof account.subscription_started_at === "string") &&
+    (account.next_billing_at === null || typeof account.next_billing_at === "string") &&
+    typeof account.lifetime === "boolean" && typeof account.admin === "boolean";
+}
+
 export type AcceptedResponse = {
   status: "accepted";
 };
@@ -231,17 +265,46 @@ export async function getCurrentAccount(sessionToken: string): Promise<CurrentAc
     throw new Error("session token is required");
   }
 
-  const response = await fetch(`${backendUrl()}/v1/me`, {
-    method: "GET",
-    headers: {
-      [REQUEST_ID_HEADER]: newRequestId(),
-      [APPLICATION_SECRET_HEADER]: requiredEnvironment("ARGUS_API_SECRET"),
-      [SESSION_HEADER]: sessionToken,
-      [FRONTEND_ORIGIN_HEADER]: requiredEnvironment("ARGUS_FRONTEND_URL"),
-    },
-    cache: "no-store",
-  });
-  return readJson<CurrentAccount>(response);
+  let response: Response;
+  try {
+    response = await fetch(`${backendUrl()}/v1/me`, {
+      method: "GET",
+      headers: {
+        [REQUEST_ID_HEADER]: newRequestId(),
+        [APPLICATION_SECRET_HEADER]: requiredEnvironment("ARGUS_API_SECRET"),
+        [SESSION_HEADER]: sessionToken,
+        [FRONTEND_ORIGIN_HEADER]: requiredEnvironment("ARGUS_FRONTEND_URL"),
+      },
+      cache: "no-store",
+    });
+  } catch {
+    throw new AccountReadError("unavailable");
+  }
+
+  if (response.status === 401) {
+    let confirmedDenial = false;
+    try {
+      const body: unknown = await response.json();
+      confirmedDenial = typeof body === "object" && body !== null &&
+        "error" in body && body.error === "unauthorized";
+    } catch {
+      // An unreadable denial does not establish which response the backend sent.
+    }
+    throw new AccountReadError(confirmedDenial ? "unauthorized" : "unavailable");
+  }
+  if (response.status !== 200) {
+    throw new AccountReadError(response.status === 429 ? "rate_limited" : "unavailable");
+  }
+
+  try {
+    const body: unknown = await response.json();
+    if (isCurrentAccount(body)) {
+      return body;
+    }
+  } catch {
+    // A malformed success response does not establish account authority.
+  }
+  throw new AccountReadError("unavailable");
 }
 
 export async function registerAccount(

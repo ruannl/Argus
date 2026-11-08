@@ -107,10 +107,83 @@ describe("server backend client", () => {
   });
 
   it("does not expose backend failure bodies and rejects empty session tokens", async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }));
-    await expect(getCurrentAccount("bad-token")).rejects.toThrow("backend request failed");
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: "unauthorized", detail: "PRIVATE-CANARY" }), { status: 401 }));
+    await expect(getCurrentAccount("bad-token")).rejects.toMatchObject({
+      kind: "unauthorized",
+      message: "Account check failed.",
+    });
     await expect(getCurrentAccount("")).rejects.toThrow("session token is required");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves successful account responses with additional fields", async () => {
+    const account = {
+      id: "00000000-0000-0000-0000-000000000001",
+      email: "customer@example.test",
+      email_verified: true,
+      subscriber_active: true,
+      subscription_started_at: null,
+      next_billing_at: null,
+      lifetime: false,
+      admin: false,
+      extra_field: "additional backend data",
+    };
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(account), { status: 200 }));
+
+    await expect(getCurrentAccount("opaque-session-token")).resolves.toEqual(account);
+  });
+
+  it.each([
+    [401, "unauthorized"],
+    [429, "rate_limited"],
+    [403, "unavailable"],
+    [500, "unavailable"],
+    [204, "unavailable"],
+  ] as const)("normalizes /v1/me status %i to %s without returning its body", async (status, kind) => {
+    const body = status === 401
+      ? { error: "unauthorized", detail: "PRIVATE-CANARY" }
+      : { error: "PRIVATE-CANARY" };
+    fetchMock.mockResolvedValue(new Response(
+      status === 204 || status === 403 ? null : JSON.stringify(body), { status },
+    ));
+    await expect(getCurrentAccount("opaque-session-token")).rejects.toMatchObject({
+      kind,
+      message: "Account check failed.",
+    });
+  });
+
+  it.each([
+    JSON.stringify({ error: "unexpected", detail: "PRIVATE-CANARY" }),
+    "not-json PRIVATE-CANARY",
+    "",
+  ])("does not treat a noncanonical 401 body as confirmed denial", async (body) => {
+    fetchMock.mockResolvedValue(new Response(body, { status: 401 }));
+    await expect(getCurrentAccount("opaque-session-token")).rejects.toMatchObject({
+      kind: "unavailable",
+      message: "Account check failed.",
+    });
+  });
+
+  it("treats malformed, unexpected and unreachable /v1/me bodies as unavailable", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("not-json", { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ id: "unexpected-only" }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: "account-id",
+      email: "customer@example.test",
+      email_verified: "true",
+      subscriber_active: true,
+      subscription_started_at: null,
+      next_billing_at: null,
+      lifetime: false,
+      admin: false,
+    }), { status: 200 }));
+    fetchMock.mockRejectedValueOnce(new Error("PRIVATE-CANARY backend origin"));
+    for (let index = 0; index < 4; index += 1) {
+      await expect(getCurrentAccount("opaque-session-token")).rejects.toMatchObject({
+        kind: "unavailable",
+        message: "Account check failed.",
+      });
+    }
   });
 
   it("registers accounts through the trusted backend route", async () => {

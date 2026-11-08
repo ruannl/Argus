@@ -27,6 +27,10 @@ public sealed class AccountApi(
     private readonly ILogger _audit = loggerFactory.CreateLogger("audit");
     private readonly ILogger _logger = loggerFactory.CreateLogger("account");
 
+    // Test-only ordering seam. It is never set from a request or environment
+    // and cannot grant authority; the production path does not wait here.
+    private Func<Guid, CancellationToken, Task>? _beforeSessionIssuanceForTests = null;
+
     public void Map(WebApplication app)
     {
         app.MapGet("/health", Health);
@@ -176,8 +180,22 @@ public sealed class AccountApi(
             return Errors.InvalidCredentials();
         }
 
-        await store.ClearFailedLoginsAsync(customer.Id, cancellationToken);
-        var (token, expiresAt) = await store.CreateSessionAsync(customer.Id, cancellationToken);
+        if (_beforeSessionIssuanceForTests is { } beforeIssuance)
+        {
+            await beforeIssuance(customer.Id, cancellationToken);
+        }
+
+        var issued = await store.CreateSessionForVerifiedHashAsync(
+            customer.Id, hashToVerify, cancellationToken);
+        if (issued is null)
+        {
+            _audit.LogInformation(
+                "audit.login_failure customer_id={CustomerId} reason={Reason}",
+                customer.Id,
+                "invalid_credentials");
+            return Errors.InvalidCredentials();
+        }
+        var (token, expiresAt) = issued.Value;
         _audit.LogInformation("audit.login_success customer_id={CustomerId}", customer.Id);
         return Results.Json(new LoginResponse(token, Timestamps.Format(expiresAt)), statusCode: 200);
     }

@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import AppShell from "@/components/app-shell";
 import WorkspaceExpired from "@/components/workspace-expired";
 import {
+  AccountReadError,
   getCurrentAccount,
   getTransaction,
   listCategories,
@@ -19,6 +20,7 @@ import type {
 } from "@/lib/server/backend-client";
 
 import TransactionDetailView from "../transaction-detail";
+import AccountReadUnavailable from "../account-read-unavailable";
 
 export const dynamic = "force-dynamic";
 
@@ -79,11 +81,21 @@ export default async function TransactionDetailPage({
   let account: CurrentAccount | null = null;
   try {
     account = await getCurrentAccount(backendToken);
-  } catch {
-    // Invalid, expired, revoked, and unavailable backend sessions fail closed.
+  } catch (error) {
+    if (error instanceof AccountReadError && error.kind === "unauthorized") {
+      return <WorkspaceExpired />;
+    }
+    return (
+      <AccountReadUnavailable
+        kind={error instanceof AccountReadError && error.kind === "rate_limited"
+          ? "rate_limited"
+          : "unavailable"}
+        view="detail"
+      />
+    );
   }
   if (!account) {
-    return <WorkspaceExpired />;
+    return <AccountReadUnavailable kind="unavailable" view="detail" />;
   }
 
   const { id } = await params;

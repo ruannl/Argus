@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import WorkspaceExpired from "@/components/workspace-expired";
 import {
+  AccountReadError,
   getCurrentAccount,
   listCategories,
   listFinancialAccounts,
@@ -20,6 +21,7 @@ import type {
 
 import TransactionsWorkspace from "./transactions-workspace";
 import type { TransactionsInitialQuery } from "./transactions-workspace";
+import AccountReadUnavailable from "./account-read-unavailable";
 
 export const dynamic = "force-dynamic";
 
@@ -229,11 +231,21 @@ export default async function TransactionsPage({
   let account: CurrentAccount | null = null;
   try {
     account = await getCurrentAccount(backendToken);
-  } catch {
-    // Invalid, expired, revoked, and unavailable backend sessions fail closed.
+  } catch (error) {
+    if (error instanceof AccountReadError && error.kind === "unauthorized") {
+      return <WorkspaceExpired />;
+    }
+    return (
+      <AccountReadUnavailable
+        kind={error instanceof AccountReadError && error.kind === "rate_limited"
+          ? "rate_limited"
+          : "unavailable"}
+        view="list"
+      />
+    );
   }
   if (!account) {
-    return <WorkspaceExpired />;
+    return <AccountReadUnavailable kind="unavailable" view="list" />;
   }
 
   const parsed = parseState(await searchParams);

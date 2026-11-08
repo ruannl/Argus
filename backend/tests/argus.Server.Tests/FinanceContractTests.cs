@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using argus.Server.Data;
+using argus.Server.Security;
 
 namespace argus.Server.Tests;
 
@@ -719,8 +720,24 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         var unverifiedEmail = UniqueEmail();
         await RegisterAsync(unverifiedEmail);
         var unverifiedId = await CustomerIdByEmailAsync(unverifiedEmail);
-        var store = new Store(Factory.CreateDb());
-        var (unverifiedToken, _) = await store.CreateSessionAsync(unverifiedId);
+        // Test-only deliberately invalid session. Production issuance requires
+        // the hash verified by login and cannot mint by customer ID alone.
+        var unverifiedToken = Tokens.NewToken();
+        var now = DateTime.UtcNow;
+        await using (var connection = await Factory.CreateDb().OpenAsync())
+        await using (var insert = connection.CreateCommand())
+        {
+            insert.CommandText = """
+                INSERT INTO sessions (id, customer_id, token_hash, expires_at, revoked_at, last_seen_at, created_at)
+                VALUES (@id, @customer, @hash, @expires, NULL, @now, @now)
+                """;
+            insert.Parameters.AddWithValue("id", Guid.NewGuid());
+            insert.Parameters.AddWithValue("customer", unverifiedId);
+            insert.Parameters.AddWithValue("hash", Tokens.HashToken(unverifiedToken));
+            insert.Parameters.AddWithValue("expires", now.Add(Store.SessionAbsoluteTtl));
+            insert.Parameters.AddWithValue("now", now);
+            await insert.ExecuteNonQueryAsync();
+        }
         var unverified = await SendAsync(Get(AccountsPath, session: unverifiedToken));
         Assert.Equal(HttpStatusCode.Unauthorized, unverified.StatusCode);
         Assert.Equal("unauthorized", await ErrorKindAsync(unverified));

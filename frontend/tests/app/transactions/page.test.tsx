@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/auth", () => ({
@@ -6,6 +7,13 @@ vi.mock("@/auth", () => ({
 }));
 
 vi.mock("@/lib/server/backend-client", () => ({
+  AccountReadError: class AccountReadError extends Error {
+    readonly kind: string;
+    constructor(kind: string) {
+      super("Account check failed.");
+      this.kind = kind;
+    }
+  },
   getCurrentAccount: vi.fn(),
   listFinancialAccounts: vi.fn(),
   listCategories: vi.fn(),
@@ -28,10 +36,12 @@ vi.mock("@/lib/server/account-actions", () => ({
 }));
 
 import { redirect } from "next/navigation";
+import { testRouter } from "../../../vitest.setup";
 
 import TransactionsPage from "@/app/transactions/page";
 import { auth } from "@/auth";
 import {
+  AccountReadError,
   getCurrentAccount,
   listCategories,
   listFinancialAccounts,
@@ -70,6 +80,7 @@ function renderPage(searchParams: Record<string, string | string[]> = {}) {
 
 describe("transactions page", () => {
   beforeEach(() => {
+    window.history.replaceState(null, "", "/transactions");
     vi.mocked(auth).mockReset();
     vi.mocked(getCurrentAccount).mockReset();
     vi.mocked(listFinancialAccounts).mockReset();
@@ -154,10 +165,15 @@ describe("transactions page", () => {
 
   it("redirects to login when no backend session exists", async () => {
     vi.mocked(auth).mockResolvedValue(null as never);
+    vi.mocked(redirect).mockImplementation(() => {
+      throw new Error("NEXT_REDIRECT");
+    });
 
-    render(await renderPage());
+    await expect(renderPage()).rejects.toThrow("NEXT_REDIRECT");
 
     expect(redirect).toHaveBeenCalledWith("/login");
+    expect(getCurrentAccount).not.toHaveBeenCalled();
+    expect(queryTransactions).not.toHaveBeenCalled();
   });
 
   it("clears a dead backend session", async () => {
@@ -166,11 +182,54 @@ describe("transactions page", () => {
       authenticated: true,
       user: { backendToken: "dead-backend-token" },
     } as never);
-    vi.mocked(getCurrentAccount).mockRejectedValue(new Error("backend session expired"));
+    vi.mocked(getCurrentAccount).mockRejectedValue(new AccountReadError("unauthorized"));
 
     render(await renderPage());
 
     expect(screen.getByText("Your session has expired. Please sign in again.")).toBeInTheDocument();
     await waitFor(() => expect(endSessionAction).toHaveBeenCalledTimes(1));
+    expect(queryTransactions).not.toHaveBeenCalled();
+    expect(listFinancialAccounts).not.toHaveBeenCalled();
+  });
+
+  it.each(["unavailable", "rate_limited"] as const)(
+    "keeps the account and recovery URL untouched when /v1/me is %s",
+    async (kind) => {
+      const user = userEvent.setup();
+      signedIn();
+      vi.mocked(getCurrentAccount).mockRejectedValue(new AccountReadError(kind));
+      const operationId = "22222222-2222-4222-8222-222222222222";
+      const statementId = "11111111-1111-4111-8111-111111111111";
+      const address = `/transactions?statement_import_id=${statementId}&operation_id=${operationId}`;
+      window.history.replaceState(null, "", address);
+
+      render(await renderPage({ statement_import_id: statementId, operation_id: operationId }));
+
+      expect(screen.getByRole("heading", { name: "Transactions unavailable" })).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        kind === "rate_limited" ? /Wait a few minutes/ : /does not prove your session expired/,
+      );
+      expect(endSessionAction).not.toHaveBeenCalled();
+      expect(listFinancialAccounts).not.toHaveBeenCalled();
+      expect(listCategories).not.toHaveBeenCalled();
+      expect(listMerchantTags).not.toHaveBeenCalled();
+      expect(queryTransactions).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole("button", { name: "Retry account check" }));
+      expect(testRouter.refresh).toHaveBeenCalledTimes(1);
+      expect(window.location.pathname + window.location.search).toBe(address);
+    },
+  );
+
+  it("does not sign out on an untyped account-check error or invent inventory", async () => {
+    signedIn();
+    vi.mocked(getCurrentAccount).mockRejectedValue(new Error("PRIVATE-CANARY backend path"));
+
+    render(await renderPage());
+
+    expect(screen.getByRole("heading", { name: "Transactions unavailable" })).toBeInTheDocument();
+    expect(screen.queryByText(/PRIVATE-CANARY/)).not.toBeInTheDocument();
+    expect(endSessionAction).not.toHaveBeenCalled();
+    expect(queryTransactions).not.toHaveBeenCalled();
   });
 });
