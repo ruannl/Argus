@@ -836,5 +836,68 @@ public static class Migrations
             CREATE INDEX import_commit_receipts_customer_idx
                 ON import_commit_receipts(customer_id, operation_id);
             """)
+        ,
+        ("0007_transaction_workspace", """
+            CREATE TABLE transaction_operations (
+                customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                operation_id UUID NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('Prepared', 'Applied', 'Abandoned', 'Expired')),
+                selection_mode TEXT NOT NULL CHECK (selection_mode IN ('explicit', 'all_matching')),
+                request_digest TEXT NOT NULL,
+                filter_digest TEXT NULL,
+                confirmation_hash TEXT NULL,
+                action JSONB NOT NULL DEFAULT '{}'::jsonb,
+                target_stamps JSONB NOT NULL DEFAULT '{}'::jsonb,
+                selected_count INT NOT NULL CHECK (selected_count >= 0),
+                changed_count INT NOT NULL CHECK (changed_count >= 0),
+                unchanged_count INT NOT NULL CHECK (unchanged_count >= 0),
+                captured_at TIMESTAMPTZ NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                applied_at TIMESTAMPTZ NULL,
+                terminal_at TIMESTAMPTZ NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                PRIMARY KEY (customer_id, operation_id),
+                CONSTRAINT transaction_operations_counts_check CHECK (
+                    selected_count = changed_count + unchanged_count
+                ),
+                CONSTRAINT transaction_operations_expiry_check CHECK (expires_at > captured_at),
+                CONSTRAINT transaction_operations_applied_check CHECK (
+                    (status = 'Applied') = (applied_at IS NOT NULL)
+                ),
+                CONSTRAINT transaction_operations_prepared_payload_check CHECK (
+                    status <> 'Prepared' OR (
+                        confirmation_hash IS NOT NULL AND action <> '{}'::jsonb
+                    )
+                )
+            );
+
+            CREATE INDEX transaction_operations_customer_status_idx
+                ON transaction_operations(customer_id, status, expires_at);
+            CREATE INDEX transaction_operations_terminal_idx
+                ON transaction_operations(customer_id, terminal_at DESC)
+                WHERE status <> 'Prepared';
+
+            CREATE TABLE transaction_operation_items (
+                customer_id UUID NOT NULL,
+                operation_id UUID NOT NULL,
+                transaction_id UUID NOT NULL,
+                transaction_version INT NOT NULL CHECK (transaction_version > 0),
+                financial_account_id UUID NOT NULL,
+                statement_import_id UUID NOT NULL,
+                ordinal INT NOT NULL CHECK (ordinal >= 0),
+                PRIMARY KEY (customer_id, operation_id, transaction_id),
+                FOREIGN KEY (customer_id, operation_id)
+                    REFERENCES transaction_operations(customer_id, operation_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX transaction_operation_items_header_idx
+                ON transaction_operation_items(customer_id, operation_id, ordinal);
+
+            CREATE INDEX transactions_customer_date_idx
+                ON transactions(customer_id, transaction_date, id);
+            CREATE INDEX transactions_customer_amount_idx
+                ON transactions(customer_id, amount, id);
+            """)
     ];
 }

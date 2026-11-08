@@ -6,6 +6,7 @@ using argus.Server.Data;
 using argus.Server.Http;
 using argus.Server.Mail;
 using argus.Server.Security;
+using argus.Server.Transactions;
 
 // The PDF parser child must run before configuration, migrations, logging, or
 // web services are loaded. It reads only its bounded stdin frame and writes
@@ -89,6 +90,10 @@ builder.Services.AddSingleton<argus.Server.Imports.IImportFaultInjector>(
     argus.Server.Imports.NoopImportFaultInjector.Instance);
 builder.Services.AddSingleton<StatementImportStore>();
 builder.Services.AddSingleton<StatementImportApi>();
+builder.Services.AddSingleton<TransactionStore>();
+builder.Services.AddSingleton<TransactionApi>();
+builder.Services.AddSingleton<ITransactionFaultInjector>(NoopTransactionFaultInjector.Instance);
+builder.Services.AddHostedService<TransactionCleanupService>();
 builder.Services.AddHostedService<ImportCleanupService>();
 
 var app = builder.Build();
@@ -104,7 +109,8 @@ app.UseCors();
 
 app.Use(async (context, next) =>
 {
-    if (context.Request.Path.StartsWithSegments("/v1/finance/imports"))
+    if (context.Request.Path.StartsWithSegments("/v1/finance/imports") ||
+        context.Request.Path.StartsWithSegments("/v1/finance/transactions"))
     {
         context.Response.Headers.CacheControl = "no-store";
     }
@@ -145,6 +151,7 @@ if (args.Contains("seed"))
 app.Services.GetRequiredService<AccountApi>().Map(app);
 app.Services.GetRequiredService<FinanceApi>().Map(app);
 app.Services.GetRequiredService<StatementImportApi>().Map(app);
+app.Services.GetRequiredService<TransactionApi>().Map(app);
 
 app.Run();
 return 0;

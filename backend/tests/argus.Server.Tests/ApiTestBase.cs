@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics;
+using Npgsql;
 
 namespace argus.Server.Tests;
 
@@ -25,6 +27,7 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         await using var command = connection.CreateCommand();
         command.CommandText =
             "TRUNCATE import_review_rows, import_reviews, import_commit_receipts, import_quota_locks, " +
+            "transaction_operation_items, transaction_operations, " +
             "transaction_merchant_tags, transactions, statement_imports, merchant_tags, " +
             "categories, financial_accounts, customers, sessions, email_verification_tokens, " +
             "password_reset_tokens CASCADE";
@@ -223,5 +226,56 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync();
+    }
+}
+
+/// <summary>Database-clock and lock observations for bounded import-expiry tests.</summary>
+internal static class ImportExpiryTestHelpers
+{
+    internal static async Task<DateTime> SetDeadlineAsync(KitFactory factory, Guid reviewId, int seconds = 7)
+    {
+        await using var connection = await factory.CreateDb().OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE import_reviews SET expires_at = clock_timestamp() + @seconds * INTERVAL '1 second'
+            WHERE id = @id RETURNING expires_at
+            """;
+        command.Parameters.AddWithValue("seconds", seconds);
+        command.Parameters.AddWithValue("id", reviewId);
+        return (DateTime)(await command.ExecuteScalarAsync())!;
+    }
+
+    internal static async Task WaitForTagWaitAsync(NpgsqlConnection observer, int blockerPid)
+    {
+        var watch = Stopwatch.StartNew();
+        while (watch.Elapsed < TimeSpan.FromSeconds(5))
+        {
+            await using var command = observer.CreateCommand();
+            command.CommandText = """
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_stat_activity
+                    WHERE @blocker = ANY(pg_blocking_pids(pid)) AND state = 'active'
+                      AND query LIKE '%FROM merchant_tags%' AND query LIKE '%FOR UPDATE%'
+                )
+                """;
+            command.Parameters.AddWithValue("blocker", blockerPid);
+            if ((bool)(await command.ExecuteScalarAsync())!) return;
+            await Task.Delay(25);
+        }
+        Assert.Fail("The import commit did not reach the selected tag lock wait.");
+    }
+
+    internal static async Task WaitForDeadlineAsync(NpgsqlConnection observer, DateTime deadline)
+    {
+        var watch = Stopwatch.StartNew();
+        while (watch.Elapsed < TimeSpan.FromSeconds(15))
+        {
+            await using var command = observer.CreateCommand();
+            command.CommandText = "SELECT clock_timestamp() >= @deadline";
+            command.Parameters.AddWithValue("deadline", deadline);
+            if ((bool)(await command.ExecuteScalarAsync())!) return;
+            await Task.Delay(25);
+        }
+        Assert.Fail("The persisted review deadline did not pass during the bounded wait.");
     }
 }

@@ -139,6 +139,7 @@ test("unauthenticated workspace routes end on the login page", async ({ page }) 
   for (const route of [
     "/home",
     "/transactions",
+    "/transactions/missing",
     "/imports",
     "/imports/review/missing",
     "/imports/missing",

@@ -771,6 +771,28 @@ public sealed class FinanceStore(Db db)
             return new CategoryDeleteOutcome.NotFound();
         }
 
+        // Lock every affected transaction in ascending UUID order before the
+        // broad reassignment. The category row is already locked, so the
+        // workspace write order (classification before transactions) and this
+        // deletion order cannot deadlock.
+        await using (var lockRows = connection.CreateCommand())
+        {
+            lockRows.Transaction = transaction;
+            lockRows.CommandText = """
+                SELECT id
+                FROM transactions
+                WHERE customer_id = @customer_id AND category_id = @category_id
+                ORDER BY id
+                FOR UPDATE
+                """;
+            lockRows.Parameters.AddWithValue("customer_id", customerId);
+            lockRows.Parameters.AddWithValue("category_id", id);
+            await using var reader = await lockRows.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+            }
+        }
+
         long reassigned;
         await using (var reassign = connection.CreateCommand())
         {
@@ -1045,6 +1067,29 @@ public sealed class FinanceStore(Db db)
         {
             await transaction.CommitAsync(cancellationToken);
             return new MerchantTagDeleteOutcome.NotFound();
+        }
+
+        // Lock the tagged transactions in ascending UUID order before the
+        // version touch and link removal. The tag row is already locked; no
+        // account lock is added, preserving the established entity order.
+        await using (var lockRows = connection.CreateCommand())
+        {
+            lockRows.Transaction = transaction;
+            lockRows.CommandText = """
+                SELECT t.id
+                FROM transactions t
+                JOIN transaction_merchant_tags j
+                  ON j.customer_id = t.customer_id AND j.transaction_id = t.id
+                WHERE t.customer_id = @customer_id AND j.merchant_tag_id = @tag_id
+                ORDER BY t.id
+                FOR UPDATE OF t
+                """;
+            lockRows.Parameters.AddWithValue("customer_id", customerId);
+            lockRows.Parameters.AddWithValue("tag_id", id);
+            await using var reader = await lockRows.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+            }
         }
 
         long unassigned;

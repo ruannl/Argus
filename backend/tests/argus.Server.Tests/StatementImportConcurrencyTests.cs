@@ -493,6 +493,90 @@ public sealed class StatementImportConcurrencyTests(KitFactory factory) : ApiTes
     }
 
     [Fact]
+    public async Task CommitWaitingOnSelectedTagMustRejectReviewThatExpiresDuringWait()
+    {
+        var session = await NewSessionAsync();
+        var accountId = await CreateAccountAsync(session);
+        var tagId = await CreateTagAsync(session, "Expiry lock tag");
+        var file = StatementFixtureBuilder.BuildFnbCsv(2, chequeAccount: false).Bytes;
+        var review = await PrepareAsync(
+            session, accountId, file, new DateOnly(2024, 1, 1), new DateOnly(2024, 1, 31));
+        var reviewId = review.GetProperty("summary").GetProperty("id").GetGuid();
+        var rowId = Rows(review)[0].GetProperty("row_id").GetGuid();
+        var patch = await SendAsync(Patch(
+            $"{ReviewsPath}/{reviewId}",
+            Json(new
+            {
+                expected_review_version = Version(review),
+                decisions = new[] { new { row_id = rowId, selected_tag_ids = new[] { tagId } } },
+            }), session: session));
+        Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
+        var patched = await BodyAsync(patch);
+
+        var db = Factory.CreateDb();
+        await using var blocker = await db.OpenAsync();
+        await using var transaction = await blocker.BeginTransactionAsync();
+        await using (var tag = blocker.CreateCommand())
+        {
+            tag.Transaction = transaction;
+            tag.CommandText = "SELECT id FROM merchant_tags WHERE id = @id FOR UPDATE";
+            tag.Parameters.AddWithValue("id", tagId);
+            Assert.NotNull(await tag.ExecuteScalarAsync());
+        }
+        int blockerPid;
+        await using (var pid = blocker.CreateCommand())
+        {
+            pid.Transaction = transaction;
+            pid.CommandText = "SELECT pg_backend_pid()";
+            blockerPid = (int)(await pid.ExecuteScalarAsync())!;
+        }
+
+        var deadline = await ImportExpiryTestHelpers.SetDeadlineAsync(Factory, reviewId);
+        var headerBefore = await StringScalarAsync($"SELECT to_jsonb(r)::text FROM import_reviews r WHERE id = '{reviewId}'");
+        var rowsBefore = await StringScalarAsync($"""
+            SELECT jsonb_agg(to_jsonb(r) ORDER BY source_row_number)::text
+            FROM import_review_rows r WHERE review_id = '{reviewId}'
+            """);
+        var versionBefore = await ScalarAsync($"SELECT import_version FROM financial_accounts WHERE id = '{accountId}'");
+        Factory.LogCapture.Clear();
+        await using var observer = await db.OpenAsync();
+        var commit = SendAsync(Post(
+            $"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(patched)), session: session));
+        HttpResponseMessage? result = null;
+        try
+        {
+            await ImportExpiryTestHelpers.WaitForTagWaitAsync(observer, blockerPid);
+            Assert.False(commit.IsCompleted);
+            await using (var stillValid = observer.CreateCommand())
+            {
+                stillValid.CommandText = "SELECT clock_timestamp() < @deadline";
+                stillValid.Parameters.AddWithValue("deadline", deadline);
+                Assert.Equal(true, await stillValid.ExecuteScalarAsync());
+            }
+            await ImportExpiryTestHelpers.WaitForDeadlineAsync(observer, deadline);
+        }
+        finally
+        {
+            await transaction.RollbackAsync();
+            result = await commit.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        Assert.Equal(HttpStatusCode.Gone, result.StatusCode);
+        Assert.Equal("review_expired", await ErrorKindAsync(result));
+        Assert.Equal(0L, await CountRowsAsync("statement_imports"));
+        Assert.Equal(0L, await CountRowsAsync("transactions"));
+        Assert.Equal(0L, await CountRowsAsync("transaction_merchant_tags"));
+        Assert.Equal(0L, await CountRowsAsync("import_commit_receipts"));
+        Assert.Equal(versionBefore, await ScalarAsync($"SELECT import_version FROM financial_accounts WHERE id = '{accountId}'"));
+        Assert.Equal(headerBefore, await StringScalarAsync($"SELECT to_jsonb(r)::text FROM import_reviews r WHERE id = '{reviewId}'"));
+        Assert.Equal(rowsBefore, await StringScalarAsync($"""
+            SELECT jsonb_agg(to_jsonb(r) ORDER BY source_row_number)::text
+            FROM import_review_rows r WHERE review_id = '{reviewId}'
+            """));
+        Assert.False(Factory.LogCapture.Contains("audit.import_committed"));
+    }
+
+    [Fact]
     public async Task DeletedTagRejectsCommitWithoutPartialWrites()
     {
         var session = await NewSessionAsync();

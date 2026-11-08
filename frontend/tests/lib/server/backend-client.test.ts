@@ -4,6 +4,8 @@ vi.mock("server-only", () => ({}));
 
 import { PRODUCT_TOKEN } from "@/lib/brand";
 import {
+  abandonTransactionOperation,
+  applyTransactionOperation,
   archiveCategory,
   archiveFinancialAccount,
   archiveMerchantTag,
@@ -17,6 +19,8 @@ import {
   deleteMerchantTag,
   getBackendHealth,
   getCurrentAccount,
+  getTransaction,
+  getTransactionOperation,
   listCategories,
   listFinancialAccounts,
   listImportHistory,
@@ -24,7 +28,10 @@ import {
   listOpenImportReviews,
   loginAccount,
   logoutSession,
+  patchTransaction,
   prepareImportReview,
+  prepareTransactionOperation,
+  queryTransactions,
   requestPasswordReset,
   registerAccount,
   resendVerification,
@@ -100,10 +107,83 @@ describe("server backend client", () => {
   });
 
   it("does not expose backend failure bodies and rejects empty session tokens", async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }));
-    await expect(getCurrentAccount("bad-token")).rejects.toThrow("backend request failed");
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: "unauthorized", detail: "PRIVATE-CANARY" }), { status: 401 }));
+    await expect(getCurrentAccount("bad-token")).rejects.toMatchObject({
+      kind: "unauthorized",
+      message: "Account check failed.",
+    });
     await expect(getCurrentAccount("")).rejects.toThrow("session token is required");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves successful account responses with additional fields", async () => {
+    const account = {
+      id: "00000000-0000-0000-0000-000000000001",
+      email: "customer@example.test",
+      email_verified: true,
+      subscriber_active: true,
+      subscription_started_at: null,
+      next_billing_at: null,
+      lifetime: false,
+      admin: false,
+      extra_field: "additional backend data",
+    };
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(account), { status: 200 }));
+
+    await expect(getCurrentAccount("opaque-session-token")).resolves.toEqual(account);
+  });
+
+  it.each([
+    [401, "unauthorized"],
+    [429, "rate_limited"],
+    [403, "unavailable"],
+    [500, "unavailable"],
+    [204, "unavailable"],
+  ] as const)("normalizes /v1/me status %i to %s without returning its body", async (status, kind) => {
+    const body = status === 401
+      ? { error: "unauthorized", detail: "PRIVATE-CANARY" }
+      : { error: "PRIVATE-CANARY" };
+    fetchMock.mockResolvedValue(new Response(
+      status === 204 || status === 403 ? null : JSON.stringify(body), { status },
+    ));
+    await expect(getCurrentAccount("opaque-session-token")).rejects.toMatchObject({
+      kind,
+      message: "Account check failed.",
+    });
+  });
+
+  it.each([
+    JSON.stringify({ error: "unexpected", detail: "PRIVATE-CANARY" }),
+    "not-json PRIVATE-CANARY",
+    "",
+  ])("does not treat a noncanonical 401 body as confirmed denial", async (body) => {
+    fetchMock.mockResolvedValue(new Response(body, { status: 401 }));
+    await expect(getCurrentAccount("opaque-session-token")).rejects.toMatchObject({
+      kind: "unavailable",
+      message: "Account check failed.",
+    });
+  });
+
+  it("treats malformed, unexpected and unreachable /v1/me bodies as unavailable", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("not-json", { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ id: "unexpected-only" }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: "account-id",
+      email: "customer@example.test",
+      email_verified: "true",
+      subscriber_active: true,
+      subscription_started_at: null,
+      next_billing_at: null,
+      lifetime: false,
+      admin: false,
+    }), { status: 200 }));
+    fetchMock.mockRejectedValueOnce(new Error("PRIVATE-CANARY backend origin"));
+    for (let index = 0; index < 4; index += 1) {
+      await expect(getCurrentAccount("opaque-session-token")).rejects.toMatchObject({
+        kind: "unavailable",
+        message: "Account check failed.",
+      });
+    }
   });
 
   it("registers accounts through the trusted backend route", async () => {
@@ -923,5 +1003,199 @@ describe("server import client", () => {
       kind: "unavailable",
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("server transaction client", () => {
+  beforeEach(() => {
+    vi.stubEnv("ARGUS_BACKEND_URL", "http://backend.test/");
+    vi.stubEnv("ARGUS_API_SECRET", "application-secret");
+    vi.stubEnv("ARGUS_FRONTEND_URL", "http://frontend.test");
+    fetchMock.mockReset();
+    globalThis.fetch = fetchMock;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.unstubAllEnvs();
+  });
+
+  const page = {
+    transactions: [],
+    inventory_count: 0,
+    matching_visible_count: 0,
+    matching_hidden_count: 0,
+    matching_total: 0,
+    filtered_total: 0,
+    page: 1,
+    page_size: 25,
+    sort_by: "date",
+    sort_direction: "desc",
+  };
+
+  it("queries through a body-only POST with the trusted headers", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(page), { status: 200 }));
+
+    await expect(queryTransactions("opaque-session-token", {
+      filters: { search: "private merchant", visibility: "hidden" },
+      page: 2,
+      page_size: 50,
+      sort_by: "amount",
+      sort_direction: "asc",
+    })).resolves.toEqual({ ok: true, value: page });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://backend.test/v1/finance/transactions/query");
+    expect(init?.method).toBe("POST");
+    expect(init?.headers).toEqual({
+      [REQUEST_ID_HEADER]: expect.any(String),
+      "Content-Type": "application/json",
+      [APPLICATION_SECRET_HEADER]: "application-secret",
+      [SESSION_HEADER]: "opaque-session-token",
+      [FRONTEND_ORIGIN_HEADER]: "http://frontend.test",
+    });
+    expect(init?.body).toBe(JSON.stringify({
+      filters: { search: "private merchant", visibility: "hidden" },
+      page: 2,
+      page_size: 50,
+      sort_by: "amount",
+      sort_direction: "asc",
+    }));
+    expect(init?.cache).toBe("no-store");
+  });
+
+  it("loads one owned transaction detail by encoded id", async () => {
+    const detail = {
+      transaction: { id: "transaction-id" },
+      suggested_tags: [],
+      has_more_suggestions: false,
+      source_page: null,
+      source_row_number: 4,
+    };
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(detail), { status: 200 }));
+
+    await expect(getTransaction("opaque-session-token", "transaction/id")).resolves.toEqual({
+      ok: true,
+      value: detail,
+    });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "http://backend.test/v1/finance/transactions/transaction%2Fid",
+    );
+  });
+
+  it("patches with expected version and exact action fields", async () => {
+    const result = { transaction: {}, selected_count: 1, changed_count: 1, unchanged_count: 0 };
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(result), { status: 200 }));
+
+    await expect(patchTransaction("opaque-session-token", "transaction-id", {
+      expected_version: 3,
+      changes: { category_id: "category-id", add_tag_ids: ["tag-a"], remove_tag_ids: ["tag-b"] },
+    })).resolves.toEqual({ ok: true, value: result });
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("PATCH");
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(JSON.stringify({
+      expected_version: 3,
+      changes: { category_id: "category-id", add_tag_ids: ["tag-a"], remove_tag_ids: ["tag-b"] },
+    }));
+  });
+
+  it("prepares, applies, and abandons operations", async () => {
+    const operation = {
+      operation_id: "operation-id",
+      status: "Prepared",
+      selection_mode: "all_matching",
+      captured_at: "2026-01-01T00:00:00Z",
+      expires_at: "2026-01-01T00:15:00Z",
+      selected_count: 2,
+      changed_count: 1,
+      unchanged_count: 1,
+      confirmation_hash: "hash",
+      applied_at: null,
+      terminal_at: null,
+      action: null,
+    };
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ operation, created: true }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        operation_id: "operation-id",
+        status: "Applied",
+        selected_count: 2,
+        changed_count: 1,
+        unchanged_count: 1,
+        applied_at: "2026-01-01T00:01:00Z",
+        replayed: false,
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...operation, status: "Abandoned" }), { status: 200 }));
+
+    await prepareTransactionOperation("opaque-session-token", {
+      operation_id: "operation-id",
+      selection: { mode: "all_matching", filters: { category_id: "category-id" } },
+      changes: { is_hidden_by_user: true },
+    });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "http://backend.test/v1/finance/transactions/operations/prepare",
+    );
+
+    await applyTransactionOperation("opaque-session-token", "operation-id", "hash", 2);
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      "http://backend.test/v1/finance/transactions/operations/operation-id/apply",
+    );
+    expect(fetchMock.mock.calls[1][1]?.body).toBe(JSON.stringify({
+      confirmation_hash: "hash",
+      expected_selected_count: 2,
+      confirm: true,
+    }));
+
+    await abandonTransactionOperation("opaque-session-token", "operation-id");
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      "http://backend.test/v1/finance/transactions/operations/operation-id/abandon",
+    );
+    expect(fetchMock.mock.calls[2][1]?.body).toBe("{}");
+  });
+
+  it("maps fixed error codes without leaking bodies", async () => {
+    const cases: [number, unknown, string][] = [
+      [401, { error: "unauthorized" }, "unauthorized"],
+      [404, { error: "not_found" }, "not_found"],
+      [409, { error: "version_conflict" }, "version_conflict"],
+      [409, { error: "selection_stale" }, "selection_stale"],
+      [409, { error: "classification_changed" }, "classification_changed"],
+      [409, { error: "parent_hidden" }, "parent_hidden"],
+      [409, { error: "idempotency_conflict" }, "idempotency_conflict"],
+      [409, { error: "operation_busy" }, "operation_busy"],
+      [410, { error: "operation_expired" }, "operation_expired"],
+      [410, { error: "operation_abandoned" }, "operation_abandoned"],
+      [413, { error: "request_too_large" }, "request_too_large"],
+      [429, { error: "operation_quota" }, "rate_limited"],
+      [400, { error: "unknown_error" }, "unavailable"],
+      [400, { something: "else" }, "unavailable"],
+    ];
+
+    for (const [status, body, kind] of cases) {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(body), { status }));
+      await expect(queryTransactions("opaque-session-token", {})).resolves.toEqual({
+        ok: false,
+        kind,
+      });
+    }
+  });
+
+  it("maps 410 and empty session tokens safely", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("not json", { status: 410 }));
+    await expect(getTransactionOperation("opaque-session-token", "operation-id")).resolves.toEqual({
+      ok: false,
+      kind: "operation_expired",
+    });
+
+    fetchMock.mockRejectedValueOnce(new Error("network failure with secret details"));
+    await expect(getTransaction("opaque-session-token", "transaction-id")).resolves.toEqual({
+      ok: false,
+      kind: "unavailable",
+    });
+
+    await expect(queryTransactions("", {})).resolves.toEqual({
+      ok: false,
+      kind: "unavailable",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

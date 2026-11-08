@@ -111,41 +111,73 @@ public sealed class Store(Db db)
         return await command.ExecuteScalarAsync(cancellationToken) is true;
     }
 
-    public async Task ClearFailedLoginsAsync(Guid customerId, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            UPDATE customers
-            SET failed_login_count = 0, locked_until = NULL, updated_at = NOW()
-            WHERE id = @id
-            """;
-        command.Parameters.AddWithValue("id", customerId);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
     // --- Sessions -----------------------------------------------------------
 
-    public async Task<(string Token, DateTime ExpiresAt)> CreateSessionAsync(
+    /// <summary>
+    /// Issues only against the exact encoded hash that the login handler
+    /// verified. Holding the customer row through commit serializes issuance
+    /// with password reset's hash replacement and session revocation.
+    /// </summary>
+    public async Task<(string Token, DateTime ExpiresAt)?> CreateSessionForVerifiedHashAsync(
         Guid customerId,
+        string verifiedPasswordHash,
         CancellationToken cancellationToken = default)
     {
         var token = Tokens.NewToken();
+        await using var connection = await db.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        await using (var lookup = connection.CreateCommand())
+        {
+            lookup.Transaction = transaction;
+            lookup.CommandText = """
+                SELECT password_hash, email_verified_at, subscriber_activated_at, locked_until
+                FROM customers WHERE id = @id FOR UPDATE
+                """;
+            lookup.Parameters.AddWithValue("id", customerId);
+            await using var reader = await lookup.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken)
+                || !string.Equals(reader.GetString(0), verifiedPasswordHash, StringComparison.Ordinal)
+                || reader.IsDBNull(1)
+                || reader.IsDBNull(2)
+                || (!reader.IsDBNull(3) && reader.GetFieldValue<DateTime>(3) > DateTime.UtcNow))
+            {
+                await reader.CloseAsync();
+                await transaction.RollbackAsync(cancellationToken);
+                return null;
+            }
+        }
+
+        await using (var clear = connection.CreateCommand())
+        {
+            clear.Transaction = transaction;
+            clear.CommandText = """
+                UPDATE customers
+                SET failed_login_count = 0, locked_until = NULL, updated_at = NOW()
+                WHERE id = @id
+                """;
+            clear.Parameters.AddWithValue("id", customerId);
+            await clear.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         var now = DateTime.UtcNow;
         var expiresAt = now.Add(SessionAbsoluteTtl);
+        await using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO sessions (id, customer_id, token_hash, expires_at, revoked_at, last_seen_at, created_at)
+                VALUES (@id, @customer_id, @token_hash, @expires_at, NULL, @now, @now)
+                """;
+            insert.Parameters.AddWithValue("id", Guid.NewGuid());
+            insert.Parameters.AddWithValue("customer_id", customerId);
+            insert.Parameters.AddWithValue("token_hash", Tokens.HashToken(token));
+            insert.Parameters.AddWithValue("expires_at", expiresAt);
+            insert.Parameters.AddWithValue("now", now);
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
 
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT INTO sessions (id, customer_id, token_hash, expires_at, revoked_at, last_seen_at, created_at)
-            VALUES (@id, @customer_id, @token_hash, @expires_at, NULL, @now, @now)
-            """;
-        command.Parameters.AddWithValue("id", Guid.NewGuid());
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("token_hash", Tokens.HashToken(token));
-        command.Parameters.AddWithValue("expires_at", expiresAt);
-        command.Parameters.AddWithValue("now", now);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return (token, expiresAt);
     }
 

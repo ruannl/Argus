@@ -37,6 +37,16 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Privacy: Next.js captures Server Function invocation arguments in
+  // development before the action authenticates or validates them, then
+  // prints them on success or failure. Private search text must never reach
+  // framework logs, so disable the development invocation lines globally.
+  // Incoming-request logging, fetch/browser logging and backend audit events
+  // are separate and unchanged. Removing this setting while private Server
+  // Actions remain reachable reopens the disclosure.
+  logging: {
+    serverFunctions: false,
+  },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

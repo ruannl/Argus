@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using argus.Server.Finance;
 using argus.Server.Imports;
 using Npgsql;
 using NpgsqlTypes;
@@ -1181,7 +1182,7 @@ public sealed class StatementImportStore
             connection, transaction, customerId, cancellationToken);
         foreach (var snapshot in snapshots)
         {
-            foreach (var tagId in SuggestTags(snapshot.Row.NormalizedDescription, activeTags))
+            foreach (var tagId in TagSuggestions.Match(snapshot.Row.NormalizedDescription, activeTags))
             {
                 snapshot.SuggestedTagIds.Add(tagId);
             }
@@ -2209,10 +2210,11 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
-        if (review.Status == "Expired" || review.ExpiresAt <= DateTime.UtcNow)
+        if (review.Status == "Expired")
         {
             throw new ImportStoreException(ImportErrorCodes.ReviewExpired);
         }
+        await ThrowIfCommitExpiredAsync(connection, transaction, review.ExpiresAt, cancellationToken);
         if (review.Status != "Prepared")
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
@@ -2291,6 +2293,8 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.TagUnavailable);
         }
+        _faults.OnStep("tags_validated");
+        await ThrowIfCommitExpiredAsync(connection, transaction, review.ExpiresAt, cancellationToken);
 
         var fingerprintMatches = await FingerprintMatchesAsync(
             connection, transaction, customerId, accountId.Value,
@@ -2517,9 +2521,26 @@ public sealed class StatementImportStore
             connection, transaction, customerId, statementId, cancellationToken)
             ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
         _faults.OnStep("before_commit");
+        await ThrowIfCommitExpiredAsync(connection, transaction, review.ExpiresAt, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         _faults.OnStep("after_commit_before_response");
         return new ImportCommitResult(summary, false);
+    }
+
+    private static async Task ThrowIfCommitExpiredAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        DateTime expiresAt,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT clock_timestamp() >= @expires_at";
+        command.Parameters.AddWithValue("expires_at", expiresAt);
+        if ((bool)(await command.ExecuteScalarAsync(cancellationToken))!)
+        {
+            throw new ImportStoreException(ImportErrorCodes.ReviewExpired);
+        }
     }
 
     private async Task<ImportCommitResult> ReplayReceiptAsync(
@@ -3298,49 +3319,6 @@ public sealed class StatementImportStore
                 reader.GetString(1).Split(' ', StringSplitOptions.RemoveEmptyEntries)));
         }
         return tags;
-    }
-
-    private static IEnumerable<Guid> SuggestTags(
-        string normalizedDescription,
-        IReadOnlyList<(Guid Id, string[] Tokens)> tags)
-    {
-        if (string.IsNullOrWhiteSpace(normalizedDescription))
-        {
-            yield break;
-        }
-        var descriptionTokens = normalizedDescription.Split(
-            ' ', StringSplitOptions.RemoveEmptyEntries);
-        foreach (var (id, tagTokens) in tags)
-        {
-            if (tagTokens.Length == 0 || tagTokens.Length > descriptionTokens.Length)
-            {
-                continue;
-            }
-            var found = false;
-            for (var start = 0; start <= descriptionTokens.Length - tagTokens.Length; start++)
-            {
-                var match = true;
-                for (var offset = 0; offset < tagTokens.Length; offset++)
-                {
-                    if (!string.Equals(
-                            descriptionTokens[start + offset], tagTokens[offset],
-                            StringComparison.Ordinal))
-                    {
-                        match = false;
-                        break;
-                    }
-                }
-                if (match)
-                {
-                    found = true;
-                    break;
-                }
-            }
-            if (found)
-            {
-                yield return id;
-            }
-        }
     }
 
     private static async Task<Guid?> FindSystemCategoryAsync(
