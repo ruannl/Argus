@@ -214,7 +214,9 @@ differences from the Rust sibling kit.
 - Put a blank line after a guard clause that returns or continues, and before a
   final `return`.
 - In a `catch` block, pass the caught exception as the first argument to the
-  logger.
+  logger. Do not pass exceptions that can embed user-supplied data, notably
+  `PostgresException` on finance and import paths; log `SqlState` and the
+  error class instead.
 - Remove unused C# usings and sort the rest with `System` first.
 - Format and lint the code you touch. Keep a repository-wide formatting pass
   separate from feature changes. Load `argus-code-style` for cleanup and

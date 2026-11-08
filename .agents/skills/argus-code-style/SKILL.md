@@ -21,7 +21,7 @@ Paths are relative to `backend/`. Omit `--include` for a full pass or add
 `--verify-no-changes` for a check. Resolve naming diagnostics with a symbol
 rename.
 
-- For declarations with three or more parameters, keep the first parameter on
+- For declarations with four or more parameters, keep the first parameter on
   the declaration line and align the rest under it. Shorter lists can stay
   inline.
 - Prefer explicit types over `var`, including `out` variables and tuple
@@ -31,7 +31,9 @@ rename.
   240 characters; otherwise break long boolean conditions after `&&` or `||`
   and align the continuation.
 - Put a blank line after a guard clause and before a final `return`.
-- In a `catch` block, pass the caught exception to the logger.
+- In a `catch` block, pass the caught exception first to the logger. Do not pass
+  exceptions that can embed user-supplied data, notably `PostgresException` on
+  finance and import paths; log `SqlState` and the error class instead.
 
 ## Next.js
 

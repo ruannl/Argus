@@ -1,3 +1,5 @@
+using Npgsql;
+
 namespace argus.Server.Data;
 
 /// <summary>
@@ -18,6 +20,10 @@ public sealed class TransactionCleanupService(TransactionStore store, ILogger<Tr
             catch (OperationCanceledException)
             {
                 break;
+            }
+            catch (PostgresException exception)
+            {
+                logger.LogError("transaction_cleanup_failed error_class={ErrorClass} sql_state={SqlState}", "postgres", exception.SqlState);
             }
             catch (Exception exception)
             {

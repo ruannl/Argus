@@ -62,7 +62,7 @@ public sealed class StatementImportApi(FinanceGuard guard,
         }
         catch (PostgresException exception)
         {
-            _logger.LogError(exception, "finance_operation_failed operation={Operation} error_class={ErrorClass} sql_state={SqlState}", operation, "postgres", exception.SqlState);
+            _logger.LogError("finance_operation_failed operation={Operation} error_class={ErrorClass} sql_state={SqlState}", operation, "postgres", exception.SqlState);
             return Errors.Internal();
         }
         catch (Exception exception)

@@ -2318,11 +2318,11 @@ public sealed class StatementImportStore
     }
 
     private static async Task<ImportCommitResult> ReplayReceiptAsync(NpgsqlConnection connection,
-                                                              NpgsqlTransaction transaction,
-                                                              Guid customerId,
-                                                              Guid reviewId,
-                                                              string requestDigest,
-                                                              CancellationToken cancellationToken)
+                                                                     NpgsqlTransaction transaction,
+                                                                     Guid customerId,
+                                                                     Guid reviewId,
+                                                                     string requestDigest,
+                                                                     CancellationToken cancellationToken)
     {
         var receipt = await ReadReceiptAsync(connection, transaction, customerId, reviewId, true, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
         if (receipt.State == "Deleted")

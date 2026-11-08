@@ -42,12 +42,12 @@ public sealed class TransactionApi(FinanceGuard guard,
         }
         catch (PostgresException exception) when (IsRetryable(exception))
         {
-            _logger.LogWarning(exception, "finance_operation_failed operation={Operation} error_class={ErrorClass} sql_state={SqlState}", operation, "postgres_retryable", exception.SqlState);
+            _logger.LogWarning("finance_operation_failed operation={Operation} error_class={ErrorClass} sql_state={SqlState}", operation, "postgres_retryable", exception.SqlState);
             return TransactionError(TransactionErrorCodes.OperationBusy);
         }
         catch (PostgresException exception)
         {
-            _logger.LogError(exception, "finance_operation_failed operation={Operation} error_class={ErrorClass} sql_state={SqlState}", operation, "postgres", exception.SqlState);
+            _logger.LogError("finance_operation_failed operation={Operation} error_class={ErrorClass} sql_state={SqlState}", operation, "postgres", exception.SqlState);
             return Errors.Internal();
         }
         catch (Exception exception)

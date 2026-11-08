@@ -65,7 +65,7 @@ public sealed class FinanceGuard(AppSettings settings, Store store, RateLimiter 
         }
         catch (PostgresException exception)
         {
-            logger.LogError(exception, "finance_operation_failed operation={Operation} error_class={ErrorClass} sql_state={SqlState}", operation, "postgres", exception.SqlState);
+            logger.LogError("finance_operation_failed operation={Operation} error_class={ErrorClass} sql_state={SqlState}", operation, "postgres", exception.SqlState);
             return Errors.Internal();
         }
         catch (Exception exception)

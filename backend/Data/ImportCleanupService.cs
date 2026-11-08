@@ -1,3 +1,5 @@
+using Npgsql;
+
 namespace argus.Server.Data;
 
 /// <summary>
@@ -17,6 +19,10 @@ public sealed class ImportCleanupService(StatementImportStore store, ILogger<Imp
             catch (OperationCanceledException)
             {
                 break;
+            }
+            catch (PostgresException exception)
+            {
+                logger.LogError("import_cleanup_failed error_class={ErrorClass} sql_state={SqlState}", "postgres", exception.SqlState);
             }
             catch (Exception exception)
             {

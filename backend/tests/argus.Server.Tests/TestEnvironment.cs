@@ -177,7 +177,7 @@ public sealed class CapturingLoggerProvider : ILoggerProvider
     {
         lock (_gate)
         {
-            _entries.Add(exception is null ? $"{level} {category}: {message}" : $"{level} {category}: {message} [{exception.GetType().Name}]");
+            _entries.Add(exception is null ? $"{level} {category}: {message}" : $"{level} {category}: {message} [{exception}]");
         }
     }
 
