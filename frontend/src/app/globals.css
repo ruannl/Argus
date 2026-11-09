@@ -32,7 +32,11 @@
   --warning-ink-soft: #78350f;
   --warning-text: #92400e;
   --success-soft: #ecfdf5;
+  --success-line: #6ee7b7;
   --success-ink: #064e3b;
+  --suggestion-soft: #eff6ff;
+  --suggestion-line: #93c5fd;
+  --suggestion-ink: #1d4ed8;
   --shadow: rgba(15, 23, 42, 0.35);
 }
 
@@ -66,7 +70,11 @@
   --warning-ink-soft: #fcd34d;
   --warning-text: #fbbf24;
   --success-soft: #0a2a20;
+  --success-line: #34d399;
   --success-ink: #a7f3d0;
+  --suggestion-soft: #10233f;
+  --suggestion-line: #3b82f6;
+  --suggestion-ink: #bfdbfe;
   --shadow: rgba(0, 0, 0, 0.65);
 }
 
@@ -98,7 +106,11 @@
   --color-warning-ink-soft: var(--warning-ink-soft);
   --color-warning-text: var(--warning-text);
   --color-success-soft: var(--success-soft);
+  --color-success-line: var(--success-line);
   --color-success-ink: var(--success-ink);
+  --color-suggestion-soft: var(--suggestion-soft);
+  --color-suggestion-line: var(--suggestion-line);
+  --color-suggestion-ink: var(--suggestion-ink);
 }
 
 * {

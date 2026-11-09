@@ -11,7 +11,10 @@ import type {
   MerchantTag,
   TransactionDetail,
   TransactionErrorDetails,
+  TransactionRow,
 } from "@/lib/server/backend-client";
+
+import { sortByDisplayName } from "@/lib/display-order";
 
 type TransactionDetailViewProps = {
   initialDetail: TransactionDetail;
@@ -19,7 +22,7 @@ type TransactionDetailViewProps = {
   tags: MerchantTag[];
   classificationDisabled?: boolean;
   onClose?: () => void;
-  onSaved?: () => void;
+  onSaved?: (transaction: TransactionRow) => void;
   onUnavailable?: () => void;
   standalone?: boolean;
 };
@@ -70,15 +73,17 @@ export default function TransactionDetailView({
   const [requiresReload, setRequiresReload] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
 
-  const activeCategories = categories.filter(
-    (category) => !category.is_archived || category.id === transaction.category.id,
+  const activeCategories = sortByDisplayName(
+    categories.filter(
+      (category) => !category.is_archived || category.id === transaction.category.id,
+    ),
   );
   const assignedIds = new Set(transaction.merchant_tags.map((tag) => tag.id));
   const removableIds = new Set(
     transaction.merchant_tags.filter((tag) => !removeIds.includes(tag.id)).map((tag) => tag.id),
   );
-  const activeAddOptions = tags.filter(
-    (tag) => !tag.is_archived && !assignedIds.has(tag.id) && !addIds.includes(tag.id),
+  const activeAddOptions = sortByDisplayName(
+    tags.filter((tag) => !tag.is_archived && !assignedIds.has(tag.id) && !addIds.includes(tag.id)),
   );
 
   const retireUnavailable = useCallback(() => {
@@ -189,7 +194,7 @@ export default function TransactionDetailView({
       setAddIds([]);
       setRemoveIds([]);
       const refreshed = await refreshDetail();
-      onSaved?.();
+      onSaved?.(savedTransaction);
       if (standalone) {
         router.refresh();
       }
@@ -389,7 +394,7 @@ export default function TransactionDetailView({
 
       <p className="mt-4 rounded-xl border border-line bg-elevated px-4 py-3 text-sm leading-6 text-muted">
         Imported date, description, amount, account and statement identity are read-only. Only
-        category, merchant tags and your individual hide flag can change.{" "}
+        category, tags, and your individual hide flag can change.{" "}
         {hiddenExplanation(transaction.hidden_reason)}
       </p>
 
@@ -454,20 +459,34 @@ export default function TransactionDetailView({
           </p>
         ) : null}
         <div className="grid gap-4 lg:grid-cols-2">
-          <label className="text-sm font-semibold text-ink">
-            Category
-            <select
-              className="mt-1 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
-              onChange={(event) => setCategoryId(event.target.value)}
-              value={categoryId}
-            >
-              {activeCategories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {categoryLabel(category)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div>
+            <label className="text-sm font-semibold text-ink" htmlFor="detail-category">
+              Category
+              <select
+                className="mt-1 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
+                id="detail-category"
+                onChange={(event) => setCategoryId(event.target.value)}
+                value={categoryId}
+              >
+                {activeCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {categoryLabel(category)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {detail.suggested_category &&
+            detail.suggested_category.id !== categoryId &&
+            transaction.category.kind === "Uncategorised" ? (
+              <button
+                className="mt-2 inline-flex items-center rounded-full border border-suggestion-line bg-suggestion-soft px-3 py-1.5 text-xs font-semibold text-suggestion-ink"
+                onClick={() => setCategoryId(detail.suggested_category!.id)}
+                type="button"
+              >
+                Suggested: {detail.suggested_category.display_name}
+              </button>
+            ) : null}
+          </div>
 
           <div>
             <p className="text-sm font-semibold text-ink">Assigned tags</p>
@@ -475,7 +494,7 @@ export default function TransactionDetailView({
               {transaction.merchant_tags.length === 0 ? (
                 <span className="text-sm text-muted">No tags assigned.</span>
               ) : null}
-              {transaction.merchant_tags.map((tag) => {
+              {sortByDisplayName(transaction.merchant_tags).map((tag) => {
                 const markedForRemoval = removeIds.includes(tag.id);
                 return (
                   <span
@@ -599,24 +618,26 @@ export default function TransactionDetailView({
           Suggested tags
         </h3>
         <p className="mt-1 text-sm text-muted">
-          Suggestions come from your active tags and this description. Nothing is applied until you
-          accept it.
+          Suggestions come from your aliases, history, and active tags for this description. Nothing
+          is applied until you accept it.
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           {detail.suggested_tags.length === 0 ? (
             <span className="text-sm text-muted">No suggestions for this description.</span>
           ) : null}
-          {detail.suggested_tags.map((tag) => (
-            <button
-              className="rounded-full border border-accent-soft-line bg-accent-soft px-3 py-1 text-xs font-bold text-accent-soft-ink disabled:opacity-60"
-              disabled={busy || classificationDisabled || requiresReload}
-              key={tag.id}
-              onClick={() => void acceptSuggestion(tag.id)}
-              type="button"
-            >
-              Suggested: {tag.display_name} — add
-            </button>
-          ))}
+          {detail.suggested_tags
+            .filter((tag) => !tag.is_archived)
+            .map((tag) => (
+              <button
+                className="rounded-full border border-suggestion-line bg-suggestion-soft px-3 py-1 text-xs font-bold text-suggestion-ink disabled:opacity-60"
+                disabled={busy || classificationDisabled || requiresReload}
+                key={tag.id}
+                onClick={() => void acceptSuggestion(tag.id)}
+                type="button"
+              >
+                Suggested: {tag.display_name} — add
+              </button>
+            ))}
         </div>
         {detail.has_more_suggestions ? (
           <p className="mt-2 text-xs text-muted">

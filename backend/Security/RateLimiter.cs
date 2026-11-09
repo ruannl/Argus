@@ -17,9 +17,12 @@ public sealed class RateLimiter
 
     /// <summary>
     /// Finance workspace traffic has its own bucket so ordinary navigation does
-    /// not consume the login/auth brute-force budget.
+    /// not consume the login/auth brute-force budget. The limit leaves room for
+    /// manually reviewing a large statement, where one row can take several
+    /// requests (skip, override, tag changes, or a group decision), while still
+    /// bounding scripted abuse.
     /// </summary>
-    public bool CheckFinanceIp(string ip) => Check($"finance_ip:{ip}", 300);
+    public bool CheckFinanceIp(string ip) => Check($"finance_ip:{ip}", 1000);
 
     /// <summary>Transaction bulk preparation is twenty requests per customer per window.</summary>
     public bool CheckTransactionPreparation(Guid customerId) =>

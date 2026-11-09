@@ -194,7 +194,10 @@ public sealed class StatementImportApi(FinanceGuard guard,
 
             int page = QueryInt(context, "page", 1);
             int pageSize = QueryInt(context, "page_size", ImportLimits.MaxPageSize);
-            var detail = await store.GetReviewAsync(customerId!.Value, id.Value, page, pageSize, cancellationToken);
+            string sortDirection = context.Request.Query["sort_direction"].ToString();
+            bool possibleDuplicatesOnly = string.Equals(context.Request.Query["duplicates"].ToString(), "possible", StringComparison.OrdinalIgnoreCase);
+            bool untaggedOnly = string.Equals(context.Request.Query["untagged"].ToString(), "true", StringComparison.OrdinalIgnoreCase);
+            var detail = await store.GetReviewAsync(customerId!.Value, id.Value, page, pageSize, sortDirection, possibleDuplicatesOnly, untaggedOnly, cancellationToken);
             return Results.Json(ReviewResponse.From(detail));
         }, "imports_review_get");
 

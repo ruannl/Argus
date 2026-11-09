@@ -2,9 +2,18 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import AppShell from "@/components/app-shell";
+import {
+  EDITOR_ROW_CLASS,
+  TABLE_CLASS,
+  TABLE_HEAD_CLASS,
+  TABLE_ROW_CLASS,
+  TABLE_WRAPPER_CLASS,
+  TD_CLASS,
+  TH_CLASS,
+} from "@/components/table-styles";
 import {
   abandonOperationAction,
   applyOperationAction,
@@ -18,7 +27,6 @@ import type {
   CurrentAccount,
   FinancialAccount,
   MerchantTag,
-  TransactionApplyResult,
   TransactionDetail,
   TransactionErrorDetails,
   TransactionFilters,
@@ -28,6 +36,9 @@ import type {
   TransactionRow,
 } from "@/lib/server/backend-client";
 
+import { sortByDisplayName } from "@/lib/display-order";
+
+import { visibleTags } from "./classification-order";
 import TransactionDetailView from "./transaction-detail";
 import TransactionInlineEditor from "./transaction-inline-editor";
 
@@ -91,11 +102,11 @@ function amountLabel(row: TransactionRow): string {
 }
 
 function activeCategories(categories: Category[]): Category[] {
-  return categories.filter((category) => !category.is_archived);
+  return sortByDisplayName(categories.filter((category) => !category.is_archived));
 }
 
 function activeTags(tags: MerchantTag[]): MerchantTag[] {
-  return tags.filter((tag) => !tag.is_archived);
+  return sortByDisplayName(tags.filter((tag) => !tag.is_archived));
 }
 
 function hiddenBadge(row: TransactionRow): string | null {
@@ -146,7 +157,6 @@ export default function TransactionsWorkspace({
   const [prepared, setPrepared] = useState<TransactionOperation | null>(null);
   const [recovery, setRecovery] = useState<TransactionOperation | null>(null);
   const [recoveryLoading, setRecoveryLoading] = useState(initialOperationId !== null);
-  const [receipt, setReceipt] = useState<TransactionApplyResult | null>(null);
   const [operationId, setOperationId] = useState<string | null>(initialOperationId);
   const [pendingPreparation, setPendingPreparation] = useState<PendingPreparation | null>(null);
   const [knownRejection, setKnownRejection] = useState(false);
@@ -175,6 +185,7 @@ export default function TransactionsWorkspace({
   const detailRequestRef = useRef(0);
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const selectPageRef = useRef<HTMLInputElement | null>(null);
+  const confirmationRef = useRef<HTMLElement | null>(null);
 
   const canAssignCategories = !inventoryFailed;
   const rows = data?.transactions ?? [];
@@ -200,6 +211,14 @@ export default function TransactionsWorkspace({
       selectPageRef.current.indeterminate = somePageSelected;
     }
   }, [somePageSelected]);
+
+  useEffect(() => {
+    if (!prepared) {
+      return;
+    }
+    confirmationRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    confirmationRef.current?.focus();
+  }, [prepared]);
 
   const syncUrl = useCallback(
     (
@@ -266,15 +285,7 @@ export default function TransactionsWorkspace({
         }
         const operation = result.value;
         if (operation.status === "Applied") {
-          setReceipt({
-            operation_id: operation.operation_id,
-            status: operation.status,
-            selected_count: operation.selected_count,
-            changed_count: operation.changed_count,
-            unchanged_count: operation.unchanged_count,
-            applied_at: operation.applied_at,
-            replayed: true,
-          });
+          resumeAfterApplied(operation);
         } else if (operation.status === "Prepared") {
           setRecovery(operation);
         } else {
@@ -294,6 +305,9 @@ export default function TransactionsWorkspace({
     return () => {
       cancelled = true;
     };
+    // resumeAfterApplied is a hoisted declaration that reads live refs and
+    // stable setters. Adding it here would rerun the initial load every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialOperationId]);
 
   const runQuery = useCallback(
@@ -397,6 +411,17 @@ export default function TransactionsWorkspace({
     [clearSelection, filters, pageSize, runQuery, sortBy, sortDirection, syncUrl],
   );
 
+  const resetFilters = useCallback(() => {
+    const next: TransactionFilters = {};
+    viewRef.current = { ...viewRef.current, filters: next, page: 1 };
+    setFilters(next);
+    setPage(1);
+    setSearchInput("");
+    clearSelection();
+    syncUrl(next, 1, pageSize, sortBy, sortDirection, null);
+    void runQuery(next, 1, pageSize, sortBy, sortDirection);
+  }, [clearSelection, pageSize, runQuery, sortBy, sortDirection, syncUrl]);
+
   function changePage(nextPage: number) {
     if (nextPage < 1) {
       return;
@@ -480,7 +505,6 @@ export default function TransactionsWorkspace({
     const currentId = operationIdRef.current;
     const displayedId =
       terminalOperationId ??
-      receipt?.operation_id ??
       recovery?.operation_id ??
       prepared?.operation_id ??
       pendingPreparation?.input.operation_id ??
@@ -491,7 +515,6 @@ export default function TransactionsWorkspace({
     statusGenerationRef.current += 1;
     setTerminalStatus(null);
     setTerminalOperationId(null);
-    setReceipt(null);
     setRecovery(null);
     setPrepared(null);
     setMessage(null);
@@ -520,8 +543,13 @@ export default function TransactionsWorkspace({
     );
   }
 
-  function showAppliedReceipt(result: TransactionApplyResult) {
-    setReceipt(result);
+  function resumeAfterApplied(result: { changed_count: number; unchanged_count: number }) {
+    // A known-applied outcome needs no acknowledgement click. Clear the
+    // operation identity and bulk controls so the next change can be prepared
+    // immediately, and keep a short status message instead of a receipt panel.
+    statusGenerationRef.current += 1;
+    operationIdRef.current = null;
+    setOperationId(null);
     setPrepared(null);
     setRecovery(null);
     setPendingPreparation(null);
@@ -529,24 +557,15 @@ export default function TransactionsWorkspace({
     setTerminalOperationId(null);
     setSelection(new Map());
     setAllMatching(false);
+    setKnownRejection(false);
+    setCaptureContext(null);
     resetBulkControls();
     setMessage({
       tone: "status",
-      text: `${result.changed_count} changed and ${result.unchanged_count} already matched.`,
+      text: `Bulk change applied: ${result.changed_count} changed and ${result.unchanged_count} already matched.`,
     });
+    syncCurrentUrl();
     refreshCurrentView();
-  }
-
-  function receiptFromStatus(operation: TransactionOperation): TransactionApplyResult {
-    return {
-      operation_id: operation.operation_id,
-      status: operation.status,
-      selected_count: operation.selected_count,
-      changed_count: operation.changed_count,
-      unchanged_count: operation.unchanged_count,
-      applied_at: operation.applied_at,
-      replayed: true,
-    };
   }
 
   async function checkOperationStatus(id: string) {
@@ -570,7 +589,7 @@ export default function TransactionsWorkspace({
         return;
       }
       if (result.value.status === "Applied") {
-        showAppliedReceipt(receiptFromStatus(result.value));
+        resumeAfterApplied(result.value);
       } else if (result.value.status === "Prepared") {
         setPrepared(null);
         setRecovery(result.value);
@@ -633,7 +652,7 @@ export default function TransactionsWorkspace({
       }
       setPendingPreparation(null);
       if (operation.status === "Applied") {
-        showAppliedReceipt(receiptFromStatus(operation));
+        resumeAfterApplied(operation);
       } else if (operation.status === "Prepared") {
         setTerminalStatus(null);
         setTerminalOperationId(null);
@@ -716,7 +735,6 @@ export default function TransactionsWorkspace({
       listCount: data?.filtered_total ?? null,
       filters: omitEmptyFilters(filters),
     });
-    setReceipt(null);
     setRecovery(null);
     rememberOperation(id);
     await sendPreparation(pending);
@@ -755,7 +773,7 @@ export default function TransactionsWorkspace({
           if (recovered.ok) {
             const recoveredOperation = recovered.value;
             if (recoveredOperation.status === "Applied") {
-              showAppliedReceipt(receiptFromStatus(recoveredOperation));
+              resumeAfterApplied(recoveredOperation);
               return;
             }
             if (recoveredOperation.status === "Prepared") {
@@ -803,7 +821,7 @@ export default function TransactionsWorkspace({
         }
         return;
       }
-      showAppliedReceipt(result.value);
+      resumeAfterApplied(result.value);
     } catch {
       setMessage({
         tone: "error",
@@ -838,7 +856,7 @@ export default function TransactionsWorkspace({
         return;
       }
       if (result.value.status === "Applied") {
-        showAppliedReceipt(result.value);
+        resumeAfterApplied(result.value);
       } else if (result.value.status === "Abandoned" || result.value.status === "Expired") {
         setPrepared(null);
         setRecovery(null);
@@ -936,9 +954,9 @@ export default function TransactionsWorkspace({
   }, [filters, page, pageSize, runQuery, sortBy, sortDirection]);
 
   // A saved edit changes that row's version. Drop it from the checked set so a
-  // later bulk preparation cannot send the pre-edit version, and invalidate an
-  // executable confirmation that was built from the old values.
-  const handleRowSaved = useCallback(
+  // later bulk preparation cannot send the pre-edit version, invalidate an
+  // executable confirmation built from the old values, and reload the view.
+  const reloadRow = useCallback(
     (id: string) => {
       invalidateConfirmation();
       setSelection((current) => {
@@ -964,15 +982,33 @@ export default function TransactionsWorkspace({
     [invalidateConfirmation, runQuery],
   );
 
+  const handleRowSaved = useCallback(
+    (saved: TransactionRow) => {
+      // Install the authoritative saved row before reloading. Without this the
+      // inline editor briefly compares its saved base version with the old
+      // row prop and flashes a stale-draft warning after every successful save.
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              transactions: current.transactions.map((row) => (row.id === saved.id ? saved : row)),
+            }
+          : current,
+      );
+      reloadRow(saved.id);
+    },
+    [reloadRow],
+  );
+
   // A stale or uncertain single edit retires its draft, tells the user why, and
   // refreshes the authoritative row before any retry can be attempted.
   const handleRowStale = useCallback(
     (id: string, text: string) => {
       setInlineEditorId((current) => (current === id ? null : current));
       setMessage({ tone: "error", text });
-      handleRowSaved(id);
+      reloadRow(id);
     },
-    [handleRowSaved],
+    [reloadRow],
   );
 
   const totalPages = data
@@ -1072,9 +1108,19 @@ export default function TransactionsWorkspace({
           <h2 className="text-lg font-bold text-ink" id="filters-title">
             Find transactions
           </h2>
-          <span className="text-xs font-semibold text-muted">
-            Search stays in memory and request bodies; it never enters the URL.
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-muted">
+              Search stays in memory and request bodies; it never enters the URL.
+            </span>
+            <button
+              className="rounded-full border border-line bg-surface px-4 py-2 text-sm font-bold text-ink disabled:opacity-50"
+              disabled={Object.keys(omitEmptyFilters(filters)).length === 0}
+              onClick={resetFilters}
+              type="button"
+            >
+              Reset filters
+            </button>
+          </div>
         </div>
 
         <form
@@ -1099,6 +1145,19 @@ export default function TransactionsWorkspace({
             type="submit"
           >
             Search
+          </button>
+          <button
+            className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink disabled:opacity-50"
+            disabled={searchInput === "" && !filters.search}
+            onClick={() => {
+              setSearchInput("");
+              if (filters.search) {
+                changeFilters({ search: "" });
+              }
+            }}
+            type="button"
+          >
+            Clear search
           </button>
         </form>
 
@@ -1149,7 +1208,7 @@ export default function TransactionsWorkspace({
               value={filters.category_id ?? ""}
             >
               <option value="">All categories</option>
-              {categories.map((category) => (
+              {sortByDisplayName(categories).map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.display_name} ({category.kind})
                   {category.is_archived ? " — archived" : ""}
@@ -1158,7 +1217,7 @@ export default function TransactionsWorkspace({
             </select>
           </label>
           <label className="text-sm font-semibold text-ink">
-            Merchant tag
+            Tag
             <select
               className="mt-1 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
               disabled={inventoryFailed}
@@ -1167,7 +1226,7 @@ export default function TransactionsWorkspace({
             >
               <option value="">Any tag</option>
               <option value="untagged">Untagged</option>
-              {tags.map((tag) => (
+              {visibleTags(tags).map((tag) => (
                 <option key={tag.id} value={tag.id}>
                   {tag.display_name}
                   {tag.is_archived ? " — archived" : ""}
@@ -1345,6 +1404,170 @@ export default function TransactionsWorkspace({
             </label>
           </div>
 
+          <section
+            aria-labelledby="bulk-title"
+            className="mt-4 rounded-2xl border border-line bg-page p-4"
+          >
+            <h3 className="text-sm font-bold text-ink" id="bulk-title">
+              Bulk classification and visibility
+            </h3>
+            <p className="mt-1 text-sm text-muted" role="status">
+              {selectionLabel}{" "}
+              {allMatching
+                ? "Later matches are not included. The confirmation captures this exact scope."
+                : "Selections persist across pages but not across filter changes."}
+            </p>
+            {operationId ? (
+              <p
+                className="mt-2 rounded-xl border border-warning-line bg-warning-soft px-3 py-2 text-xs font-semibold text-warning-ink"
+                role="status"
+              >
+                Bulk changes are paused until the pending operation is resolved. Use the
+                confirmation or recovery panel below to apply or abandon it.
+              </p>
+            ) : null}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                disabled={rows.length === 0 || allMatching}
+                onClick={toggleAllMatching}
+                type="button"
+              >
+                Select all matching filters
+              </button>
+              <button
+                className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                disabled={!allMatching && selectionCount === 0}
+                onClick={() => clearSelection()}
+                type="button"
+              >
+                Clear selection
+              </button>
+              {loading ? (
+                <span className="text-sm text-muted" role="status">
+                  Refreshing…
+                </span>
+              ) : null}
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="text-sm font-semibold text-ink">
+                Set category
+                <select
+                  className="mt-1 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
+                  disabled={!canAssignCategories || busy || operationId !== null}
+                  onChange={(event) => setBulkCategoryId(event.target.value)}
+                  value={bulkCategoryId}
+                >
+                  <option value="">Keep category</option>
+                  {activeCategories(categories).map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.display_name} ({category.kind})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm font-semibold text-ink">
+                Add tags
+                <select
+                  className="mt-1 h-24 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
+                  disabled={!canAssignCategories || busy || operationId !== null}
+                  multiple
+                  onChange={(event) =>
+                    setBulkAddTagIds(
+                      Array.from(event.target.selectedOptions, (option) => option.value),
+                    )
+                  }
+                  value={bulkAddTagIds}
+                >
+                  {activeTags(tags).map((tag) => (
+                    <option key={tag.id} value={tag.id}>
+                      {tag.display_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm font-semibold text-ink">
+                Remove tags
+                <select
+                  className="mt-1 h-24 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
+                  disabled={!canAssignCategories || busy || operationId !== null}
+                  multiple
+                  onChange={(event) =>
+                    setBulkRemoveTagIds(
+                      Array.from(event.target.selectedOptions, (option) => option.value),
+                    )
+                  }
+                  value={bulkRemoveTagIds}
+                >
+                  {visibleTags(tags).map((tag) => (
+                    <option key={tag.id} value={tag.id}>
+                      {tag.display_name}
+                      {tag.is_archived ? " — archived" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="text-sm font-semibold text-ink">
+                Visibility
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <button
+                    aria-pressed={bulkHidden === true}
+                    className={
+                      bulkHidden === true
+                        ? "rounded-full bg-ink px-4 py-2 text-sm font-bold text-page"
+                        : "rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                    }
+                    disabled={busy || operationId !== null}
+                    onClick={() => setBulkHidden((current) => (current === true ? null : true))}
+                    type="button"
+                  >
+                    Hide
+                  </button>
+                  <button
+                    aria-pressed={bulkHidden === false}
+                    className={
+                      bulkHidden === false
+                        ? "rounded-full bg-ink px-4 py-2 text-sm font-bold text-page"
+                        : "rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                    }
+                    disabled={busy || operationId !== null}
+                    onClick={() => setBulkHidden((current) => (current === false ? null : false))}
+                    type="button"
+                  >
+                    Restore
+                  </button>
+                </div>
+                <p className="mt-1 text-xs font-normal text-muted">
+                  Restore refuses wholly when any selected transaction has a hidden parent
+                  statement.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button
+                className="rounded-full bg-ink px-5 py-2.5 text-sm font-bold text-page disabled:opacity-60"
+                disabled={!canPrepare}
+                onClick={() => void prepareBulkChange()}
+                type="button"
+              >
+                Review change
+              </button>
+              <button
+                className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                disabled={busy}
+                onClick={resetBulkControls}
+                type="button"
+              >
+                Reset change
+              </button>
+              <span className="text-xs text-muted">
+                Selected count = changed + already matching; nothing is written until Apply.
+              </span>
+            </div>
+          </section>
+
           {data.filtered_total === 0 ? (
             <div className="mt-4 rounded-2xl border border-line bg-page p-5">
               {data.inventory_count === 0 ? (
@@ -1395,92 +1618,143 @@ export default function TransactionsWorkspace({
               )}
             </div>
           ) : (
-            <ul className="mt-4 space-y-3">
-              {rows.map((row) => {
-                const badge = hiddenBadge(row);
-                const isSelected = selection.has(row.id);
-                return (
-                  <li className="rounded-2xl border border-line bg-page p-4" key={row.id}>
-                    <div className="flex flex-wrap items-start gap-3">
-                      <input
-                        aria-label={`Select transaction ${row.description || "no description"} on ${row.transaction_date} for ${amountLabel(row)}`}
-                        checked={isSelected}
-                        className="mt-1"
-                        disabled={loading}
-                        onChange={() => toggleRow(row)}
-                        type="checkbox"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <button
-                          className="block w-full text-left"
-                          onClick={(event) => void openDetail(row.id, event.currentTarget)}
-                          type="button"
-                        >
-                          <span className="block truncate text-sm font-semibold text-ink">
-                            {row.description.trim() === "" ? "No description" : row.description}
-                          </span>
-                          <span className="mt-1 block text-xs text-muted">
-                            {row.transaction_date} · {row.financial_account.display_name}
-                            {row.financial_account.is_archived ? " (archived)" : ""} · version{" "}
-                            {row.version}
-                          </span>
-                        </button>
-                        <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
-                          <span className="rounded-full border border-line bg-surface px-2 py-1 font-semibold text-ink">
-                            {row.category.display_name} ({row.category.kind})
-                          </span>
-                          {row.category.is_archived ? (
-                            <span className="rounded-full border border-line bg-elevated px-2 py-1 font-semibold text-muted">
-                              Archived category
-                            </span>
-                          ) : null}
-                          {row.merchant_tags.map((tag) => (
-                            <span
-                              className="rounded-full border border-line bg-surface px-2 py-1 font-semibold text-ink"
-                              key={tag.id}
+            <div className={`${TABLE_WRAPPER_CLASS} mt-4`}>
+              <table className={`${TABLE_CLASS} min-w-[64rem]`}>
+                <thead className={TABLE_HEAD_CLASS}>
+                  <tr>
+                    <th className={`${TH_CLASS} w-10`} scope="col">
+                      <span className="sr-only">Select</span>
+                    </th>
+                    <th className={TH_CLASS} scope="col">
+                      Date
+                    </th>
+                    <th className={TH_CLASS} scope="col">
+                      Description
+                    </th>
+                    <th className={TH_CLASS} scope="col">
+                      Account
+                    </th>
+                    <th className={TH_CLASS} scope="col">
+                      Classification
+                    </th>
+                    <th className={`${TH_CLASS} text-right`} scope="col">
+                      Amount
+                    </th>
+                    <th className={`${TH_CLASS} text-right`} scope="col">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => {
+                    const badge = hiddenBadge(row);
+                    const isSelected = selection.has(row.id);
+                    return (
+                      <Fragment key={row.id}>
+                        <tr className={TABLE_ROW_CLASS}>
+                          <td className={TD_CLASS}>
+                            <input
+                              aria-label={`Select transaction ${row.description || "no description"} on ${row.transaction_date} for ${amountLabel(row)}`}
+                              checked={isSelected}
+                              disabled={loading}
+                              onChange={() => toggleRow(row)}
+                              type="checkbox"
+                            />
+                          </td>
+                          <td className={`${TD_CLASS} whitespace-nowrap text-muted`}>
+                            {row.transaction_date}
+                          </td>
+                          <td className={TD_CLASS}>
+                            <button
+                              className="block w-full text-left text-sm font-semibold text-ink hover:underline"
+                              onClick={(event) => void openDetail(row.id, event.currentTarget)}
+                              type="button"
                             >
-                              {tag.display_name}
-                              {tag.is_archived ? " (archived)" : ""}
+                              {row.description.trim() === "" ? "No description" : row.description}
+                            </button>
+                            <span className="mt-0.5 block text-xs text-muted">
+                              Version {row.version}
                             </span>
-                          ))}
-                          {badge ? (
-                            <span className="rounded-full border border-warning-line bg-warning-soft px-2 py-1 font-semibold text-warning-ink">
-                              {badge}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                      <span className="font-mono text-lg font-semibold tabular-nums text-ink">
-                        {amountLabel(row)}
-                      </span>
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <button
-                        aria-expanded={inlineEditorId === row.id}
-                        className="rounded-full border border-line px-3 py-1.5 text-xs font-bold text-ink disabled:opacity-50"
-                        disabled={inventoryFailed}
-                        onClick={() =>
-                          setInlineEditorId((current) => (current === row.id ? null : row.id))
-                        }
-                        type="button"
-                      >
-                        {inlineEditorId === row.id ? "Close inline editor" : "Edit inline"}
-                      </button>
-                    </div>
-                    {inlineEditorId === row.id ? (
-                      <TransactionInlineEditor
-                        categories={categories}
-                        classificationDisabled={inventoryFailed}
-                        onSaved={() => handleRowSaved(row.id)}
-                        onStale={(text) => handleRowStale(row.id, text)}
-                        row={row}
-                        tags={tags}
-                      />
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
+                          </td>
+                          <td className={`${TD_CLASS} text-muted`}>
+                            {row.financial_account.display_name}
+                            {row.financial_account.is_archived ? " (archived)" : ""}
+                          </td>
+                          <td className={TD_CLASS}>
+                            <div className="flex flex-wrap gap-1.5 text-xs">
+                              <span
+                                className={
+                                  row.category.kind === "Uncategorised"
+                                    ? "rounded-full border border-warning-line bg-surface px-2 py-1 font-semibold text-ink"
+                                    : "rounded-full border border-line bg-surface px-2 py-1 font-semibold text-ink"
+                                }
+                              >
+                                {row.category.display_name} ({row.category.kind})
+                              </span>
+                              {row.category.is_archived ? (
+                                <span className="rounded-full border border-line bg-elevated px-2 py-1 font-semibold text-muted">
+                                  Archived category
+                                </span>
+                              ) : null}
+                              {sortByDisplayName(row.merchant_tags).map((tag) => (
+                                <span
+                                  className="rounded-full border border-line bg-surface px-2 py-1 font-semibold text-ink"
+                                  key={tag.id}
+                                >
+                                  {tag.display_name}
+                                  {tag.is_archived ? " (archived)" : ""}
+                                </span>
+                              ))}
+                              {badge ? (
+                                <span className="rounded-full border border-warning-line bg-warning-soft px-2 py-1 font-semibold text-warning-ink">
+                                  {badge}
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td
+                            className={`${TD_CLASS} text-right font-mono text-sm font-semibold whitespace-nowrap tabular-nums text-ink`}
+                          >
+                            {amountLabel(row)}
+                          </td>
+                          <td className={TD_CLASS}>
+                            <div className="flex justify-end">
+                              <button
+                                aria-expanded={inlineEditorId === row.id}
+                                className="rounded-full border border-line px-3 py-1.5 text-xs font-bold text-ink disabled:opacity-50"
+                                disabled={inventoryFailed}
+                                onClick={() =>
+                                  setInlineEditorId((current) =>
+                                    current === row.id ? null : row.id,
+                                  )
+                                }
+                                type="button"
+                              >
+                                {inlineEditorId === row.id ? "Close inline editor" : "Edit inline"}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                        {inlineEditorId === row.id ? (
+                          <tr className={EDITOR_ROW_CLASS}>
+                            <td className="px-4 py-4" colSpan={7}>
+                              <TransactionInlineEditor
+                                categories={categories}
+                                classificationDisabled={inventoryFailed}
+                                onSaved={(saved) => handleRowSaved(saved)}
+                                onStale={(text) => handleRowStale(row.id, text)}
+                                row={row}
+                                tags={tags}
+                              />
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
 
           <nav aria-label="Transaction pages" className="mt-4 flex flex-wrap items-center gap-2">
@@ -1507,162 +1781,12 @@ export default function TransactionsWorkspace({
         </section>
       ) : null}
 
-      <section
-        aria-labelledby="bulk-title"
-        className="mt-6 rounded-[2rem] border border-line bg-surface p-5 card-shadow sm:p-6"
-      >
-        <h2 className="text-lg font-bold text-ink" id="bulk-title">
-          Bulk classification and visibility
-        </h2>
-        <p className="mt-1 text-sm text-muted" role="status">
-          {selectionLabel}{" "}
-          {allMatching
-            ? "Later matches are not included. The confirmation captures this exact scope."
-            : "Selections persist across pages but not across filter changes."}
-        </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-            disabled={rows.length === 0 || allMatching}
-            onClick={toggleAllMatching}
-            type="button"
-          >
-            Select all matching filters
-          </button>
-          <button
-            className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-            disabled={!allMatching && selectionCount === 0}
-            onClick={() => clearSelection()}
-            type="button"
-          >
-            Clear selection
-          </button>
-          {loading ? (
-            <span className="text-sm text-muted" role="status">
-              Refreshing…
-            </span>
-          ) : null}
-        </div>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <label className="text-sm font-semibold text-ink">
-            Set category
-            <select
-              className="mt-1 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
-              disabled={!canAssignCategories || busy || operationId !== null}
-              onChange={(event) => setBulkCategoryId(event.target.value)}
-              value={bulkCategoryId}
-            >
-              <option value="">Keep category</option>
-              {activeCategories(categories).map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.display_name} ({category.kind})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm font-semibold text-ink">
-            Add tags
-            <select
-              className="mt-1 h-24 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
-              disabled={!canAssignCategories || busy || operationId !== null}
-              multiple
-              onChange={(event) =>
-                setBulkAddTagIds(Array.from(event.target.selectedOptions, (option) => option.value))
-              }
-              value={bulkAddTagIds}
-            >
-              {activeTags(tags).map((tag) => (
-                <option key={tag.id} value={tag.id}>
-                  {tag.display_name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm font-semibold text-ink">
-            Remove tags
-            <select
-              className="mt-1 h-24 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
-              disabled={!canAssignCategories || busy || operationId !== null}
-              multiple
-              onChange={(event) =>
-                setBulkRemoveTagIds(
-                  Array.from(event.target.selectedOptions, (option) => option.value),
-                )
-              }
-              value={bulkRemoveTagIds}
-            >
-              {tags.map((tag) => (
-                <option key={tag.id} value={tag.id}>
-                  {tag.display_name}
-                  {tag.is_archived ? " — archived" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="text-sm font-semibold text-ink">
-            Visibility
-            <div className="mt-1 flex flex-wrap gap-2">
-              <button
-                aria-pressed={bulkHidden === true}
-                className={
-                  bulkHidden === true
-                    ? "rounded-full bg-ink px-4 py-2 text-sm font-bold text-page"
-                    : "rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-                }
-                disabled={busy || operationId !== null}
-                onClick={() => setBulkHidden((current) => (current === true ? null : true))}
-                type="button"
-              >
-                Hide
-              </button>
-              <button
-                aria-pressed={bulkHidden === false}
-                className={
-                  bulkHidden === false
-                    ? "rounded-full bg-ink px-4 py-2 text-sm font-bold text-page"
-                    : "rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-                }
-                disabled={busy || operationId !== null}
-                onClick={() => setBulkHidden((current) => (current === false ? null : false))}
-                type="button"
-              >
-                Restore
-              </button>
-            </div>
-            <p className="mt-1 text-xs font-normal text-muted">
-              Restore refuses wholly when any selected transaction has a hidden parent statement.
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button
-            className="rounded-full bg-ink px-5 py-2.5 text-sm font-bold text-page disabled:opacity-60"
-            disabled={!canPrepare}
-            onClick={() => void prepareBulkChange()}
-            type="button"
-          >
-            Review change
-          </button>
-          <button
-            className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-            disabled={busy}
-            onClick={resetBulkControls}
-            type="button"
-          >
-            Reset change
-          </button>
-          <span className="text-xs text-muted">
-            Selected count = changed + already matching; nothing is written until Apply.
-          </span>
-        </div>
-      </section>
-
       {prepared ? (
         <section
           aria-labelledby="confirmation-title"
           className="mt-6 rounded-[2rem] border border-accent-soft-line bg-accent-soft p-5 sm:p-6"
+          ref={confirmationRef}
+          tabIndex={-1}
         >
           <h2 className="text-lg font-bold text-accent-soft-ink" id="confirmation-title">
             Confirm this change
@@ -1698,10 +1822,14 @@ export default function TransactionsWorkspace({
             Action:{" "}
             {preparedAction?.category ? `category “${preparedAction.category.display_name}”; ` : ""}
             {preparedAction?.add_tags.length
-              ? `add ${preparedAction.add_tags.map((tag) => tag.display_name).join(", ")}; `
+              ? `add ${sortByDisplayName(preparedAction.add_tags)
+                  .map((tag) => tag.display_name)
+                  .join(", ")}; `
               : ""}
             {preparedAction?.remove_tags.length
-              ? `remove ${preparedAction.remove_tags.map((tag) => tag.display_name).join(", ")}; `
+              ? `remove ${sortByDisplayName(preparedAction.remove_tags)
+                  .map((tag) => tag.display_name)
+                  .join(", ")}; `
               : ""}
             {preparedAction?.is_hidden_by_user === true
               ? "hide these records (duplicate protection stays)."
@@ -1742,7 +1870,7 @@ export default function TransactionsWorkspace({
         </p>
       ) : null}
 
-      {operationId && !prepared && !recovery && !receipt && !terminalStatus ? (
+      {operationId && !prepared && !recovery && !terminalStatus ? (
         <section
           aria-labelledby="unresolved-operation-title"
           className="mt-6 rounded-[2rem] border border-warning-line bg-warning-soft p-5 sm:p-6"
@@ -1850,30 +1978,6 @@ export default function TransactionsWorkspace({
         </section>
       ) : null}
 
-      {receipt ? (
-        <section
-          aria-labelledby="receipt-title"
-          className="mt-6 rounded-[2rem] border border-line bg-elevated p-5 sm:p-6"
-        >
-          <h2 className="text-lg font-bold text-ink" id="receipt-title">
-            Applied receipt
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-muted">
-            {receipt.changed_count} changed, {receipt.unchanged_count} already matched,{" "}
-            {receipt.selected_count} in the saved scope.
-            {receipt.applied_at ? ` Applied ${formatTimestamp(receipt.applied_at)}.` : ""} The
-            receipt survives reloads and statement deletion.
-          </p>
-          <button
-            className="mt-3 rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-            onClick={acknowledgeOutcome}
-            type="button"
-          >
-            Dismiss receipt
-          </button>
-        </section>
-      ) : null}
-
       {detailId ? (
         <div className="fixed inset-0 z-40 flex items-stretch justify-end bg-ink/40">
           <button
@@ -1958,7 +2062,7 @@ export default function TransactionsWorkspace({
                 initialDetail={detail}
                 key={detail.transaction.id}
                 onClose={closeDetail}
-                onSaved={() => handleRowSaved(detail.transaction.id)}
+                onSaved={(saved) => handleRowSaved(saved)}
                 onUnavailable={() => {
                   setDetail(null);
                   setDetailError(

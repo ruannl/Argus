@@ -84,7 +84,7 @@ export default function Home() {
               </h2>
               <p className="mt-5 text-lg leading-8 text-muted">
                 A focused workspace for South African bank and credit-card statements, with
-                categories, merchant tags, and totals that reconcile.
+                categories, tags, and totals that reconcile.
               </p>
             </div>
             <div className="mt-10 grid gap-4 md:grid-cols-3">

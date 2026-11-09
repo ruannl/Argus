@@ -691,7 +691,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         const string ip = "203.0.113.42";
 
         HttpResponseMessage? last = null;
-        for (var index = 0; index < 300; index++)
+        for (var index = 0; index < 1000; index++)
         {
             last?.Dispose();
             last = await SendAsync(WithTestIp(Get(AccountsPath, session: session), ip));
@@ -711,6 +711,69 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
             Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
             Assert.Equal("rate_limited", await ErrorKindAsync(response));
         }
+    }
+
+    [Fact]
+    public async Task MerchantAliasesSupportCrudAndRejectForeignTargets()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var tagResponse = await SendAsync(Post(TagsPath, Json(new { display_name = "Serene Pharmacy" }), session: session));
+        var tagId = (await BodyAsync(tagResponse)).GetProperty("id").GetGuid();
+        var categoryResponse = await SendAsync(Post(CategoriesPath, Json(new { display_name = "Pharmacy and personal care", kind = "Expense" }), session: session));
+        var categoryId = (await BodyAsync(categoryResponse)).GetProperty("id").GetGuid();
+        const string aliasesPath = "/v1/finance/merchant-aliases";
+
+        var created = await SendAsync(Post(aliasesPath, Json(new
+        {
+            display_alias = "apteek",
+            merchant_tag_id = tagId,
+            category_id = categoryId,
+        }), session: session));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var createdBody = await BodyAsync(created);
+        var aliasId = createdBody.GetProperty("id").GetGuid();
+        Assert.Equal("apteek", createdBody.GetProperty("display_alias").GetString());
+        Assert.Equal(tagId, createdBody.GetProperty("merchant_tag_id").GetGuid());
+        Assert.Equal(categoryId, createdBody.GetProperty("category_id").GetGuid());
+
+        var listed = await BodyAsync(await SendAsync(Get(aliasesPath, session: session)));
+        Assert.Single(listed.GetProperty("merchant_aliases").EnumerateArray());
+
+        var duplicate = await SendAsync(Post(aliasesPath, Json(new
+        {
+            display_alias = "  APTEEK ",
+            merchant_tag_id = tagId,
+            category_id = categoryId,
+        }), session: session));
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        Assert.Equal("duplicate_name", await ErrorKindAsync(duplicate));
+
+        var updated = await SendAsync(Patch($"{aliasesPath}/{aliasId}", Json(new
+        {
+            display_alias = "serene apteek",
+            merchant_tag_id = tagId,
+            category_id = (Guid?)null,
+        }), session: session));
+        Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
+        var updatedBody = await BodyAsync(updated);
+        Assert.Equal("serene apteek", updatedBody.GetProperty("display_alias").GetString());
+        Assert.Equal(JsonValueKind.Null, updatedBody.GetProperty("category_id").ValueKind);
+
+        var (otherSession, _) = await NewCustomerAsync();
+        var otherTagResponse = await SendAsync(Post(TagsPath, Json(new { display_name = "Foreign" }), session: otherSession));
+        var otherTagId = (await BodyAsync(otherTagResponse)).GetProperty("id").GetGuid();
+        var foreign = await SendAsync(Patch($"{aliasesPath}/{aliasId}", Json(new
+        {
+            display_alias = "serene apteek",
+            merchant_tag_id = otherTagId,
+        }), session: session));
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+
+        var deleted = await SendAsync(Delete($"{aliasesPath}/{aliasId}", session: session));
+        Assert.Equal(HttpStatusCode.OK, deleted.StatusCode);
+        Assert.Empty((await BodyAsync(await SendAsync(Get(aliasesPath, session: session)))).GetProperty("merchant_aliases").EnumerateArray());
+        var deletedAgain = await SendAsync(Delete($"{aliasesPath}/{aliasId}", session: session));
+        Assert.Equal(HttpStatusCode.NotFound, deletedAgain.StatusCode);
     }
 
     // --- Concurrency -------------------------------------------------------

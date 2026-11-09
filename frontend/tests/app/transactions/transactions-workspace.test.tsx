@@ -237,6 +237,119 @@ describe("transactions workspace", () => {
     expect(screen.queryByText("No transactions yet")).not.toBeInTheDocument();
   });
 
+  it("clears the search filter with the clear button", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.type(screen.getByLabelText("Search description or tag"), "coffee");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    await waitFor(() => {
+      const call = vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0];
+      expect(call?.filters?.search).toBe("coffee");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+
+    expect(screen.getByLabelText("Search description or tag")).toHaveValue("");
+    await waitFor(() => {
+      const call = vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0];
+      expect(call?.filters?.search).toBeUndefined();
+    });
+  });
+
+  it("resets search and filters with the reset button", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.type(screen.getByLabelText("Search description or tag"), "coffee");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.selectOptions(screen.getByLabelText("Category"), "cat-2");
+
+    await waitFor(() => {
+      const call = vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0];
+      expect(call?.filters?.category_id).toBe("cat-2");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Reset filters" }));
+
+    expect(screen.getByLabelText("Search description or tag")).toHaveValue("");
+    expect(screen.getByLabelText("Category")).toHaveValue("");
+    await waitFor(() => {
+      const call = vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0];
+      expect(call?.filters).toEqual({});
+    });
+  });
+
+  it("marks the Uncategorised category with an orange border", () => {
+    const uncategorisedRow = {
+      ...row,
+      category: {
+        ...row.category,
+        display_name: "Uncategorised",
+        kind: "Uncategorised" as const,
+      },
+    };
+    renderWorkspace({
+      initialPage: { ...pageData, transactions: [uncategorisedRow] },
+    });
+
+    expect(screen.getByText("Uncategorised (Uncategorised)")).toHaveClass("border-warning-line");
+  });
+
+  it("sorts category and tag options by name", () => {
+    renderWorkspace({ tags: [secondTag, merchantTag] });
+
+    const categoryOptions = within(screen.getByLabelText("Category")).getAllByRole("option");
+    expect(categoryOptions.map((option) => option.textContent)).toEqual([
+      "All categories",
+      "Groceries (Expense)",
+      "Travel (Expense)",
+    ]);
+
+    const tagOptions = within(screen.getByLabelText("Tag")).getAllByRole("option");
+    expect(tagOptions.map((option) => option.textContent)).toEqual([
+      "Any tag",
+      "Untagged",
+      "Coffee",
+      "Travel",
+    ]);
+  });
+
+  it("hides archived tags with no transactions from tag option lists", () => {
+    const archivedEmpty: MerchantTag = {
+      ...merchantTag,
+      id: "tag-archived-empty",
+      display_name: "Closed shop",
+      is_archived: true,
+      transaction_count: 0,
+    };
+    const archivedUsed: MerchantTag = {
+      ...merchantTag,
+      id: "tag-archived-used",
+      display_name: "Old shop",
+      is_archived: true,
+      transaction_count: 2,
+    };
+    renderWorkspace({ tags: [archivedEmpty, archivedUsed, secondTag, merchantTag] });
+
+    const filterOptions = within(screen.getByLabelText("Tag"))
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+    expect(filterOptions).toEqual([
+      "Any tag",
+      "Untagged",
+      "Coffee",
+      "Old shop — archived",
+      "Travel",
+    ]);
+
+    const removeOptions = within(screen.getByLabelText("Remove tags"))
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+    expect(removeOptions).toEqual(["Coffee", "Old shop — archived", "Travel"]);
+  });
+
   it("preserves explicit selection across page navigation", async () => {
     const user = userEvent.setup();
     const firstOfTwo = {
@@ -304,11 +417,12 @@ describe("transactions workspace", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Apply change" }));
-    expect(await screen.findByRole("heading", { name: "Applied receipt" })).toBeInTheDocument();
-    expect(applyOperationAction).toHaveBeenCalledWith(prepared.operation_id, "hash", 1);
     expect(
-      screen.getByText(/1 changed, 0 already matched, 1 in the saved scope/),
+      await screen.findByText("Bulk change applied: 1 changed and 0 already matched."),
     ).toBeInTheDocument();
+    expect(applyOperationAction).toHaveBeenCalledWith(prepared.operation_id, "hash", 1);
+    expect(new URL(window.location.href).searchParams.has("operation_id")).toBe(false);
+    expect(screen.queryByRole("heading", { name: "Applied receipt" })).not.toBeInTheDocument();
   });
 
   it("retains a late preparation for safe abandonment and releases busy state", async () => {
@@ -406,15 +520,14 @@ describe("transactions workspace", () => {
     await screen.findByRole("heading", { name: "Confirm this change" });
     await user.click(screen.getByRole("button", { name: "Cancel and abandon" }));
 
-    expect(await screen.findByRole("heading", { name: "Applied receipt" })).toBeInTheDocument();
+    expect(
+      await screen.findByText("Bulk change applied: 1 changed and 0 already matched."),
+    ).toBeInTheDocument();
     expect(
       screen.queryByText(/Confirmation cancelled\. No transaction data changed/),
     ).not.toBeInTheDocument();
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
-      prepared.operation_id,
-    );
-    await user.click(screen.getByRole("button", { name: "Dismiss receipt" }));
     expect(new URL(window.location.href).searchParams.has("operation_id")).toBe(false);
+    expect(screen.queryByRole("heading", { name: "Applied receipt" })).not.toBeInTheDocument();
   });
 
   it("keeps the recovery id when reload status is unavailable", async () => {
@@ -508,11 +621,11 @@ describe("transactions workspace", () => {
         value: { ...abandoned, status: "Applied", applied_at: "2026-01-01T00:01:00Z" },
       });
     });
-    expect(await screen.findByRole("heading", { name: "Applied receipt" })).toBeInTheDocument();
+    expect(
+      await screen.findByText("Bulk change applied: 1 changed and 0 already matched."),
+    ).toBeInTheDocument();
     expect(new URL(window.location.href).searchParams.get("visibility")).toBe("hidden");
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
-      prepared.operation_id,
-    );
+    expect(new URL(window.location.href).searchParams.has("operation_id")).toBe(false);
     expect(vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0].filters?.visibility).toBe(
       "hidden",
     );
@@ -685,7 +798,7 @@ describe("transactions workspace", () => {
 
     await user.selectOptions(screen.getByLabelText("Inline category for Row one"), "cat-2");
     await user.click(screen.getByRole("button", { name: "Hidden" }));
-    await screen.findByText(/version 2/);
+    await screen.findByText(/Version 2/);
 
     expect(screen.getByRole("button", { name: "Save inline changes" })).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent(
@@ -1217,11 +1330,9 @@ describe("transactions workspace", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Cancel and abandon" }));
-    expect(await screen.findByRole("heading", { name: "Applied receipt" })).toBeInTheDocument();
-    expect(new URL(window.location.href).searchParams.get("operation_id")).toBe(
-      operationB.operation_id,
-    );
-    await user.click(screen.getByRole("button", { name: "Dismiss receipt" }));
+    expect(
+      await screen.findByText("Bulk change applied: 1 changed and 0 already matched."),
+    ).toBeInTheDocument();
     expect(new URL(window.location.href).searchParams.has("operation_id")).toBe(false);
   });
 });

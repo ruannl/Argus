@@ -24,20 +24,22 @@ import {
 import type {
   FinanceRequestErrorKind,
   FinanceRequestResult,
+  MerchantTag,
   UserCategoryKind,
 } from "@/lib/server/backend-client";
 
-export type FinanceActionResult = {
+export type FinanceActionResult<T = unknown> = {
   ok: boolean;
   message: string;
   errorKind?: FinanceRequestErrorKind;
+  value?: T;
 };
 
 const SESSION_EXPIRED_MESSAGE = "Your session has expired. Please sign in again.";
 
 const ERROR_MESSAGES: Record<FinanceRequestErrorKind, string> = {
   invalid_request: "That name or value could not be accepted.",
-  duplicate_name: "A category or merchant tag with that name already exists.",
+  duplicate_name: "A category or tag with that name already exists.",
   system_category_immutable: "The Uncategorised system bucket cannot be changed.",
   kind_change_confirmation_required: "Confirm the category kind change before saving.",
   not_found: "That item no longer exists. Refresh the page and try again.",
@@ -45,7 +47,7 @@ const ERROR_MESSAGES: Record<FinanceRequestErrorKind, string> = {
   unavailable: "Something went wrong. Please try again later.",
 };
 
-function failure(kind: FinanceRequestErrorKind): FinanceActionResult {
+function failure<T = unknown>(kind: FinanceRequestErrorKind): FinanceActionResult<T> {
   return { ok: false, message: ERROR_MESSAGES[kind], errorKind: kind };
 }
 
@@ -84,7 +86,8 @@ function isUserCategoryKind(value: string | null): value is UserCategoryKind {
 async function withSession<T>(
   run: (token: string) => Promise<FinanceRequestResult<T>>,
   successMessage: string,
-): Promise<FinanceActionResult> {
+  includeValue = false,
+): Promise<FinanceActionResult<T>> {
   const token = await sessionToken();
   if (!token) {
     return { ok: false, message: SESSION_EXPIRED_MESSAGE, errorKind: "unavailable" };
@@ -93,12 +96,14 @@ async function withSession<T>(
   try {
     const result = await run(token);
     if (!result.ok) {
-      return failure(result.kind);
+      return failure<T>(result.kind);
     }
     revalidateWorkspace();
-    return success(successMessage);
+    return includeValue
+      ? { ok: true, message: successMessage, value: result.value }
+      : { ok: true, message: successMessage };
   } catch {
-    return failure("unavailable");
+    return failure<T>("unavailable");
   }
 }
 
@@ -246,12 +251,14 @@ export async function deleteCategoryAction(formData: FormData): Promise<FinanceA
 
 // --- Merchant tags ---------------------------------------------------------
 
-export async function createMerchantTagAction(formData: FormData): Promise<FinanceActionResult> {
+export async function createMerchantTagAction(
+  formData: FormData,
+): Promise<FinanceActionResult<MerchantTag>> {
   const displayName = formString(formData, "display_name");
   if (displayName === null) {
-    return failure("invalid_request");
+    return failure<MerchantTag>("invalid_request");
   }
-  return withSession((token) => createMerchantTag(token, displayName), "Merchant tag created.");
+  return withSession((token) => createMerchantTag(token, displayName), "Tag created.", true);
 }
 
 export async function updateMerchantTagAction(formData: FormData): Promise<FinanceActionResult> {
@@ -260,7 +267,7 @@ export async function updateMerchantTagAction(formData: FormData): Promise<Finan
   if (!id || displayName === null) {
     return failure("invalid_request");
   }
-  return withSession((token) => updateMerchantTag(token, id, displayName), "Merchant tag renamed.");
+  return withSession((token) => updateMerchantTag(token, id, displayName), "Tag renamed.");
 }
 
 export async function archiveMerchantTagAction(formData: FormData): Promise<FinanceActionResult> {
@@ -268,7 +275,7 @@ export async function archiveMerchantTagAction(formData: FormData): Promise<Fina
   if (!id) {
     return failure("invalid_request");
   }
-  return withSession((token) => archiveMerchantTag(token, id), "Merchant tag archived.");
+  return withSession((token) => archiveMerchantTag(token, id), "Tag archived.");
 }
 
 export async function restoreMerchantTagAction(formData: FormData): Promise<FinanceActionResult> {
@@ -276,7 +283,7 @@ export async function restoreMerchantTagAction(formData: FormData): Promise<Fina
   if (!id) {
     return failure("invalid_request");
   }
-  return withSession((token) => restoreMerchantTag(token, id), "Merchant tag restored.");
+  return withSession((token) => restoreMerchantTag(token, id), "Tag restored.");
 }
 
 export async function deleteMerchantTagAction(formData: FormData): Promise<FinanceActionResult> {

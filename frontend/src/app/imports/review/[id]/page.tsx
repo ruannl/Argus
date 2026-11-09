@@ -10,6 +10,16 @@ import ReviewWorkspace from "./review-workspace";
 
 export const dynamic = "force-dynamic";
 
+const REVIEW_PAGE_SIZES = [25, 50, 100] as const;
+const DEFAULT_REVIEW_PAGE_SIZE = 50;
+
+function parsePageSize(value: string | undefined): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return REVIEW_PAGE_SIZES.includes(parsed as (typeof REVIEW_PAGE_SIZES)[number])
+    ? parsed
+    : DEFAULT_REVIEW_PAGE_SIZE;
+}
+
 function ReviewUnavailable({ kind }: { kind: ImportErrorKind }) {
   const message =
     kind === "review_expired"
@@ -36,7 +46,13 @@ export default async function ReviewPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{
+    page?: string;
+    page_size?: string;
+    sort_direction?: string;
+    duplicates?: string;
+    untagged?: string;
+  }>;
 }) {
   const token = (await auth())?.user?.backendToken;
   if (!token) {
@@ -54,10 +70,20 @@ export default async function ReviewPage({
   }
 
   const { id } = await params;
-  const { page: pageParam } = await searchParams;
+  const {
+    page: pageParam,
+    page_size: pageSizeParam,
+    sort_direction: sortParam,
+    duplicates: duplicatesParam,
+    untagged: untaggedParam,
+  } = await searchParams;
   const page = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
+  const pageSize = parsePageSize(pageSizeParam);
+  const sortDirection = sortParam === "desc" ? "desc" : "asc";
+  const possibleOnly = duplicatesParam === "possible";
+  const untaggedOnly = untaggedParam === "true";
   const [review, tags] = await Promise.all([
-    getImportReview(token, id, page, 50),
+    getImportReview(token, id, page, pageSize, sortDirection, possibleOnly, untaggedOnly),
     listMerchantTags(token),
   ]);
 
@@ -79,13 +105,17 @@ export default async function ReviewPage({
     <AppShell
       account={account}
       activeNav="imports"
-      description="Every row is read-only. Decisions are limited to skip, duplicate override, and merchant-tag selection."
+      description="Every row is read-only. Decisions are limited to skip, duplicate override, and tag selection."
       eyebrow="Workspace"
       title="Import review"
     >
       <ReviewWorkspace
-        key={review.value.summary.version}
+        key={`${review.value.summary.version}:${page}:${pageSize}:${sortDirection}:${possibleOnly}:${untaggedOnly}`}
+        pageSize={pageSize}
+        possibleOnly={possibleOnly}
         review={review.value}
+        untaggedOnly={untaggedOnly}
+        sortDirection={sortDirection}
         tags={tags.ok ? tags.value.merchant_tags : []}
       />
     </AppShell>

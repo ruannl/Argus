@@ -194,7 +194,7 @@ describe("finance server actions", () => {
 
     expect(result).toEqual({
       ok: false,
-      message: "A category or merchant tag with that name already exists.",
+      message: "A category or tag with that name already exists.",
       errorKind: "duplicate_name",
     });
     expect(revalidatePath).not.toHaveBeenCalled();
@@ -274,7 +274,7 @@ describe("finance server actions", () => {
     expect(revalidatePath).toHaveBeenCalledWith("/settings");
   });
 
-  it("reports how many transactions a merchant tag delete unassigns", async () => {
+  it("reports how many transactions a tag delete unassigns", async () => {
     signedIn();
     vi.mocked(deleteMerchantTag).mockResolvedValue({
       ok: true,

@@ -1,11 +1,12 @@
 # Plan 1: Foundation, App Shell, and Financial Entities
 
-- **Revision:** 1 (`2026-10-30`)
-- **Status:** Specialist Plan Review Passed (`GO`) — Operator-approved; executed direct (Partner) — final acceptance review gate **PASS** (0 open findings)
+- **Current approved revision:** 2 (`2026-11-09`) — operator-approved finance IP limit of 1000 requests per 15 minutes and the customer-scoped merchant-alias Settings/API extension. Revision 1 remains the executed and accepted foundation baseline; revision 2 authorizes only the PR #8 extension recorded in Section 13.
+- **Prior approved revision:** 1 (`2026-10-30`) — Specialist Plan Review Passed (`GO`); operator-approved; executed direct (Partner); final acceptance review gate **PASS** (0 open findings).
+- **Status:** Revision 1 is executed, published and accepted. Revision 2 is an operator-approved semantic amendment for PR #8 and has no new plan review; the PR #8 implementation remains subject to its own fresh acceptance review. No deployment is authorized.
 - **Specialist Review Provenance:** Request `f70c4037-e38a-49a3-8153-4e616278495d` · Verdict `GO` (0 CRITICAL, 0 HIGH, 3 MEDIUM notes, 8 LOW notes disposed below) · Reviewed baseline `commit:0e7f1c8ab773a66c99c2e0ae96f4fe314c321a03/blob:5bcfb3122c484536d615819d1a5978e4c5c1a5c6` · Review artifact SHA-256 `6309ac5320a400effde300cf50ebcf6bbf7390183ad8dd1e5f57f9df8557d4ce`
 - **Governing Programme:** HiveMind Thread #1 (`306f43f0-6ed8-43ea-8f75-0019027f8b06`, Requirement `e53f52af-c2ed-4098-ac75-2902426ee59a` Ready revision 1 `134e0580-8e55-4216-b883-9e9c6c466d9b`)
 - **Governing Child Thread:** HiveMind Thread #2 (`780e38b1-7e15-420a-93f6-1f91f41f4ab2`, Requirement `eccf36da-2e35-4677-b4c5-ef2a51981343` Ready revision 1 `e0e2ef0f-0887-4932-bcf4-1a5acc79850c`)
-- **Authoritative Product Brief:** `docs/product-brief.md` (commit `0e7f1c8`, Sections 1.1, 4, 6.1, 6.5, 6.8–6.10, 7.1, 8, 9.2, 9.4–9.5, 12.3–12.4, 13.1)
+- **Authoritative Product Brief:** `docs/product-brief.md` (commit `0e7f1c8`, Sections 1.1, 4, 6.1, 6.5, 6.8–6.10, 7.1, 8, 9.2, 9.4–9.5, 12.3–12.4, 13.1), plus the 2026-11-06 CSV-only scope amendment and the 2026-11-09 behavior amendment.
 
 ---
 
@@ -248,7 +249,7 @@ Phases are sequential and execution-agnostic.
      - **N4 (LOW — Idempotent archive/restore re-entry):** Archiving an already-archived account, category, or merchant tag, or restoring an already-active one, returns an idempotent `200 OK` with the current record (preserving `archived_at` when already archived). Add contract tests for repeated `/archive` and repeated `/restore`.
      - **N5 (LOW — Same-customer composite foreign key defense-in-depth in `0005`):** Add `UNIQUE (customer_id, id)` on `financial_accounts`, `categories`, and `statement_imports`, and reference `(customer_id, financial_account_id)`, `(customer_id, category_id)`, and `(customer_id, statement_import_id)` from `transactions` (and `(customer_id, financial_account_id)` from `statement_imports`) so cross-customer foreign-key references are impossible at the PostgreSQL constraint level as well as in `FinanceStore` queries.
      - **N6 (LOW — Map PostgreSQL `23514` check violation on `categories`):** Catch `PostgresException` with `SqlState == PostgresErrorCodes.CheckViolation` (`"23514"`) in `FinanceStore` category mutations and map to `SystemCategoryImmutable` (`400 {"error":"system_category_immutable"}`) or `InvalidRequest` (`400 {"error":"invalid_request"}`) so concurrent races never fall through to `500`, and cover with a test.
-     - **N7 (LOW — Dedicated finance rate-limit bucket):** Add `rateLimiter.CheckFinanceIp(peerIp)` in `backend/Security/RateLimiter.cs` (keyed `finance_ip:{ip}` with a 300 requests / 15-minute sliding window) so multi-fetch workspace/Settings navigation does not consume or exhaust the 120-request `ip:{ip}` login/auth brute-force bucket.
+     - **N7 (LOW — Dedicated finance rate-limit bucket; revision 2 limit):** Add `rateLimiter.CheckFinanceIp(peerIp)` in `backend/Security/RateLimiter.cs` (keyed `finance_ip:{ip}` with a 1000-requests / 15-minute sliding window) so multi-fetch workspace/Settings navigation does not consume or exhaust the 120-request `ip:{ip}` login/auth brute-force bucket. This remains an in-memory, per-process abuse bound; it is not a distributed quota or a per-customer fairness guarantee. The login/auth 120 bucket, the import-customer 10/15-minute bucket, and the transaction-preparation 20/15-minute bucket are unchanged. No separate per-customer review-action bucket is introduced by revision 2.
      - **N8 (LOW — Explicit guard error codes across all contract table rows):** Ensure all `/v1/finance/*` routes enforce and test `401 unauthorized`, `403` (bodyless origin rejection), and `429 rate_limited` uniformly across `GET`, `POST`, `PATCH`, and `DELETE`.
      - **N10 (LOW — Align verified-subscriber gate with `LoginAsync`):** Align the finance session guard with `AccountEndpoints.LoginAsync` (`customer.EmailVerifiedAt is not null && customer.SubscriberActivatedAt is not null`, which holds for all verified active subscribers including seeded lifetime dev accounts since `Seed.cs` sets `subscriber_activated_at = NOW()`), keeping entitlement enforcement identical between login and finance access.
 - **Verification Commands (Phase 1):**
@@ -353,11 +354,11 @@ Phases are sequential and execution-agnostic.
 ### Backend Files
 | Path | Action | Contract / Responsibility |
 | --- | --- | --- |
-| `backend/Data/Db.cs` | Modify | Add migration `0005_finance_foundation` to `Migrations.All`. |
-| `backend/Data/FinanceStore.cs` | Create | Domain records (`FinancialAccountRecord`, `CategoryRecord`, `MerchantTagRecord`), `DefaultCategories`, name normalisation, idempotent transactional category seeding, and customer-scoped CRUD/archive/restore/delete queries. |
-| `backend/Http/HttpSupport.cs` | Modify | Add `NotFound`, `DuplicateName`, `SystemCategoryImmutable`, `KindChangeConfirmationRequired` to `Errors`; add finance request/response DTO records. |
-| `backend/Http/FinanceEndpoints.cs` | Create | `FinanceApi` mapping `/v1/finance/accounts`, `/v1/finance/categories`, and `/v1/finance/merchant-tags` with origin, app-secret, session, verified-subscriber, and rate-limit guards, plus `SEC-4` compliant logging. |
-| `backend/Security/RateLimiter.cs` | Modify | Add `CheckFinanceIp(string ip)` bucket (`finance_ip:{ip}`, 300 requests per 15-minute window) so finance requests are bounded independently of the login/auth bucket (`N7`). |
+| `backend/Data/Db.cs` | Modify | Add migration `0005_finance_foundation` to `Migrations.All`; revision 2 adds additive migration `0008_suggestion_learning` (generated `transactions.merchant_key`, `merchant_aliases` table and indexes). |
+| `backend/Data/FinanceStore.cs` | Create | Domain records (`FinancialAccountRecord`, `CategoryRecord`, `MerchantTagRecord`), `DefaultCategories`, name normalisation, idempotent transactional category seeding, and customer-scoped CRUD/archive/restore/delete queries. Revision 2 adds customer-scoped merchant-alias CRUD with active owned tag/category validation and a 100-alias cap. |
+| `backend/Http/HttpSupport.cs` | Modify | Add `NotFound`, `DuplicateName`, `SystemCategoryImmutable`, `KindChangeConfirmationRequired` to `Errors`; add finance request/response DTO records. Revision 2 adds the merchant-alias create/update request records. |
+| `backend/Http/FinanceEndpoints.cs` | Create | `FinanceApi` mapping `/v1/finance/accounts`, `/v1/finance/categories`, and `/v1/finance/merchant-tags` with origin, app-secret, session, verified-subscriber, and rate-limit guards, plus `SEC-4` compliant logging. Revision 2 adds GET/POST/PATCH/DELETE `/v1/finance/merchant-aliases` under the same guard. |
+| `backend/Security/RateLimiter.cs` | Modify | Add `CheckFinanceIp(string ip)` bucket (`finance_ip:{ip}`, 1000 requests per 15-minute window) so finance requests are bounded independently of the login/auth bucket (`N7`; revision 2). |
 | `backend/Program.cs` | Modify | Register `FinanceStore` and `FinanceApi` singletons, map `FinanceApi`, and update CORS `.WithMethods("GET", "POST", "PATCH", "DELETE")`. |
 | `backend/Seed.cs` | Modify | Call `FinanceStore.EnsureCategoriesSeededAsync` for seeded dev accounts (`dev@example.test`, `user@example.test`). |
 | `backend/tests/argus.Server.Tests/ApiTestBase.cs` | Modify | Add `Patch` and `Delete` request helpers and include finance tables in `ResetDatabaseAsync`. |
@@ -376,9 +377,11 @@ Phases are sequential and execution-agnostic.
 | `frontend/src/app/home/page.tsx` | Modify | Render `Overview` empty state and Summary/Charts tab header inside `AppShell`. |
 | `frontend/src/app/transactions/page.tsx` | Create | Authenticated `Transactions` route with first-run empty state inside `AppShell`. |
 | `frontend/src/app/imports/page.tsx` | Create | Authenticated `Imports` route with first-run empty state inside `AppShell`. |
-| `frontend/src/lib/server/backend-client.ts` | Modify | Add server-only client functions and types for `/v1/finance/accounts`, `/v1/finance/categories`, and `/v1/finance/merchant-tags`. |
+| `frontend/src/lib/server/backend-client.ts` | Modify | Add server-only client functions and types for `/v1/finance/accounts`, `/v1/finance/categories`, and `/v1/finance/merchant-tags`. Revision 2 adds `MerchantAlias` types and the `/v1/finance/merchant-aliases` client functions. |
 | `frontend/src/lib/server/finance-actions.ts` | Create | `"use server"` actions for financial accounts, categories, and merchant tags. |
-| `frontend/src/app/settings/page.tsx` | Create | Authenticated `Settings` page rendering `Accounts`, `Categories`, `Merchant tags`, and `Profile` (`AccountDetails`) inside `AppShell`. |
+| `frontend/src/lib/server/alias-actions.ts` | Create | `"use server"` actions for merchant-alias create, update and delete; revalidate Settings, Transactions and Imports suggestion surfaces. |
+| `frontend/src/app/settings/page.tsx` | Create | Authenticated `Settings` page rendering `Accounts`, `Categories`, `Merchant tags`, and `Profile` (`AccountDetails`) inside `AppShell`. Revision 2 adds the `Aliases` tab. |
+| `frontend/src/app/settings/aliases-section.tsx` | Create | Client section for per-customer alias text, active tag, and optional active non-system category, with edit and delete. |
 | `frontend/src/app/settings/accounts-section.tsx` | Create | Client interactive section for ZAR financial accounts (`SET-1`). |
 | `frontend/src/app/settings/categories-section.tsx` | Create | Client interactive section for categories, kind-change warning, and delete confirmation (`SET-2`, `CAT-1..7`). |
 | `frontend/src/app/settings/merchant-tags-section.tsx` | Create | Client interactive section for merchant tags and delete confirmation (`SET-2`, `TAG-1`, `TAG-7`). |
@@ -386,7 +389,7 @@ Phases are sequential and execution-agnostic.
 | `frontend/tests/app/home/page.test.tsx` | Modify | Assert `Overview` shell navigation, first-run empty state, expired session handling, and admin link visibility. |
 | `frontend/tests/app/transactions/page.test.tsx` | Create | Unit tests for `/transactions` page and session guard. |
 | `frontend/tests/app/imports/page.test.tsx` | Create | Unit tests for `/imports` page and session guard. |
-| `frontend/tests/app/settings/page.test.tsx` | Create | Unit and interaction tests for `/settings` (`Accounts`, `Categories`, `Merchant tags`, `Profile`). |
+| `frontend/tests/app/settings/page.test.tsx` | Create | Unit and interaction tests for `/settings` (`Accounts`, `Categories`, `Merchant tags`, `Aliases`, `Profile`). |
 | `frontend/tests/lib/server/backend-client.test.ts` | Modify | Unit tests for finance client functions and error classification. |
 | `frontend/tests/lib/server/finance-actions.test.ts` | Create | Unit tests for finance server actions. |
 | `frontend/tests/e2e/smoke.spec.ts` | Modify | Update Playwright e2e smoke tests for landing page rewrite, `/sample-page` 404 retirement, and unauthenticated route guards. |
@@ -414,6 +417,10 @@ All routes require `X-{ProductToken}-Application-Secret`, valid origin (`Origin`
 | `POST` | `/v1/finance/merchant-tags/{id:guid}/archive` | None | `200` single merchant tag object (`is_archived: true`) | `404 not_found`, `401`, `403`, `429` |
 | `POST` | `/v1/finance/merchant-tags/{id:guid}/restore` | None | `200` single merchant tag object (`is_archived: false`) | `404 not_found`, `401`, `403`, `429` |
 | `DELETE` | `/v1/finance/merchant-tags/{id:guid}` | None | `200 { "deleted": true, "unassigned_transaction_count": int }` | `404 not_found`, `401`, `403`, `429` |
+| `GET` | `/v1/finance/merchant-aliases` | None | `200 { "merchant_aliases": [ { "id", "display_alias", "merchant_tag_id", "tag_display_name", "category_id", "category_display_name", "created_at", "updated_at" } ] }` | `401 unauthorized`, `403`, `429 rate_limited` |
+| `POST` | `/v1/finance/merchant-aliases` | `{ "display_alias": string, "merchant_tag_id": guid, "category_id"?: guid \| null }` | `201` single alias object | `400 invalid_request`, `404 not_found`, `409 duplicate_name`, `401`, `403`, `429` |
+| `PATCH` | `/v1/finance/merchant-aliases/{id:guid}` | `{ "display_alias": string, "merchant_tag_id": guid, "category_id"?: guid \| null }` | `200` single alias object | `400 invalid_request`, `404 not_found`, `409 duplicate_name`, `401`, `403`, `429` |
+| `DELETE` | `/v1/finance/merchant-aliases/{id:guid}` | None | `200 { "deleted": true }` | `404 not_found`, `401`, `403`, `429` |
 
 ---
 
@@ -485,6 +492,19 @@ npm run test:e2e
 
 ---
 
+## 13. Revision 2 — suggestion aliases and finance rate limit (2026-11-09)
+
+- **Approval/provenance:** Operator instruction in the PR #8 artifact-revision request, 2026-11-09; Thread #2 Decision `c3d50335-0e30-47c4-ad88-448ee45c03d3`. This is a semantic amendment, not a plan review. The PR #8 implementation remains subject to its own fresh acceptance review; this section records authority, not code acceptance.
+- **Finance IP bound:** `CheckFinanceIp` retains a separate `finance_ip:{ip}` bucket and becomes 1000 requests per 15-minute sliding window. It remains in-memory and per-process: it resets on restart, is not shared across instances, and is not a per-customer fairness mechanism. The login/auth 120, import-customer 10/15-minute and transaction-preparation 20/15-minute buckets are unchanged. No separate per-customer review-action bucket is introduced by this revision; one would be a separate bounded change if abuse evidence requires it. The residual limit is documented in the runbooks.
+- **Merchant aliases:** Add customer-scoped aliases. Each alias has `display_alias`, `normalized_alias`, one active owned `merchant_tag_id`, an optional active owned non-system `category_id`, and timestamps. Normalization is the existing trimmed, whitespace-collapsed, control-rejecting, 80-rune name rule; uniqueness is `(customer_id, normalized_alias)`; the store caps a customer at 100 aliases. A new or updated alias whose tag is foreign, archived or deleted, or whose category is foreign, archived, deleted or the system bucket, is rejected without a write. Alias ownership is enforced by application predicates: the tag foreign key is single-column `ON DELETE CASCADE` and the category foreign key is single-column `ON DELETE SET NULL`. This is an explicit bounded exception to the foundation's composite-FK defense-in-depth; aliases are nonsensitive suggestion metadata and every read/write is customer-scoped. A future migration may add composite keys, but it is not required for this acceptance.
+- **API and UI:** GET/POST/PATCH/DELETE `/v1/finance/merchant-aliases` use the existing trusted-caller, origin, session, verified-subscriber and finance-rate-limit guard; reject unknown JSON properties; return no-store responses; and use identical `404 not_found` for unknown or foreign IDs. A duplicate normalized alias returns `409 duplicate_name`; invalid input returns `400 invalid_request`. The Settings `Aliases` tab lists aliases, creates one from an active tag and optional active non-system category, and supports edit and delete. Alias text is user-defined and never logged; audit events carry IDs and counts only.
+- **Lifecycle:** Tag deletion cascades its aliases; tag archive leaves the row but suggestions ignore the archived tag. Category deletion nulls the alias category; category archive suppresses the category suggestion. Renaming a tag or category changes displayed labels, not IDs. Suggestions never create, update or delete an alias.
+- **Schema:** Additive migration `0008_suggestion_learning` adds the generated `transactions.merchant_key` column, the `merchant_aliases` table with its unique/indexed customer keys, and supporting indexes. Existing transactions calculate the generated key without a backfill rewrite of source values. `0005`–`0007` are not rewritten. The migration is additive and does not change identity, fingerprint, occurrence, receipt, visibility or deletion contracts.
+- **Exact files:** `backend/Data/Db.cs`, `backend/Data/FinanceStore.cs`, `backend/Http/FinanceEndpoints.cs`, `backend/Http/HttpSupport.cs`, `backend/Security/RateLimiter.cs`; `frontend/src/lib/server/backend-client.ts`, `frontend/src/lib/server/alias-actions.ts`, `frontend/src/app/settings/page.tsx`, `frontend/src/app/settings/aliases-section.tsx`, `frontend/tests/app/settings/page.test.tsx`; `docs/repository-layout.md`, this Plan, `docs/product-brief.md`, and the runbooks. No other application path is authorized by this revision.
+- **Verification for PR #8 acceptance:** backend format/test/build and frontend format/lint/test/build/e2e on the final PR #8 head, plus isolation tests for alias ownership, duplicate normalization, active/archived tag and category lifecycle, cap behavior, and the 1000/15-minute bucket. This revision itself changes no application code and is not evidence that the PR passes.
+
+---
+
 ## Decisions Log
 
 | Date | Decision | Rationale |
@@ -493,6 +513,7 @@ npm run test:e2e
 | `2026-10-30` | Track first-use default category seeding via `customers.categories_seeded_at TIMESTAMPTZ NULL` guarded by `SELECT ... FOR UPDATE`. | Guarantees idempotent concurrent seeding on first use while ensuring that default categories renamed or deleted by the customer are never resurrected on subsequent reads or restarts. |
 | `2026-10-30` | Include `statement_imports`, `transactions`, and `transaction_merchant_tags` relational tables in migration `0005_finance_foundation`. | Enables real SQL `transaction_count` queries, real transactional reassignment to `Uncategorised` (`AC-CAT-6`), and real tag unassignment (`AC-TAG-8`) verified by PostgreSQL isolation tests in Plan 1. |
 | `2026-10-30` | Keep Playwright `smoke.spec.ts` backend-independent while verifying authenticated workspace and Settings flows in Vitest + xUnit PostgreSQL isolation tests. | Matches `.github/workflows/ci.yml` where the `frontend` job runs Next.js standalone without starting the C# backend or PostgreSQL. |
+| `2026-11-09` | **Revision 2 approved — PR #8 authority:** operator instruction in the PR #8 artifact-revision request approved the 1000-request/15-minute finance IP bound and the customer-scoped merchant-alias Settings/API extension; Thread #2 Decision `c3d50335-0e30-47c4-ad88-448ee45c03d3`. The limit remains an in-memory per-process abuse bound; login/auth, import-customer and transaction-preparation buckets are unchanged, and no separate per-customer review-action bucket is introduced. Alias ownership is application-enforced with single-column tag/category foreign keys (`CASCADE`/`SET NULL`), an explicit bounded exception to the foundation's composite-FK defense-in-depth. No new plan review, code acceptance or deployment is claimed. |
 
 ---
 

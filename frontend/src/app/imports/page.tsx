@@ -19,6 +19,18 @@ import ImportWorkspace from "./import-workspace";
 
 export const dynamic = "force-dynamic";
 
+const TAB_KEYS = ["new", "reviews", "history"] as const;
+type ImportsTabKey = (typeof TAB_KEYS)[number];
+
+function parseTab(value: string | string[] | undefined, hasCursor: boolean): ImportsTabKey {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  const matched = TAB_KEYS.find((key) => key === candidate);
+  if (matched) {
+    return matched;
+  }
+  return hasCursor ? "history" : "new";
+}
+
 type ImportsData = {
   accounts: FinancialAccount[];
   reviews: ImportOpenReview[];
@@ -51,7 +63,15 @@ async function loadImportsData(backendToken: string, cursor?: string): Promise<I
   };
 }
 
-function ImportsWorkspace({ account, data }: { account: CurrentAccount; data: ImportsData }) {
+function ImportsWorkspace({
+  account,
+  data,
+  initialTab,
+}: {
+  account: CurrentAccount;
+  data: ImportsData;
+  initialTab: ImportsTabKey;
+}) {
   return (
     <AppShell
       account={account}
@@ -60,7 +80,11 @@ function ImportsWorkspace({ account, data }: { account: CurrentAccount; data: Im
       eyebrow="Workspace"
       title="Imports"
     >
-      <ImportWorkspace key={data.accounts.map((account) => account.id).join(",")} {...data} />
+      <ImportWorkspace
+        key={data.accounts.map((account) => account.id).join(",")}
+        initialTab={initialTab}
+        {...data}
+      />
     </AppShell>
   );
 }
@@ -68,9 +92,11 @@ function ImportsWorkspace({ account, data }: { account: CurrentAccount; data: Im
 export default async function ImportsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ cursor?: string }>;
+  searchParams?: Promise<{ cursor?: string; tab?: string | string[] }>;
 } = {}) {
-  const cursor = (await searchParams)?.cursor;
+  const params = await searchParams;
+  const cursor = params?.cursor;
+  const initialTab = parseTab(params?.tab, Boolean(cursor));
   const backendToken = (await auth())?.user?.backendToken;
   if (!backendToken) {
     redirect("/login");
@@ -88,5 +114,5 @@ export default async function ImportsPage({
   }
 
   const data = await loadImportsData(backendToken, cursor);
-  return <ImportsWorkspace account={account} data={data} />;
+  return <ImportsWorkspace account={account} data={data} initialTab={initialTab} />;
 }
