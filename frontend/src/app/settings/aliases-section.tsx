@@ -180,6 +180,13 @@ function AliasRow({
           </div>
         </td>
       </tr>
+      {result ? (
+        <tr>
+          <td className="px-4 pb-4" colSpan={4}>
+            <FormResult result={result} />
+          </td>
+        </tr>
+      ) : null}
       <tr className={EDITOR_ROW_CLASS} hidden={!editing} id={editorId}>
         <td className="px-4 py-4" colSpan={4}>
           <form
@@ -193,7 +200,6 @@ function AliasRow({
               Save alias
             </button>
           </form>
-          <FormResult result={result} />
         </td>
       </tr>
     </Fragment>

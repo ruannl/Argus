@@ -1311,16 +1311,18 @@ public sealed class FinanceStore(Db db)
         try
         {
             await using var connection = await db.OpenAsync(cancellationToken);
-            if (!await AliasTagExistsAsync(connection, null, customerId, merchantTagId.Value, cancellationToken))
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            if (!await AliasTagExistsAsync(connection, transaction, customerId, merchantTagId.Value, cancellationToken))
             {
                 return new MerchantAliasOutcome.TagNotFound();
             }
-            if (categoryId is Guid selectedCategory && !await AliasCategoryExistsAsync(connection, null, customerId, selectedCategory, cancellationToken))
+            if (categoryId is Guid selectedCategory && !await AliasCategoryExistsAsync(connection, transaction, customerId, selectedCategory, cancellationToken))
             {
                 return new MerchantAliasOutcome.CategoryNotFound();
             }
 
             await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = """
                 UPDATE merchant_aliases
                 SET display_alias = @display_alias,
@@ -1341,6 +1343,7 @@ public sealed class FinanceStore(Db db)
             {
                 return new MerchantAliasOutcome.NotFound();
             }
+            await transaction.CommitAsync(cancellationToken);
         }
         catch (PostgresException exception) when (IsUniqueViolation(exception))
         {
@@ -1393,6 +1396,7 @@ public sealed class FinanceStore(Db db)
         command.CommandText = """
             SELECT 1 FROM merchant_tags
             WHERE customer_id = @customer_id AND id = @id AND is_archived = FALSE
+            FOR SHARE
             """;
         command.Parameters.AddWithValue(CustomerIdParameter, customerId);
         command.Parameters.AddWithValue("id", merchantTagId);
@@ -1412,6 +1416,7 @@ public sealed class FinanceStore(Db db)
             SELECT 1 FROM categories
             WHERE customer_id = @customer_id AND id = @id
               AND is_system = FALSE AND is_archived = FALSE
+            FOR SHARE
             """;
         command.Parameters.AddWithValue(CustomerIdParameter, customerId);
         command.Parameters.AddWithValue("id", categoryId);
