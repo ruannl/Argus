@@ -9,7 +9,7 @@ export const PRODUCT_TAGLINE = "See where your money goes";
 export const AUDIENCE_OUTCOME_LEAD = "See where your money goes.";
 
 export const AUDIENCE_OUTCOME_DETAIL =
-  "Make sense of your money. See the patterns. Understand your financial behaviour. Import your South African ZAR bank statements, classify transactions by category and merchant tag, and explore period overviews and bar charts that reconcile to every transaction.";
+  "Make sense of your money. See the patterns. Understand your financial behaviour. Import your South African ZAR bank statements, classify transactions by category and tag, and explore period overviews and bar charts that reconcile to every transaction.";
 
 export const PRIMARY_CTA_LABEL = "Start with your statements";
 
@@ -25,7 +25,7 @@ export const FEATURE_HIGHLIGHTS = [
   {
     heading: "Classify every transaction",
     description:
-      "Group transactions by category and merchant tag. A system Uncategorised bucket means nothing is ever lost, and a kind change asks for confirmation first.",
+      "Group transactions by category and tag. A system Uncategorised bucket means nothing is ever lost, and a kind change asks for confirmation first.",
   },
   {
     heading: "Totals that reconcile",
@@ -38,7 +38,7 @@ export const HOW_IT_WORKS_STEPS = [
   "Create your account",
   "Add your ZAR financial accounts",
   "Import a bank or credit-card statement",
-  "Classify transactions by category and merchant tag",
+  "Classify transactions by category and tag",
   "Explore period overviews and bar charts",
 ] as const;
 

@@ -876,6 +876,46 @@ public static class Migrations
                 ON transactions(customer_id, transaction_date, id);
             CREATE INDEX transactions_customer_amount_idx
                 ON transactions(customer_id, amount, id);
+            """),
+        ("0008_suggestion_learning", """
+            CREATE FUNCTION argus_merchant_key(description TEXT) RETURNS TEXT
+            LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+                SELECT string_agg(token, ' ' ORDER BY ordinality)
+                FROM (
+                    SELECT token, ordinality
+                    FROM unnest(regexp_split_to_array(lower(coalesce(description, '')), '[^a-z0-9]+'))
+                         WITH ORDINALITY AS parts(token, ordinality)
+                    WHERE token <> ''
+                      AND token !~ '^[0-9]+$'
+                      AND token !~ '^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$'
+                      AND length(token) > 1
+                    ORDER BY ordinality
+                    LIMIT 2
+                ) AS significant
+            $$;
+
+            ALTER TABLE transactions
+                ADD COLUMN merchant_key TEXT GENERATED ALWAYS AS (argus_merchant_key(normalized_description)) STORED;
+
+            CREATE INDEX transactions_customer_merchant_key_idx
+                ON transactions(customer_id, merchant_key, transaction_date);
+
+            CREATE TABLE merchant_aliases (
+                id UUID PRIMARY KEY,
+                customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                display_alias TEXT NOT NULL,
+                normalized_alias TEXT NOT NULL,
+                merchant_tag_id UUID NOT NULL REFERENCES merchant_tags(id) ON DELETE CASCADE,
+                category_id UUID NULL REFERENCES categories(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                CONSTRAINT merchant_aliases_alias_check CHECK (btrim(normalized_alias) <> '')
+            );
+
+            CREATE UNIQUE INDEX merchant_aliases_customer_alias_key
+                ON merchant_aliases(customer_id, normalized_alias);
+            CREATE INDEX merchant_aliases_customer_idx
+                ON merchant_aliases(customer_id);
             """)
     ];
 }

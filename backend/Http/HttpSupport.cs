@@ -101,6 +101,10 @@ public sealed record CreateMerchantTagRequest(string? DisplayName);
 
 public sealed record UpdateMerchantTagRequest(string? DisplayName);
 
+public sealed record CreateMerchantAliasRequest(string? DisplayAlias, Guid? MerchantTagId, Guid? CategoryId);
+
+public sealed record UpdateMerchantAliasRequest(string? DisplayAlias, Guid? MerchantTagId, Guid? CategoryId);
+
 public static class JsonBody
 {
     private static readonly JsonSerializerOptions _options = new()

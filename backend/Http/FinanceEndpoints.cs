@@ -34,6 +34,11 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
         app.MapPost("/v1/finance/merchant-tags/{id:guid}/archive", ArchiveMerchantTagAsync);
         app.MapPost("/v1/finance/merchant-tags/{id:guid}/restore", RestoreMerchantTagAsync);
         app.MapDelete("/v1/finance/merchant-tags/{id:guid}", DeleteMerchantTagAsync);
+
+        app.MapGet("/v1/finance/merchant-aliases", ListMerchantAliasesAsync);
+        app.MapPost("/v1/finance/merchant-aliases", CreateMerchantAliasAsync);
+        app.MapPatch("/v1/finance/merchant-aliases/{id:guid}", UpdateMerchantAliasAsync);
+        app.MapDelete("/v1/finance/merchant-aliases/{id:guid}", DeleteMerchantAliasAsync);
     }
 
     // --- Guard -------------------------------------------------------------
@@ -424,6 +429,126 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
             }
         }, "merchant_tags_delete");
 
+    // --- Merchant aliases --------------------------------------------------
+
+    private Task<IResult> ListMerchantAliasesAsync(HttpContext context, CancellationToken cancellationToken) =>
+        GuardedAsync(async () =>
+        {
+            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            if (failure is not null)
+            {
+                return failure;
+            }
+
+            var aliases = await financeStore.ListMerchantAliasesAsync(customerId!.Value, cancellationToken);
+            return Results.Json(new { merchant_aliases = aliases.Select(FinanceMerchantAliasResponse.From).ToArray(), });
+        }, "merchant_aliases_list");
+
+    private Task<IResult> CreateMerchantAliasAsync(HttpContext context, CancellationToken cancellationToken) =>
+        GuardedAsync(async () =>
+        {
+            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            if (failure is not null)
+            {
+                return failure;
+            }
+
+            var parsed = await JsonBody.ReadAsync<CreateMerchantAliasRequest>(context.Request, cancellationToken);
+            if (!parsed.Parsed)
+            {
+                return Errors.InvalidRequest();
+            }
+
+            var outcome = await financeStore.CreateMerchantAliasAsync(
+                customerId!.Value,
+                parsed.Value!.DisplayAlias,
+                parsed.Value.MerchantTagId,
+                parsed.Value.CategoryId,
+                cancellationToken);
+
+            return MerchantAliasResult(outcome, customerId.Value, "audit.finance_merchant_alias_created", created: true);
+        }, "merchant_aliases_create");
+
+    private Task<IResult> UpdateMerchantAliasAsync(HttpContext context, CancellationToken cancellationToken) =>
+        GuardedAsync(async () =>
+        {
+            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            if (failure is not null)
+            {
+                return failure;
+            }
+
+            var id = RouteGuid(context);
+            if (id is null)
+            {
+                return Errors.NotFound();
+            }
+
+            var parsed = await JsonBody.ReadAsync<UpdateMerchantAliasRequest>(context.Request, cancellationToken);
+            if (!parsed.Parsed)
+            {
+                return Errors.InvalidRequest();
+            }
+
+            var outcome = await financeStore.UpdateMerchantAliasAsync(
+                customerId!.Value,
+                id.Value,
+                parsed.Value!.DisplayAlias,
+                parsed.Value.MerchantTagId,
+                parsed.Value.CategoryId,
+                cancellationToken);
+
+            return MerchantAliasResult(outcome, customerId.Value, "audit.finance_merchant_alias_updated", created: false);
+        }, "merchant_aliases_update");
+
+    private Task<IResult> DeleteMerchantAliasAsync(HttpContext context, CancellationToken cancellationToken) =>
+        GuardedAsync(async () =>
+        {
+            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            if (failure is not null)
+            {
+                return failure;
+            }
+
+            var id = RouteGuid(context);
+            if (id is null)
+            {
+                return Errors.NotFound();
+            }
+
+            bool deleted = await financeStore.DeleteMerchantAliasAsync(customerId!.Value, id.Value, cancellationToken);
+            if (!deleted)
+            {
+                return Errors.NotFound();
+            }
+
+            _audit.LogInformation("audit.finance_merchant_alias_deleted customer_id={CustomerId} alias_id={AliasId}", customerId.Value, id.Value);
+            return Results.Json(new { deleted = true, });
+        }, "merchant_aliases_delete");
+
+    private IResult MerchantAliasResult(MerchantAliasOutcome outcome,
+                                        Guid customerId,
+                                        string auditEvent,
+                                        bool created)
+    {
+        switch (outcome)
+        {
+            case MerchantAliasOutcome.Success success:
+                _audit.LogInformation("{AuditEvent} customer_id={CustomerId} alias_id={AliasId}", auditEvent, customerId, success.Alias.Id);
+                return Results.Json(FinanceMerchantAliasResponse.From(success.Alias), statusCode: created ? 201 : 200);
+            case MerchantAliasOutcome.InvalidName:
+                return Errors.InvalidRequest();
+            case MerchantAliasOutcome.DuplicateName:
+                return Errors.DuplicateName();
+            case MerchantAliasOutcome.TagNotFound:
+            case MerchantAliasOutcome.CategoryNotFound:
+            case MerchantAliasOutcome.NotFound:
+                return Errors.NotFound();
+            default:
+                return Errors.Internal();
+        }
+    }
+
     private IResult MerchantTagResult(MerchantTagOutcome outcome,
                                       Guid customerId,
                                       string auditEvent,
@@ -494,6 +619,26 @@ public sealed record FinanceCategoryResponse(Guid Id,
         category.TransactionCount,
         Timestamps.Format(category.CreatedAt),
         Timestamps.Format(category.UpdatedAt));
+}
+
+public sealed record FinanceMerchantAliasResponse(Guid Id,
+                                                   string DisplayAlias,
+                                                   Guid MerchantTagId,
+                                                   string TagDisplayName,
+                                                   Guid? CategoryId,
+                                                   string? CategoryDisplayName,
+                                                   DateTime CreatedAt,
+                                                   DateTime UpdatedAt)
+{
+    public static FinanceMerchantAliasResponse From(MerchantAliasRecord alias) => new(
+        alias.Id,
+        alias.DisplayAlias,
+        alias.MerchantTagId,
+        alias.TagDisplayName,
+        alias.CategoryId,
+        alias.CategoryDisplayName,
+        alias.CreatedAt,
+        alias.UpdatedAt);
 }
 
 public sealed record FinanceMerchantTagResponse(Guid Id,

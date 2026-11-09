@@ -124,6 +124,23 @@ export type MerchantTag = {
   updated_at: string;
 };
 
+export type MerchantAlias = {
+  id: string;
+  display_alias: string;
+  merchant_tag_id: string;
+  tag_display_name: string;
+  category_id: string | null;
+  category_display_name: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MerchantAliasInput = {
+  display_alias: string;
+  merchant_tag_id: string;
+  category_id: string | null;
+};
+
 export type DeleteCategoryResult = {
   deleted: boolean;
   reassigned_transaction_count: number;
@@ -650,6 +667,49 @@ export async function deleteMerchantTag(
   );
 }
 
+// --- Merchant aliases ------------------------------------------------------
+
+export async function listMerchantAliases(
+  sessionToken: string,
+): Promise<FinanceRequestResult<{ merchant_aliases: MerchantAlias[] }>> {
+  return financeRequest<{ merchant_aliases: MerchantAlias[] }>(
+    sessionToken,
+    "GET",
+    "/v1/finance/merchant-aliases",
+  );
+}
+
+export async function createMerchantAlias(
+  sessionToken: string,
+  input: MerchantAliasInput,
+): Promise<FinanceRequestResult<MerchantAlias>> {
+  return financeRequest<MerchantAlias>(sessionToken, "POST", "/v1/finance/merchant-aliases", input);
+}
+
+export async function updateMerchantAlias(
+  sessionToken: string,
+  id: string,
+  input: MerchantAliasInput,
+): Promise<FinanceRequestResult<MerchantAlias>> {
+  return financeRequest<MerchantAlias>(
+    sessionToken,
+    "PATCH",
+    `/v1/finance/merchant-aliases/${encodeURIComponent(id)}`,
+    input,
+  );
+}
+
+export async function deleteMerchantAlias(
+  sessionToken: string,
+  id: string,
+): Promise<FinanceRequestResult<{ deleted: boolean }>> {
+  return financeRequest<{ deleted: boolean }>(
+    sessionToken,
+    "DELETE",
+    `/v1/finance/merchant-aliases/${encodeURIComponent(id)}`,
+  );
+}
+
 // --- Transaction workspace -------------------------------------------------
 
 export type TransactionVisibility = "visible" | "hidden" | "all";
@@ -735,6 +795,7 @@ export type TransactionPage = {
 export type TransactionDetail = {
   transaction: TransactionRow;
   suggested_tags: TransactionTagRef[];
+  suggested_category?: TransactionCategoryRef | null;
   has_more_suggestions: boolean;
   source_page: number | null;
   source_row_number: number;
@@ -1533,11 +1594,18 @@ export async function getImportReview(
   reviewId: string,
   page = 1,
   pageSize = 100,
+  sortDirection: "asc" | "desc" = "asc",
+  possibleDuplicatesOnly = false,
+  untaggedOnly = false,
 ): Promise<ImportRequestResult<ImportReviewDetail>> {
+  const filters = [
+    possibleDuplicatesOnly ? "&duplicates=possible" : "",
+    untaggedOnly ? "&untagged=true" : "",
+  ].join("");
   return importRequest<ImportReviewDetail>(
     sessionToken,
     "GET",
-    `/v1/finance/imports/reviews/${encodeURIComponent(reviewId)}?page=${page}&page_size=${pageSize}`,
+    `/v1/finance/imports/reviews/${encodeURIComponent(reviewId)}?page=${page}&page_size=${pageSize}&sort_direction=${sortDirection}${filters}`,
   );
 }
 

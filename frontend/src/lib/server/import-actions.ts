@@ -58,7 +58,7 @@ const ERROR_MESSAGES: Record<ImportErrorKind, string> = {
   idempotency_conflict: "That operation was already used for different content.",
   account_archived: "That financial account is archived. Restore it in Settings before importing.",
   identity_conflict: "An identity check failed. No records were changed.",
-  tag_unavailable: "A selected merchant tag was deleted or archived. Choose it again or remove it.",
+  tag_unavailable: "A selected tag was deleted or archived. Choose it again or remove it.",
   no_included_rows:
     "Nothing is included. Skip invalid rows only after including at least one valid row.",
   invalid_rows: "Invalid rows must be marked as skipped before committing.",

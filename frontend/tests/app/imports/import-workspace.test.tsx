@@ -102,6 +102,7 @@ describe("import workspace", () => {
         accounts={[account]}
         reviews={[]}
         history={[]}
+        initialTab="new"
         loadError={null}
         nextCursor={null}
       />,
@@ -158,6 +159,7 @@ describe("import workspace", () => {
         accounts={[account]}
         reviews={[]}
         history={[]}
+        initialTab="new"
         loadError={null}
         nextCursor={null}
       />,

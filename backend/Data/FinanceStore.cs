@@ -34,6 +34,15 @@ public sealed record MerchantTagRecord(Guid Id,
                                        DateTime CreatedAt,
                                        DateTime UpdatedAt);
 
+public sealed record MerchantAliasRecord(Guid Id,
+                                         string DisplayAlias,
+                                         Guid MerchantTagId,
+                                         string TagDisplayName,
+                                         Guid? CategoryId,
+                                         string? CategoryDisplayName,
+                                         DateTime CreatedAt,
+                                         DateTime UpdatedAt);
+
 public abstract record AccountOutcome
 {
     public sealed record Success(FinancialAccountRecord Account) : AccountOutcome;
@@ -78,6 +87,21 @@ public abstract record MerchantTagOutcome
     public sealed record NotFound : MerchantTagOutcome;
 
     public sealed record DuplicateName : MerchantTagOutcome;
+}
+
+public abstract record MerchantAliasOutcome
+{
+    public sealed record Success(MerchantAliasRecord Alias) : MerchantAliasOutcome;
+
+    public sealed record InvalidName : MerchantAliasOutcome;
+
+    public sealed record DuplicateName : MerchantAliasOutcome;
+
+    public sealed record TagNotFound : MerchantAliasOutcome;
+
+    public sealed record CategoryNotFound : MerchantAliasOutcome;
+
+    public sealed record NotFound : MerchantAliasOutcome;
 }
 
 public abstract record MerchantTagDeleteOutcome
@@ -1158,6 +1182,218 @@ public sealed class FinanceStore(Db db)
 
         return await command.ExecuteScalarAsync(cancellationToken) is not null;
     }
+
+    // --- Merchant aliases --------------------------------------------------
+
+    private const string MerchantAliasColumns = """
+        a.id, a.display_alias, a.merchant_tag_id, t.display_name,
+        a.category_id, c.display_name, a.created_at, a.updated_at
+        """;
+
+    public async Task<IReadOnlyList<MerchantAliasRecord>> ListMerchantAliasesAsync(Guid customerId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await db.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {MerchantAliasColumns}
+            FROM merchant_aliases a
+            JOIN merchant_tags t
+              ON t.customer_id = a.customer_id AND t.id = a.merchant_tag_id
+            LEFT JOIN categories c
+              ON c.customer_id = a.customer_id AND c.id = a.category_id
+            WHERE a.customer_id = @customer_id
+            ORDER BY a.display_alias, a.id
+            """;
+        command.Parameters.AddWithValue(CustomerIdParameter, customerId);
+
+        var aliases = new List<MerchantAliasRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            aliases.Add(MapMerchantAlias(reader));
+        }
+
+        return aliases;
+    }
+
+    public async Task<MerchantAliasOutcome> CreateMerchantAliasAsync(Guid customerId,
+                                                                     string? displayAlias,
+                                                                     Guid? merchantTagId,
+                                                                     Guid? categoryId,
+                                                                     CancellationToken cancellationToken = default)
+    {
+        if (!TryNormalizeName(displayAlias, out string? alias, out string? normalizedAlias) || merchantTagId is null)
+        {
+            return new MerchantAliasOutcome.InvalidName();
+        }
+
+        var id = Guid.NewGuid();
+        try
+        {
+            await using var connection = await db.OpenAsync(cancellationToken);
+            if (!await AliasTagExistsAsync(connection, customerId, merchantTagId.Value, cancellationToken))
+            {
+                return new MerchantAliasOutcome.TagNotFound();
+            }
+            if (categoryId is Guid selectedCategory && !await AliasCategoryExistsAsync(connection, customerId, selectedCategory, cancellationToken))
+            {
+                return new MerchantAliasOutcome.CategoryNotFound();
+            }
+
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO merchant_aliases (
+                    id, customer_id, display_alias, normalized_alias,
+                    merchant_tag_id, category_id, created_at, updated_at
+                )
+                VALUES (@id, @customer_id, @display_alias, @normalized_alias,
+                        @merchant_tag_id, @category_id, NOW(), NOW())
+                """;
+            command.Parameters.AddWithValue("id", id);
+            command.Parameters.AddWithValue(CustomerIdParameter, customerId);
+            command.Parameters.AddWithValue("display_alias", alias);
+            command.Parameters.AddWithValue("normalized_alias", normalizedAlias);
+            command.Parameters.AddWithValue("merchant_tag_id", merchantTagId.Value);
+            command.Parameters.AddWithValue("category_id", NpgsqlDbType.Uuid, (object?)categoryId ?? DBNull.Value);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        catch (PostgresException exception) when (IsUniqueViolation(exception))
+        {
+            return new MerchantAliasOutcome.DuplicateName();
+        }
+
+        MerchantAliasRecord? created = await FindMerchantAliasAsync(customerId, id, cancellationToken);
+        return created is null ? new MerchantAliasOutcome.NotFound() : new MerchantAliasOutcome.Success(created);
+    }
+
+    public async Task<MerchantAliasOutcome> UpdateMerchantAliasAsync(Guid customerId,
+                                                                     Guid id,
+                                                                     string? displayAlias,
+                                                                     Guid? merchantTagId,
+                                                                     Guid? categoryId,
+                                                                     CancellationToken cancellationToken = default)
+    {
+        if (!TryNormalizeName(displayAlias, out string? alias, out string? normalizedAlias) || merchantTagId is null)
+        {
+            return new MerchantAliasOutcome.InvalidName();
+        }
+
+        try
+        {
+            await using var connection = await db.OpenAsync(cancellationToken);
+            if (!await AliasTagExistsAsync(connection, customerId, merchantTagId.Value, cancellationToken))
+            {
+                return new MerchantAliasOutcome.TagNotFound();
+            }
+            if (categoryId is Guid selectedCategory && !await AliasCategoryExistsAsync(connection, customerId, selectedCategory, cancellationToken))
+            {
+                return new MerchantAliasOutcome.CategoryNotFound();
+            }
+
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE merchant_aliases
+                SET display_alias = @display_alias,
+                    normalized_alias = @normalized_alias,
+                    merchant_tag_id = @merchant_tag_id,
+                    category_id = @category_id,
+                    updated_at = NOW()
+                WHERE customer_id = @customer_id AND id = @id
+                """;
+            command.Parameters.AddWithValue("id", id);
+            command.Parameters.AddWithValue(CustomerIdParameter, customerId);
+            command.Parameters.AddWithValue("display_alias", alias);
+            command.Parameters.AddWithValue("normalized_alias", normalizedAlias);
+            command.Parameters.AddWithValue("merchant_tag_id", merchantTagId.Value);
+            command.Parameters.AddWithValue("category_id", NpgsqlDbType.Uuid, (object?)categoryId ?? DBNull.Value);
+            int updated = await command.ExecuteNonQueryAsync(cancellationToken);
+            if (updated == 0)
+            {
+                return new MerchantAliasOutcome.NotFound();
+            }
+        }
+        catch (PostgresException exception) when (IsUniqueViolation(exception))
+        {
+            return new MerchantAliasOutcome.DuplicateName();
+        }
+
+        MerchantAliasRecord? updatedAlias = await FindMerchantAliasAsync(customerId, id, cancellationToken);
+        return updatedAlias is null ? new MerchantAliasOutcome.NotFound() : new MerchantAliasOutcome.Success(updatedAlias);
+    }
+
+    public async Task<bool> DeleteMerchantAliasAsync(Guid customerId, Guid id, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await db.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM merchant_aliases WHERE customer_id = @customer_id AND id = @id";
+        command.Parameters.AddWithValue(CustomerIdParameter, customerId);
+        command.Parameters.AddWithValue("id", id);
+
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
+    }
+
+    private async Task<MerchantAliasRecord?> FindMerchantAliasAsync(Guid customerId, Guid id, CancellationToken cancellationToken)
+    {
+        await using var connection = await db.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {MerchantAliasColumns}
+            FROM merchant_aliases a
+            JOIN merchant_tags t
+              ON t.customer_id = a.customer_id AND t.id = a.merchant_tag_id
+            LEFT JOIN categories c
+              ON c.customer_id = a.customer_id AND c.id = a.category_id
+            WHERE a.customer_id = @customer_id AND a.id = @id
+            """;
+        command.Parameters.AddWithValue(CustomerIdParameter, customerId);
+        command.Parameters.AddWithValue("id", id);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? MapMerchantAlias(reader) : null;
+    }
+
+    private static async Task<bool> AliasTagExistsAsync(NpgsqlConnection connection,
+                                                        Guid customerId,
+                                                        Guid merchantTagId,
+                                                        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT 1 FROM merchant_tags
+            WHERE customer_id = @customer_id AND id = @id AND is_archived = FALSE
+            """;
+        command.Parameters.AddWithValue(CustomerIdParameter, customerId);
+        command.Parameters.AddWithValue("id", merchantTagId);
+
+        return await command.ExecuteScalarAsync(cancellationToken) is not null;
+    }
+
+    private static async Task<bool> AliasCategoryExistsAsync(NpgsqlConnection connection,
+                                                             Guid customerId,
+                                                             Guid categoryId,
+                                                             CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT 1 FROM categories
+            WHERE customer_id = @customer_id AND id = @id
+              AND is_system = FALSE AND is_archived = FALSE
+            """;
+        command.Parameters.AddWithValue(CustomerIdParameter, customerId);
+        command.Parameters.AddWithValue("id", categoryId);
+
+        return await command.ExecuteScalarAsync(cancellationToken) is not null;
+    }
+
+    private static MerchantAliasRecord MapMerchantAlias(NpgsqlDataReader reader) => new(
+        reader.GetGuid(0),
+        reader.GetString(1),
+        reader.GetGuid(2),
+        reader.GetString(3),
+        reader.IsDBNull(4) ? null : reader.GetGuid(4),
+        reader.IsDBNull(5) ? null : reader.GetString(5),
+        reader.GetFieldValue<DateTime>(6),
+        reader.GetFieldValue<DateTime>(7));
 
     // --- Mapping -----------------------------------------------------------
 

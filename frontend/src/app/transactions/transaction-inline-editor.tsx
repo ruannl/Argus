@@ -5,12 +5,14 @@ import { useState } from "react";
 import { saveTransactionAction } from "@/lib/server/transaction-actions";
 import type { Category, MerchantTag, TransactionRow } from "@/lib/server/backend-client";
 
+import { sortByDisplayName } from "@/lib/display-order";
+
 type TransactionInlineEditorProps = {
   row: TransactionRow;
   categories: Category[];
   tags: MerchantTag[];
   classificationDisabled?: boolean;
-  onSaved: () => void;
+  onSaved: (transaction: TransactionRow) => void;
   onStale: (message: string) => void;
 };
 
@@ -36,13 +38,15 @@ export default function TransactionInlineEditor({
   const draftIsStale = row.version !== base.version;
   const controlsDisabled = busy || draftIsStale || classificationDisabled;
 
-  const assignable = categories.filter(
-    (category) => !category.is_archived || category.id === row.category.id,
+  const assignable = sortByDisplayName(
+    categories.filter((category) => !category.is_archived || category.id === row.category.id),
   );
   const assignedIds = new Set(row.merchant_tags.map((tag) => tag.id));
   // Selected additions stay in the option list so the multi-select keeps
   // showing them and the user can deselect them before saving.
-  const addOptions = tags.filter((tag) => !tag.is_archived && !assignedIds.has(tag.id));
+  const addOptions = sortByDisplayName(
+    tags.filter((tag) => !tag.is_archived && !assignedIds.has(tag.id)),
+  );
 
   async function save() {
     if (classificationDisabled) {
@@ -109,7 +113,7 @@ export default function TransactionInlineEditor({
       setMessage("Inline change saved.");
       setAddIds([]);
       setRemoveIds([]);
-      onSaved();
+      onSaved(result.value.transaction);
     } catch {
       onStale(
         "The inline save outcome is uncertain. The list refresh was requested; check the saved value before retrying.",
@@ -160,7 +164,7 @@ export default function TransactionInlineEditor({
         <fieldset className="mt-2" disabled={controlsDisabled}>
           <legend className="text-xs font-semibold text-ink">Remove assigned tags inline</legend>
           <div className="mt-1 flex flex-wrap gap-2">
-            {row.merchant_tags.map((tag) => {
+            {sortByDisplayName(row.merchant_tags).map((tag) => {
               const marked = removeIds.includes(tag.id);
               return (
                 <label className="flex items-center gap-1 text-xs text-ink" key={tag.id}>

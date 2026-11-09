@@ -359,6 +359,9 @@ public sealed class StatementImportStore
                                                          Guid reviewId,
                                                          int page,
                                                          int pageSize,
+                                                         string sortDirection = "asc",
+                                                         bool possibleDuplicatesOnly = false,
+                                                         bool untaggedOnly = false,
                                                          CancellationToken cancellationToken = default)
     {
         page = Math.Max(1, page);
@@ -379,8 +382,9 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
 
-        var rows = await ReadReviewRowsAsync(connection, null, reviewId, page, pageSize, cancellationToken);
-        int total = await CountReviewRowsAsync(connection, null, reviewId, cancellationToken);
+        bool descending = string.Equals(sortDirection, "desc", StringComparison.OrdinalIgnoreCase);
+        var rows = await ReadReviewRowsAsync(connection, null, reviewId, page, pageSize, descending, possibleDuplicatesOnly, untaggedOnly, cancellationToken);
+        int total = await CountReviewRowsAsync(connection, null, reviewId, possibleDuplicatesOnly, untaggedOnly, cancellationToken);
 
         return new ImportReviewDetail(summary, new ImportReviewPage(rows, total, page, pageSize));
     }
@@ -418,7 +422,7 @@ public sealed class StatementImportStore
         }
         EnsureEditable(summary, expectedVersion);
 
-        var rows = (await ReadReviewRowsAsync(connection, transaction, reviewId, 1, int.MaxValue, cancellationToken)).ToList();
+        var rows = (await ReadReviewRowsAsync(connection, transaction, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, cancellationToken)).ToList();
         var byId = rows.ToDictionary(row => row.RowId);
         foreach (var decision in decisions)
         {
@@ -595,7 +599,7 @@ public sealed class StatementImportStore
         }
         EnsureEditable(summary, expectedVersion);
 
-        var existingRows = await ReadReviewRowsAsync(connection, transaction, reviewId, 1, int.MaxValue, cancellationToken);
+        var existingRows = await ReadReviewRowsAsync(connection, transaction, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, cancellationToken);
         var decisionMap = existingRows.ToDictionary(row => row.RowId, row => new RowDecision(row.Skip, row.Override));
         var parsedRows = existingRows.Select(ToParsedRow).ToArray();
         var snapshot = await ComputeDuplicateSnapshotAsync(connection, transaction, customerId, accountId.Value, parsedRows, decisionMap, cancellationToken);
@@ -811,8 +815,7 @@ public sealed class StatementImportStore
         string[] namespaces = incoming.Where(row => row.Namespace is not null).Select(row => row.Namespace!).Distinct(StringComparer.Ordinal).ToArray();
         string[] ids = incoming.Where(row => row.Value is not null).Select(row => row.Value!).Distinct(StringComparer.Ordinal).ToArray();
         decimal[] amounts = incoming.Select(row => row.Cents / 100m).Distinct().ToArray();
-        var minDate = incoming.Count == 0 ? DateOnly.MinValue : incoming.Min(row => row.Date).AddDays(-3);
-        var maxDate = incoming.Count == 0 ? DateOnly.MinValue : incoming.Max(row => row.Date).AddDays(3);
+        DateOnly[] dates = incoming.Select(row => row.Date).Distinct().ToArray();
 
         var existing = new Dictionary<Guid, ExistingRow>();
         if (identityKeys.Length > 0)
@@ -842,16 +845,15 @@ public sealed class StatementImportStore
                 existing[row.Id] = row;
             }
         }
-        if (amounts.Length > 0)
+        if (amounts.Length > 0 && dates.Length > 0)
         {
             foreach (var row in await QueryExistingAsync(
                          connection, transaction, customerId, accountId,
-                         "t.amount = ANY(@amounts) AND t.transaction_date BETWEEN @min_date AND @max_date",
+                         "t.amount = ANY(@amounts) AND t.transaction_date = ANY(@dates)",
                          command =>
                          {
                              command.Parameters.AddWithValue("amounts", NpgsqlDbType.Array | NpgsqlDbType.Numeric, amounts);
-                             command.Parameters.AddWithValue("min_date", minDate);
-                             command.Parameters.AddWithValue("max_date", maxDate);
+                             command.Parameters.AddWithValue("dates", NpgsqlDbType.Array | NpgsqlDbType.Date, dates);
                          },
                          cancellationToken))
             {
@@ -975,9 +977,10 @@ public sealed class StatementImportStore
             }
         }
 
-        // Near-duplicate scan: exact amount and ±3 inclusive days, excluding the
-        // exact identity. The comparison cap is a safe processing bound, never a
-        // silent policy truncation.
+        // Near-duplicate scan: exact transaction date and amount, excluding the
+        // exact identity. A date that differs suggests a separate transaction,
+        // even at the same merchant and amount. The comparison cap is a safe
+        // processing bound, never a silent policy truncation.
         foreach (var incomingRow in incoming)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -985,7 +988,7 @@ public sealed class StatementImportStore
             {
                 foreach (var candidate in sameAmount)
                 {
-                    if (Math.Abs(candidate.Date.DayNumber - incomingRow.Date.DayNumber) > 3 || candidate.IdentityKey == incomingRow.IdentityKey)
+                    if (candidate.Date != incomingRow.Date || candidate.IdentityKey == incomingRow.IdentityKey)
                     {
                         continue;
                     }
@@ -1014,7 +1017,7 @@ public sealed class StatementImportStore
 
             foreach (var second in sameAmount)
             {
-                if (second.Index <= first.Index || first.IdentityKey == second.IdentityKey || Math.Abs(first.Date.DayNumber - second.Date.DayNumber) > 3)
+                if (second.Index <= first.Index || first.IdentityKey == second.IdentityKey || first.Date != second.Date)
                 {
                     continue;
                 }
@@ -1043,9 +1046,18 @@ public sealed class StatementImportStore
         }
 
         var activeTags = await LoadActiveTagsAsync(connection, transaction, customerId, cancellationToken);
+        string[] merchantKeys = snapshots
+            .Select(snapshot => MerchantKey.FromDescription(snapshot.Row.NormalizedDescription))
+            .Where(key => key is not null)
+            .Select(key => key!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        SuggestionData suggestions = await SuggestionLoader.LoadAsync(
+            connection, transaction, customerId, merchantKeys, cancellationToken);
         foreach (var snapshot in snapshots)
         {
-            foreach (var tagId in TagSuggestions.Match(snapshot.Row.NormalizedDescription, activeTags))
+            foreach (var tagId in MerchantSuggestions.Build(
+                         snapshot.Row.NormalizedDescription, activeTags, suggestions).TagIds)
             {
                 snapshot.SuggestedTagIds.Add(tagId);
             }
@@ -1397,11 +1409,17 @@ public sealed class StatementImportStore
                                                                                         Guid reviewId,
                                                                                         int page,
                                                                                         int pageSize,
+                                                                                        bool descending,
+                                                                                        bool possibleDuplicatesOnly,
+                                                                                        bool untaggedOnly,
                                                                                         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = """
+        string orderBy = descending
+            ? "transaction_date DESC NULLS LAST, source_row_number DESC, row_id DESC"
+            : "transaction_date ASC NULLS LAST, source_row_number ASC, row_id ASC";
+        command.CommandText = $"""
             SELECT row_id, source_line, source_page, source_row_number, raw_values::text,
                    transaction_date, description, normalized_description, amount_cents,
                    validation_codes::text, warnings::text, source_id_namespace, source_id_value,
@@ -1411,10 +1429,17 @@ public sealed class StatementImportStore
                    selected_tag_ids::text
             FROM import_review_rows
             WHERE review_id = @review_id
-            ORDER BY source_row_number, row_id
+              AND (@possible_only = FALSE OR (
+                    skip = FALSE
+                    AND (near_candidate_total > 0 OR duplicate_reasons @> '["stable_id_changed"]'::jsonb)
+                  ))
+              AND (@untagged_only = FALSE OR jsonb_array_length(selected_tag_ids) = 0)
+            ORDER BY {orderBy}
             LIMIT @limit OFFSET @offset
             """;
         command.Parameters.AddWithValue("review_id", reviewId);
+        command.Parameters.AddWithValue("possible_only", possibleDuplicatesOnly);
+        command.Parameters.AddWithValue("untagged_only", untaggedOnly);
         command.Parameters.AddWithValue("limit", pageSize == int.MaxValue ? 100_000 : pageSize);
         command.Parameters.AddWithValue("offset", pageSize == int.MaxValue ? 0 : (page - 1) * pageSize);
         var rows = new List<ImportReviewRowRecord>();
@@ -1456,12 +1481,25 @@ public sealed class StatementImportStore
     private static async Task<int> CountReviewRowsAsync(NpgsqlConnection connection,
                                                         NpgsqlTransaction? transaction,
                                                         Guid reviewId,
+                                                        bool possibleDuplicatesOnly,
+                                                        bool untaggedOnly,
                                                         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT COUNT(*) FROM import_review_rows WHERE review_id = @review_id";
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM import_review_rows
+            WHERE review_id = @review_id
+              AND (@possible_only = FALSE OR (
+                    skip = FALSE
+                    AND (near_candidate_total > 0 OR duplicate_reasons @> '["stable_id_changed"]'::jsonb)
+                  ))
+              AND (@untagged_only = FALSE OR jsonb_array_length(selected_tag_ids) = 0)
+            """;
         command.Parameters.AddWithValue("review_id", reviewId);
+        command.Parameters.AddWithValue("possible_only", possibleDuplicatesOnly);
+        command.Parameters.AddWithValue("untagged_only", untaggedOnly);
 
         return (int)(long)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
@@ -2041,7 +2079,7 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
 
-        var rows = await ReadReviewRowsAsync(connection, transaction, reviewId, 1, int.MaxValue, cancellationToken);
+        var rows = await ReadReviewRowsAsync(connection, transaction, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, cancellationToken);
         if (rows.Any(row => row.ValidationCodes.Length > 0 && !row.Skip))
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRows);

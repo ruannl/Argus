@@ -66,8 +66,8 @@ function OverviewWorkspace({
         </h2>
         <p className="mt-4 max-w-2xl text-base leading-7 text-muted">
           {isCharts
-            ? "Bar-first charts appear after your first statement import. Start by creating a ZAR financial account, categories, and merchant tags in "
-            : "Your Summary and Charts fill in after your first statement import. Start by creating a ZAR financial account, categories, and merchant tags in "}
+            ? "Bar-first charts appear after your first statement import. Start by creating a ZAR financial account, categories, and tags in "
+            : "Your Summary and Charts fill in after your first statement import. Start by creating a ZAR financial account, categories, and tags in "}
           <Link
             className="font-semibold text-accent-text underline underline-offset-4"
             href="/settings"

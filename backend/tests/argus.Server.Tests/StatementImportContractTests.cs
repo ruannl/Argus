@@ -125,6 +125,56 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
     }
 
     [Fact]
+    public async Task ReviewHonoursTheRequestedPageSize()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var file = StatementFixtureBuilder.BuildFnbCsv(120, chequeAccount: false).Bytes;
+        var review = await PrepareAsync(session, accountId, file, new DateOnly(2024, 1, 1), new DateOnly(2024, 12, 31));
+        var reviewId = review.GetProperty("summary").GetProperty("id").GetGuid();
+
+        var first = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}?page=1&page_size=100", session: session)));
+        Assert.Equal(100, Rows(first).Length);
+        Assert.Equal(100, first.GetProperty("page").GetProperty("page_size").GetInt32());
+
+        var second = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}?page=2&page_size=100", session: session)));
+        Assert.Equal(20, Rows(second).Length);
+        Assert.Equal(2, second.GetProperty("page").GetProperty("page").GetInt32());
+    }
+
+    [Fact]
+    public async Task ReviewRowsSortByTransactionDateInTheRequestedDirection()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var file = StatementFixtureBuilder.BuildFnbCsv(3, chequeAccount: false).Bytes;
+        var review = await PrepareAsync(session, accountId, file, new DateOnly(2024, 1, 1), new DateOnly(2024, 1, 31));
+        var reviewId = review.GetProperty("summary").GetProperty("id").GetGuid();
+
+        await ExecuteSqlAsync($"""
+            UPDATE import_review_rows
+            SET transaction_date = CASE source_row_number
+                WHEN 1 THEN DATE '2024-01-20'
+                WHEN 2 THEN DATE '2024-01-10'
+                WHEN 3 THEN DATE '2024-01-30'
+            END
+            WHERE review_id = '{reviewId}'
+            """);
+
+        var defaultOrder = Rows(await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session))))
+            .Select(row => row.GetProperty("transaction_date").GetString())
+            .ToArray();
+        string?[] expectedAscending = ["2024-01-10", "2024-01-20", "2024-01-30"];
+        Assert.Equal(expectedAscending, defaultOrder);
+
+        var newestFirst = Rows(await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}?sort_direction=desc", session: session))))
+            .Select(row => row.GetProperty("transaction_date").GetString())
+            .ToArray();
+        string?[] expectedDescending = ["2024-01-30", "2024-01-20", "2024-01-10"];
+        Assert.Equal(expectedDescending, newestFirst);
+    }
+
+    [Fact]
     public async Task CsvCommitPreservesDisplayWhitespaceAndNormalizesMatching()
     {
         var (session, _) = await NewCustomerAsync();
@@ -655,6 +705,41 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
     }
 
     [Fact]
+    public async Task ReviewSuggestionsIncludeUserAliases()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var tagResponse = await SendAsync(Post("/v1/finance/merchant-tags", Json(new { display_name = "Serene Pharmacy" }), session: session));
+        var tagId = (await BodyAsync(tagResponse)).GetProperty("id").GetGuid();
+        var aliasResponse = await SendAsync(Post("/v1/finance/merchant-aliases", Json(new
+        {
+            display_alias = "apteek",
+            merchant_tag_id = tagId,
+        }), session: session));
+        Assert.Equal(HttpStatusCode.Created, aliasResponse.StatusCode);
+
+        var config = new
+        {
+            format = "generic",
+            header_line = 1,
+            delimiter = ",",
+            date_format = "yyyy-MM-dd",
+            decimal_separator = ".",
+            thousands_separator = "none",
+            amount_mode = "signed",
+            date_column = 0,
+            description_column = 1,
+            amount_column = 2,
+            direction = "normal",
+        };
+        var csv = "Date,Description,Amount\n2025-01-02,SERENE APTEEK 410586*5387 02 OCT,-100.00\n";
+        var review = await PrepareAsync(session, accountId, System.Text.Encoding.UTF8.GetBytes(csv), new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), sourceKind: "generic_csv", parserConfig: config);
+
+        var suggested = Rows(review)[0].GetProperty("suggested_tag_ids").EnumerateArray().Select(value => value.GetString()).ToArray();
+        Assert.Contains(tagId.ToString(), suggested);
+    }
+
+    [Fact]
     public async Task NearMatchIsAWarningAndDoesNotSuppress()
     {
         var (session, _) = await NewCustomerAsync();
@@ -664,12 +749,69 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var firstCommit = await SendAsync(Post($"{ReviewsPath}/{first.GetProperty("summary").GetProperty("id").GetGuid()}/commit", Json(CommitBody(first)), session: session));
         Assert.Equal(HttpStatusCode.Created, firstCommit.StatusCode);
 
-        var secondCsv = "one\ntwo\nthree\nfour\nfive\nsix\n" + "Date,Amount,Balance,Description\n" + "2025/01/03,-10.00,0.00,Coffee shop\n";
+        var secondCsv = "one\ntwo\nthree\nfour\nfive\nsix\n" + "Date,Amount,Balance,Description\n" + "2025/01/02,-10.00,0.00,Coffee shop branch\n" + "2025/01/04,-10.00,0.00,Coffee shop evening\n";
         var second = await PrepareAsync(session, accountId, System.Text.Encoding.UTF8.GetBytes(secondCsv), new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31));
-        var row = Rows(second)[0];
+        var rows = Rows(second);
         Assert.Equal(1, second.GetProperty("summary").GetProperty("possible_duplicate_count").GetInt32());
-        Assert.Equal("none", row.GetProperty("duplicate_state").GetString());
-        Assert.NotEmpty(row.GetProperty("near_candidates").EnumerateArray());
+        Assert.Equal("none", rows[0].GetProperty("duplicate_state").GetString());
+        Assert.NotEmpty(rows[0].GetProperty("near_candidates").EnumerateArray());
+        Assert.Empty(rows[1].GetProperty("near_candidates").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task ReviewCanFilterToUntaggedRows()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var tagResponse = await SendAsync(Post("/v1/finance/merchant-tags", Json(new { display_name = "Groceries" }), session: session));
+        Assert.Equal(HttpStatusCode.Created, tagResponse.StatusCode);
+        var tagId = (await BodyAsync(tagResponse)).GetProperty("id").GetGuid();
+
+        var header = "one\ntwo\nthree\nfour\nfive\nsix\nDate,Amount,Balance,Description\n";
+        var review = await PrepareAsync(session, accountId, System.Text.Encoding.UTF8.GetBytes(header + "2025/01/02,-10.00,0.00,Tagged row\n2025/01/03,-11.00,0.00,Untagged row\n"), new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31));
+        var reviewId = review.GetProperty("summary").GetProperty("id").GetGuid();
+        var rows = Rows(review);
+
+        var patch = await SendAsync(Patch($"{ReviewsPath}/{reviewId}", Json(new
+        {
+            expected_review_version = Version(review),
+            decisions = new[] { new { row_id = rows[0].GetProperty("row_id").GetGuid(), selected_tag_ids = new[] { tagId } } },
+        }), session: session));
+        Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
+
+        var filtered = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}?untagged=true", session: session)));
+        var filteredRows = Rows(filtered);
+        Assert.Single(filteredRows);
+        Assert.Equal("Untagged row", filteredRows[0].GetProperty("description").GetString());
+        Assert.Equal(1, filtered.GetProperty("page").GetProperty("total").GetInt32());
+
+        var all = Rows(await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session))));
+        Assert.Equal(2, all.Length);
+    }
+
+    [Fact]
+    public async Task ReviewCanFilterToPossibleDuplicates()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var header = "one\ntwo\nthree\nfour\nfive\nsix\nDate,Amount,Balance,Description\n";
+        var first = await PrepareAsync(session, accountId, System.Text.Encoding.UTF8.GetBytes(header + "2025/01/02,-10.00,0.00,Coffee shop\n"), new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31));
+        var firstCommit = await SendAsync(Post($"{ReviewsPath}/{first.GetProperty("summary").GetProperty("id").GetGuid()}/commit", Json(CommitBody(first)), session: session));
+        Assert.Equal(HttpStatusCode.Created, firstCommit.StatusCode);
+
+        var secondCsv = header + "2025/01/02,-10.00,0.00,Coffee shop branch\n2025/01/04,-22.00,0.00,Bookstore\n";
+        var second = await PrepareAsync(session, accountId, System.Text.Encoding.UTF8.GetBytes(secondCsv), new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31));
+        var reviewId = second.GetProperty("summary").GetProperty("id").GetGuid();
+        Assert.Equal(1, second.GetProperty("summary").GetProperty("possible_duplicate_count").GetInt32());
+
+        var filtered = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}?duplicates=possible", session: session)));
+        var filteredRows = Rows(filtered);
+        Assert.Single(filteredRows);
+        Assert.Equal("Coffee shop branch", filteredRows[0].GetProperty("description").GetString());
+        Assert.Equal(1, filtered.GetProperty("page").GetProperty("total").GetInt32());
+
+        var all = Rows(await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session))));
+        Assert.Equal(2, all.Length);
     }
 
     [Fact]

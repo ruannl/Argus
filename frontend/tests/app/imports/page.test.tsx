@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/auth", () => ({
@@ -85,13 +86,26 @@ describe("imports page", () => {
       value: { items: [], next_cursor: null },
     });
 
+    const user = userEvent.setup();
     render(await ImportsPage());
 
     expect(screen.getByRole("heading", { level: 1, name: "Imports" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Choose a statement" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "New import" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(
+      within(screen.getByRole("tabpanel")).getByRole("heading", { name: "Choose a statement" }),
+    ).toBeInTheDocument();
     expect(document.querySelector('input[type="file"]')).not.toBeNull();
-    expect(screen.getByText("No open reviews.")).toBeInTheDocument();
-    expect(screen.getByText("No statements imported yet.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Open reviews" }));
+    expect(within(screen.getByRole("tabpanel")).getByText("No open reviews.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "History" }));
+    expect(
+      within(screen.getByRole("tabpanel")).getByText("No statements imported yet."),
+    ).toBeInTheDocument();
 
     const nav = screen.getByRole("navigation", { name: "Workspace" });
     expect(within(nav).getByRole("link", { name: "Imports" })).toHaveAttribute(
@@ -99,6 +113,48 @@ describe("imports page", () => {
       "page",
     );
     expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it("marks the Open reviews tab when reviews are waiting", async () => {
+    vi.mocked(auth).mockResolvedValue({
+      expires: "2030-01-01T00:00:00.000Z",
+      authenticated: true,
+      user: { backendToken: "backend-token" },
+    } as never);
+    vi.mocked(getCurrentAccount).mockResolvedValue(account);
+    vi.mocked(listFinancialAccounts).mockResolvedValue({
+      ok: true,
+      value: { accounts: [financialAccount] },
+    });
+    vi.mocked(listOpenImportReviews).mockResolvedValue({
+      ok: true,
+      value: {
+        reviews: [
+          {
+            id: "review-id",
+            financial_account_id: "financial-account-id",
+            source_kind: "fnb_csv",
+            start_date: "2024-01-01",
+            end_date: "2024-01-31",
+            version: 3,
+            expires_at: "2030-01-02T00:00:00.0000000Z",
+            total_rows: 4,
+            imported_count: 2,
+            suppressed_count: 1,
+            skipped_count: 1,
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+      },
+    });
+    vi.mocked(listImportHistory).mockResolvedValue({
+      ok: true,
+      value: { items: [], next_cursor: null },
+    });
+
+    render(await ImportsPage());
+
+    expect(screen.getByRole("tab", { name: "Open reviews" })).toHaveClass("border-warning-line");
   });
 
   it("renders the next history cursor link", async () => {
@@ -145,11 +201,14 @@ describe("imports page", () => {
       },
     });
 
+    const user = userEvent.setup();
     render(await ImportsPage());
+
+    await user.click(screen.getByRole("tab", { name: "History" }));
 
     expect(screen.getByRole("link", { name: "Load older imports" })).toHaveAttribute(
       "href",
-      "/imports?cursor=cursor-1",
+      "/imports?tab=history&cursor=cursor-1",
     );
   });
 

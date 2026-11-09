@@ -92,14 +92,28 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
 
         var row = rows[0];
         var activeTags = await LoadActiveTagsAsync(connection, transaction, customerId, cancellationToken);
+        string? merchantKey = MerchantKey.FromDescription(row.NormalizedDescription);
+        SuggestionData suggestionData = await SuggestionLoader.LoadAsync(
+            connection,
+            transaction,
+            customerId,
+            merchantKey is null ? [] : [merchantKey],
+            cancellationToken);
+        SuggestionResult suggestion = MerchantSuggestions.Build(
+            row.NormalizedDescription,
+            activeTags.Select(tag => (tag.Id, tag.Tokens)).ToArray(),
+            suggestionData);
         var assigned = row.TagIds.ToHashSet();
-        var matches = TagSuggestions.Match(row.NormalizedDescription, activeTags.Select(tag => (tag.Id, tag.Tokens)).ToArray()).Where(id => !assigned.Contains(id)).Take(TransactionLimits.MaxSuggestions + 1).ToArray();
+        var matches = suggestion.TagIds.Where(id => !assigned.Contains(id)).Take(TransactionLimits.MaxSuggestions + 1).ToArray();
         bool hasMore = matches.Length > TransactionLimits.MaxSuggestions;
         var suggested = matches.Take(TransactionLimits.MaxSuggestions).Select(id => activeTags.First(tag => tag.Id == id)).Select(tag => new TransactionTagRef(tag.Id, tag.DisplayName, false)).ToArray();
+        TransactionCategoryRef? suggestedCategory = suggestion.CategoryId is Guid categoryId
+            ? await ReadCategoryRefAsync(connection, transaction, customerId, categoryId, cancellationToken)
+            : null;
 
         await transaction.CommitAsync(cancellationToken);
 
-        return new TransactionDetailResult(row.Response, suggested, hasMore, row.SourcePage, row.SourceRowNumber);
+        return new TransactionDetailResult(row.Response, suggested, suggestedCategory, hasMore, row.SourcePage, row.SourceRowNumber);
     }
 
     // --- Single metadata edits ---------------------------------------------
@@ -2043,6 +2057,36 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         }
 
         return result;
+    }
+
+    private static async Task<TransactionCategoryRef?> ReadCategoryRefAsync(NpgsqlConnection connection,
+                                                                           NpgsqlTransaction? transaction,
+                                                                           Guid customerId,
+                                                                           Guid categoryId,
+                                                                           CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT id, display_name, kind, is_system, is_archived
+            FROM categories
+            WHERE customer_id = @customer_id AND id = @id
+            """;
+        command.Parameters.AddWithValue("customer_id", customerId);
+        command.Parameters.AddWithValue("id", categoryId);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new TransactionCategoryRef(
+            reader.GetGuid(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.GetBoolean(3),
+            reader.GetBoolean(4));
     }
 
     private static async Task<IReadOnlyList<(Guid Id, string DisplayName, string[] Tokens)>>

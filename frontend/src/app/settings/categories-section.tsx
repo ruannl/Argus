@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
+import { sortByDisplayName } from "@/lib/display-order";
 import type { Category, CategoryKind, UserCategoryKind } from "@/lib/server/backend-client";
 import {
   archiveCategoryAction,
@@ -13,14 +14,21 @@ import {
 import type { FinanceActionResult } from "@/lib/server/finance-actions";
 
 import FormResult from "./form-result";
-
-const FIELD_CLASS =
-  "mt-2 w-full rounded-2xl border border-line bg-page px-4 py-3 text-base text-ink outline-none focus:border-accent-text focus-visible:ring-2 focus-visible:ring-accent-ring";
-const LABEL_CLASS = "text-sm font-semibold text-muted";
-const BUTTON_CLASS =
-  "inline-flex items-center justify-center rounded-full border border-line px-4 py-2 text-sm font-bold text-ink transition hover:border-ink";
-const PRIMARY_BUTTON_CLASS =
-  "inline-flex items-center justify-center rounded-full bg-ink px-5 py-2.5 text-sm font-bold text-page transition hover:bg-ink-hover";
+import {
+  BUTTON_CLASS,
+  EDITOR_ROW_CLASS,
+  EMPTY_STATE_CLASS,
+  FIELD_CLASS,
+  LABEL_CLASS,
+  PRIMARY_BUTTON_CLASS,
+  STATUS_PILL_CLASS,
+  TABLE_CLASS,
+  TABLE_HEAD_CLASS,
+  TABLE_ROW_CLASS,
+  TABLE_WRAPPER_CLASS,
+  TD_CLASS,
+  TH_CLASS,
+} from "./settings-ui";
 
 const USER_KINDS: UserCategoryKind[] = ["Expense", "Income", "Transfer", "Excluded"];
 
@@ -35,154 +43,177 @@ const KIND_CLASS: Record<CategoryKind, string> = {
 function CategoryRow({ category }: { category: Category }) {
   const initialKind: UserCategoryKind =
     category.kind === "Uncategorised" ? "Expense" : category.kind;
+  const [editing, setEditing] = useState(false);
   const [selectedKind, setSelectedKind] = useState<UserCategoryKind>(initialKind);
   const [result, setResult] = useState<FinanceActionResult | null>(null);
   const kindChanged = selectedKind !== category.kind;
   const nameId = `category-name-${category.id}`;
   const kindId = `category-kind-${category.id}`;
   const confirmId = `category-confirm-${category.id}`;
+  const editorId = `category-editor-${category.id}`;
 
   return (
-    <li className="rounded-3xl border border-line bg-surface p-5 sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-lg font-semibold text-ink">{category.display_name}</p>
-          <p className="mt-1 text-sm text-muted">
-            {category.transaction_count}{" "}
-            {category.transaction_count === 1 ? "transaction" : "transactions"}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-          <span className={`rounded-full px-3 py-1 ${KIND_CLASS[category.kind]}`}>
+    <Fragment>
+      <tr className={TABLE_ROW_CLASS}>
+        <td className={TD_CLASS}>
+          <p className="font-semibold text-ink">{category.display_name}</p>
+        </td>
+        <td className={TD_CLASS}>
+          <span className={`${STATUS_PILL_CLASS} ${KIND_CLASS[category.kind]}`}>
             {category.kind}
           </span>
+        </td>
+        <td className={TD_CLASS}>
           <span
-            className={
+            className={`${STATUS_PILL_CLASS} ${
               category.is_archived
-                ? "rounded-full bg-warning-soft px-3 py-1 text-warning-text"
-                : "rounded-full bg-success-soft px-3 py-1 text-success-ink"
-            }
+                ? "bg-warning-soft text-warning-text"
+                : "bg-success-soft text-success-ink"
+            }`}
           >
             {category.is_archived ? "Archived" : "Active"}
           </span>
-        </div>
-      </div>
-
-      <form
-        action={async (formData) => {
-          setResult(await updateCategoryAction(formData));
-        }}
-        className="mt-5"
-      >
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label className={LABEL_CLASS} htmlFor={nameId}>
-              Rename category
-            </label>
-            <input
-              className={FIELD_CLASS}
-              defaultValue={category.display_name}
-              id={nameId}
-              name="display_name"
-              required
-            />
-          </div>
-          <div>
-            <label className={LABEL_CLASS} htmlFor={kindId}>
-              Kind
-            </label>
-            <select
-              className={FIELD_CLASS}
-              id={kindId}
-              name="kind"
-              onChange={(event) => setSelectedKind(event.target.value as UserCategoryKind)}
-              value={selectedKind}
+        </td>
+        <td className={`${TD_CLASS} text-muted tabular-nums`}>
+          {category.transaction_count}{" "}
+          {category.transaction_count === 1 ? "transaction" : "transactions"}
+        </td>
+        <td className={TD_CLASS}>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              aria-controls={editorId}
+              aria-expanded={editing}
+              aria-label={`${editing ? "Close" : "Edit"} ${category.display_name}`}
+              className={BUTTON_CLASS}
+              onClick={() => setEditing((current) => !current)}
+              type="button"
             >
-              {USER_KINDS.map((kind) => (
-                <option key={kind} value={kind}>
-                  {kind}
-                </option>
-              ))}
-            </select>
+              {editing ? "Close" : "Edit"}
+            </button>
+            <form
+              action={async (formData) => {
+                setResult(
+                  await (category.is_archived
+                    ? restoreCategoryAction(formData)
+                    : archiveCategoryAction(formData)),
+                );
+              }}
+            >
+              <input name="id" type="hidden" value={category.id} />
+              <button
+                aria-label={`${category.is_archived ? "Restore" : "Archive"} ${category.display_name}`}
+                className={BUTTON_CLASS}
+                type="submit"
+              >
+                {category.is_archived ? "Restore" : "Archive"}
+              </button>
+            </form>
           </div>
-        </div>
+        </td>
+      </tr>
 
-        {kindChanged ? (
-          <div className="mt-4 rounded-2xl border border-warning-line bg-warning-soft p-4 text-sm leading-6 text-warning-ink">
-            <p className="font-semibold">Changing the kind affects your totals</p>
-            <p className="mt-1">
-              Money in, Money out, and Net include or exclude this category&apos;s transactions
-              based on its kind. The transactions themselves are not changed.
+      <tr className={EDITOR_ROW_CLASS} hidden={!editing} id={editorId}>
+        <td className="px-4 py-4" colSpan={5}>
+          <form
+            action={async (formData) => {
+              setResult(await updateCategoryAction(formData));
+            }}
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className={LABEL_CLASS} htmlFor={nameId}>
+                  Rename {category.display_name}
+                </label>
+                <input
+                  className={FIELD_CLASS}
+                  defaultValue={category.display_name}
+                  id={nameId}
+                  name="display_name"
+                  required
+                />
+              </div>
+              <div>
+                <label className={LABEL_CLASS} htmlFor={kindId}>
+                  Kind for {category.display_name}
+                </label>
+                <select
+                  className={FIELD_CLASS}
+                  id={kindId}
+                  name="kind"
+                  onChange={(event) => setSelectedKind(event.target.value as UserCategoryKind)}
+                  value={selectedKind}
+                >
+                  {USER_KINDS.map((kind) => (
+                    <option key={kind} value={kind}>
+                      {kind}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {kindChanged ? (
+              <div className="mt-4 rounded-2xl border border-warning-line bg-warning-soft p-4 text-sm leading-6 text-warning-ink">
+                <p className="font-semibold">Changing the kind affects your totals</p>
+                <p className="mt-1">
+                  Money in, Money out, and Net include or exclude this category&apos;s transactions
+                  based on its kind. The transactions themselves are not changed.
+                </p>
+                <label className="mt-3 flex items-start gap-2 font-semibold" htmlFor={confirmId}>
+                  <input
+                    className="mt-1"
+                    id={confirmId}
+                    name="confirm_kind_change"
+                    type="checkbox"
+                    value="true"
+                  />
+                  I understand and want to change the kind.
+                </label>
+              </div>
+            ) : null}
+
+            <input name="id" type="hidden" value={category.id} />
+            <button className={`${BUTTON_CLASS} mt-4`} type="submit">
+              Save category
+            </button>
+          </form>
+
+          <details className="mt-4 rounded-2xl border border-warning-line bg-warning-soft p-4">
+            <summary className="cursor-pointer text-sm font-bold text-warning-ink">
+              Delete category
+            </summary>
+            <p className="mt-3 text-sm leading-6 text-warning-ink">
+              Deleting this category moves {category.transaction_count}{" "}
+              {category.transaction_count === 1 ? "transaction" : "transactions"} to Uncategorised.
+              No transactions are deleted.
             </p>
-            <label className="mt-3 flex items-start gap-2 font-semibold" htmlFor={confirmId}>
-              <input
-                className="mt-1"
-                id={confirmId}
-                name="confirm_kind_change"
-                type="checkbox"
-                value="true"
-              />
-              I understand and want to change the kind.
-            </label>
-          </div>
-        ) : null}
+            <form
+              action={async (formData) => {
+                setResult(await deleteCategoryAction(formData));
+              }}
+              className="mt-3"
+            >
+              <input name="id" type="hidden" value={category.id} />
+              <button className={BUTTON_CLASS} type="submit">
+                Confirm delete category
+              </button>
+            </form>
+          </details>
 
-        <input name="id" type="hidden" value={category.id} />
-        <button className={`${BUTTON_CLASS} mt-4`} type="submit">
-          Save category
-        </button>
-      </form>
-
-      <form
-        action={async (formData) => {
-          setResult(
-            await (category.is_archived
-              ? restoreCategoryAction(formData)
-              : archiveCategoryAction(formData)),
-          );
-        }}
-        className="mt-4"
-      >
-        <input name="id" type="hidden" value={category.id} />
-        <button className={BUTTON_CLASS} type="submit">
-          {category.is_archived ? "Restore category" : "Archive category"}
-        </button>
-      </form>
-
-      <details className="mt-4 rounded-2xl border border-warning-line bg-warning-soft p-4">
-        <summary className="cursor-pointer text-sm font-bold text-warning-ink">
-          Delete category
-        </summary>
-        <p className="mt-3 text-sm leading-6 text-warning-ink">
-          Deleting this category moves {category.transaction_count}{" "}
-          {category.transaction_count === 1 ? "transaction" : "transactions"} to Uncategorised. No
-          transactions are deleted.
-        </p>
-        <form
-          action={async (formData) => {
-            setResult(await deleteCategoryAction(formData));
-          }}
-          className="mt-3"
-        >
-          <input name="id" type="hidden" value={category.id} />
-          <button className={BUTTON_CLASS} type="submit">
-            Confirm delete category
-          </button>
-        </form>
-      </details>
-
-      <FormResult result={result} />
-    </li>
+          <FormResult result={result} />
+        </td>
+      </tr>
+    </Fragment>
   );
 }
 
 export default function CategoriesSection({ categories }: { categories: Category[] }) {
   const [createResult, setCreateResult] = useState<FinanceActionResult | null>(null);
   const system = categories.find((category) => category.is_system);
-  const editable = categories.filter((category) => !category.is_system);
+  const editable = sortByDisplayName(categories.filter((category) => !category.is_system));
 
   return (
-    <section aria-labelledby="settings-categories-title" className="mt-10">
+    <section aria-labelledby="settings-categories-title">
       <h2
         className="text-2xl leading-tight font-semibold tracking-[-0.03em] text-ink sm:text-3xl"
         id="settings-categories-title"
@@ -195,15 +226,15 @@ export default function CategoriesSection({ categories }: { categories: Category
       </p>
 
       {system ? (
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-accent-soft-line bg-accent-soft p-5">
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-accent-soft-line bg-accent-soft px-4 py-3">
           <div>
-            <p className="text-lg font-semibold text-ink">{system.display_name}</p>
-            <p className="mt-1 text-sm text-muted">
+            <p className="text-sm font-semibold text-ink">{system.display_name}</p>
+            <p className="mt-0.5 text-sm text-muted">
               System bucket — cannot be deleted. {system.transaction_count}{" "}
               {system.transaction_count === 1 ? "transaction" : "transactions"}.
             </p>
           </div>
-          <span className="rounded-full bg-surface px-3 py-1 text-xs font-semibold text-accent-soft-ink">
+          <span className={`${STATUS_PILL_CLASS} bg-surface text-accent-soft-ink`}>
             {system.kind}
           </span>
         </div>
@@ -213,9 +244,9 @@ export default function CategoriesSection({ categories }: { categories: Category
         action={async (formData) => {
           setCreateResult(await createCategoryAction(formData));
         }}
-        className="mt-5 grid gap-4 rounded-3xl border border-line bg-surface p-5 sm:grid-cols-2 sm:p-6"
+        className="mt-5 flex flex-wrap items-end gap-3 rounded-3xl border border-line bg-surface p-4 sm:p-5"
       >
-        <div>
+        <div className="min-w-[12rem] flex-1">
           <label className={LABEL_CLASS} htmlFor="new-category-name">
             Category name
           </label>
@@ -227,7 +258,7 @@ export default function CategoriesSection({ categories }: { categories: Category
             required
           />
         </div>
-        <div>
+        <div className="min-w-[10rem]">
           <label className={LABEL_CLASS} htmlFor="new-category-kind">
             Kind
           </label>
@@ -239,24 +270,43 @@ export default function CategoriesSection({ categories }: { categories: Category
             ))}
           </select>
         </div>
-        <div className="sm:col-span-2">
-          <button className={PRIMARY_BUTTON_CLASS} type="submit">
-            Add category
-          </button>
-        </div>
+        <button className={PRIMARY_BUTTON_CLASS} type="submit">
+          Add category
+        </button>
       </form>
       <FormResult result={createResult} />
 
       {editable.length === 0 ? (
-        <p className="mt-6 rounded-3xl border border-line bg-surface p-5 text-base text-muted">
-          No categories yet.
-        </p>
+        <p className={EMPTY_STATE_CLASS}>No categories yet.</p>
       ) : (
-        <ul className="mt-6 grid gap-4">
-          {editable.map((category) => (
-            <CategoryRow category={category} key={category.id} />
-          ))}
-        </ul>
+        <div className={TABLE_WRAPPER_CLASS}>
+          <table className={`${TABLE_CLASS} min-w-[44rem]`}>
+            <thead className={TABLE_HEAD_CLASS}>
+              <tr>
+                <th className={TH_CLASS} scope="col">
+                  Category
+                </th>
+                <th className={TH_CLASS} scope="col">
+                  Kind
+                </th>
+                <th className={TH_CLASS} scope="col">
+                  Status
+                </th>
+                <th className={TH_CLASS} scope="col">
+                  Transactions
+                </th>
+                <th className={`${TH_CLASS} text-right`} scope="col">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {editable.map((category) => (
+                <CategoryRow category={category} key={category.id} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

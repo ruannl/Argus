@@ -100,6 +100,10 @@ npm run test:e2e
 | POST | `/v1/finance/merchant-tags/{id}/archive` | Archive a merchant tag |
 | POST | `/v1/finance/merchant-tags/{id}/restore` | Restore a merchant tag |
 | DELETE | `/v1/finance/merchant-tags/{id}` | Delete a tag and remove its assignments |
+| GET | `/v1/finance/merchant-aliases` | List the customer's suggestion aliases |
+| POST | `/v1/finance/merchant-aliases` | Create an alias that maps a description to a tag and optional category |
+| PATCH | `/v1/finance/merchant-aliases/{id}` | Update an alias |
+| DELETE | `/v1/finance/merchant-aliases/{id}` | Delete an alias |
 | POST | `/v1/finance/imports/inspect` | Inspect a statement file; stateless preview/mapping |
 | POST | `/v1/finance/imports/reviews` | Prepare a durable, expiring review |
 | GET | `/v1/finance/imports/reviews` | List the customer's open reviews |
@@ -114,7 +118,7 @@ npm run test:e2e
 | POST | `/v1/finance/imports/{id}/restore` | Restore the parent statement layer |
 | DELETE | `/v1/finance/imports/{id}` | Delete the statement and exactly its owned transactions |
 | POST | `/v1/finance/transactions/query` | Owned list with filters, counts and pagination |
-| GET | `/v1/finance/transactions/{id}` | Owned detail with unapplied tag suggestions |
+| GET | `/v1/finance/transactions/{id}` | Owned detail with unapplied tag and category suggestions |
 | PATCH | `/v1/finance/transactions/{id}` | Versioned category/tag/hide metadata edit |
 | POST | `/v1/finance/transactions/operations/prepare` | Freeze an explicit or all-matching bulk scope |
 | GET | `/v1/finance/transactions/operations/{id}` | Safe operation status and receipt recovery |

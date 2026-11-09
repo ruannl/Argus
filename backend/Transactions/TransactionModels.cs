@@ -135,6 +135,7 @@ public sealed record TransactionPageResult(TransactionResponse[] Transactions,
 
 public sealed record TransactionDetailResult(TransactionResponse Transaction,
                                              TransactionTagRef[] SuggestedTags,
+                                             TransactionCategoryRef? SuggestedCategory,
                                              bool HasMoreSuggestions,
                                              int? SourcePage,
                                              int SourceRowNumber);

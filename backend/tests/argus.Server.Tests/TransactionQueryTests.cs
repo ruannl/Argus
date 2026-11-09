@@ -328,7 +328,53 @@ public sealed class TransactionQueryTests(KitFactory factory, ITestOutputHelper 
     }
 
     [Fact]
-    public async Task TagSuggestionAlgorithmIsUnchangedWholeTokenSequenceMatching()
+    public async Task HistorySuggestsTagsAndCategoryForTheSameMerchantKey()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var (systemId, expenseId) = await DefaultCategoriesAsync(session);
+        var statementId = await SeedStatementAsync(customerId, accountId);
+        var woolworthsTag = await CreateTagAsync(session, "Woolworths");
+
+        await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2024, 5, 1), "WOOLWORTHS 410586*6466 22 AUG", -100m, 1, tagIds: [woolworthsTag]);
+        var rowId = await SeedTransactionAsync(customerId, accountId, statementId, systemId, new DateOnly(2024, 5, 2), "WOOLWORTHS 410586*5387 24 AUG", -50m, 2);
+
+        var body = await BodyAsync(await SendAsync(Get($"/v1/finance/transactions/{rowId}", session: session)));
+        var suggested = body.GetProperty("suggested_tags").EnumerateArray().ToArray();
+        Assert.Contains(suggested, tag => tag.GetProperty("id").GetGuid() == woolworthsTag);
+        Assert.Equal(expenseId, body.GetProperty("suggested_category").GetProperty("id").GetGuid());
+    }
+
+    [Fact]
+    public async Task AliasSuggestsTagAndCategoryForAnAbbreviatedMerchant()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var (systemId, _) = await DefaultCategoriesAsync(session);
+        var statementId = await SeedStatementAsync(customerId, accountId);
+        var pharmacyTag = await CreateTagAsync(session, "Serene Pharmacy");
+        var pharmacyResponse = await SendAsync(Post("/v1/finance/categories", Json(new { display_name = "Pharmacy and personal care", kind = "Expense" }), session: session));
+        Assert.Equal(HttpStatusCode.Created, pharmacyResponse.StatusCode);
+        var pharmacyCategory = (await BodyAsync(pharmacyResponse)).GetProperty("id").GetGuid();
+
+        var aliasResponse = await SendAsync(Post("/v1/finance/merchant-aliases", Json(new
+        {
+            display_alias = "apteek",
+            merchant_tag_id = pharmacyTag,
+            category_id = pharmacyCategory,
+        }), session: session));
+        Assert.Equal(HttpStatusCode.Created, aliasResponse.StatusCode);
+
+        var rowId = await SeedTransactionAsync(customerId, accountId, statementId, systemId, new DateOnly(2024, 5, 3), "SERENE APTEEK 410586*5387 02 OCT", -100m, 1);
+
+        var body = await BodyAsync(await SendAsync(Get($"/v1/finance/transactions/{rowId}", session: session)));
+        var suggested = body.GetProperty("suggested_tags").EnumerateArray().ToArray();
+        Assert.Contains(suggested, tag => tag.GetProperty("id").GetGuid() == pharmacyTag);
+        Assert.Equal(pharmacyCategory, body.GetProperty("suggested_category").GetProperty("id").GetGuid());
+    }
+
+    [Fact]
+    public async Task TagSuggestionAlgorithmMatchesWholeTokensAndTruncatedTagWords()
     {
         (Guid Id, string[] Tokens)[] tags = new (Guid Id, string[] Tokens)[]
         {
@@ -338,13 +384,39 @@ public sealed class TransactionQueryTests(KitFactory factory, ITestOutputHelper 
         };
 
         var matches = TagSuggestions.Match("the cafe nero visit", tags).ToArray();
-        Assert.Equal(new[] { tags[0].Id, tags[1].Id, tags[2].Id }, matches);
+        Assert.Equal(new[] { tags[1].Id, tags[0].Id, tags[2].Id }, matches);
 
         var reversed = TagSuggestions.Match("nero cafe", tags).ToArray();
         Assert.Equal(new[] { tags[0].Id, tags[2].Id }, reversed);
 
         Assert.Empty(TagSuggestions.Match(string.Empty, tags));
         Assert.Equal(new[] { tags[2].Id }, TagSuggestions.Match("café nero", tags));
+
+        var pharmacy = Guid.NewGuid();
+        Assert.Equal(
+            new[] { pharmacy },
+            TagSuggestions.Match("cmpa serene pharm", [(pharmacy, ["serene", "pharmacy"])]));
+
+        var supermarket = Guid.NewGuid();
+        Assert.Equal(
+            new[] { supermarket },
+            TagSuggestions.Match("sparkles supermarke", [(supermarket, ["sparkles", "supermarket"])]));
+
+        // A longer statement word is a different merchant, not a truncation.
+        var woolworths = Guid.NewGuid();
+        Assert.Empty(TagSuggestions.Match("woolworthsx groceries", [(woolworths, ["woolworths"])]));
+
+        // Short tags never prefix-match: "Spar" must not match "Sparkles".
+        var spar = Guid.NewGuid();
+        Assert.Empty(TagSuggestions.Match("sparkles supermarket", [(spar, ["spar"])]));
+
+        // Exact words rank above a truncation-only match.
+        var exact = Guid.NewGuid();
+        var specific = Guid.NewGuid();
+        var ranked = TagSuggestions.Match(
+            "serene pharm",
+            [(exact, ["serene"]), (specific, ["serene", "pharmacy"])]).ToArray();
+        Assert.Equal(new[] { specific, exact }, ranked);
     }
 
     [Fact]

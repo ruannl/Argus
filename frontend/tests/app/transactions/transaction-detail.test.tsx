@@ -104,6 +104,33 @@ describe("transaction detail", () => {
     vi.mocked(loadTransactionAction).mockResolvedValue({ ok: true, value: makeDetail() });
   });
 
+  it("offers a suggested category without applying it automatically", async () => {
+    const user = userEvent.setup();
+    const detail = {
+      ...makeDetail({
+        category: {
+          id: "cat-1",
+          display_name: "Uncategorised",
+          kind: "Uncategorised",
+          is_system: true,
+          is_archived: false,
+        },
+      }),
+      suggested_category: {
+        id: "cat-2",
+        display_name: "Travel",
+        kind: "Expense" as const,
+        is_system: false,
+        is_archived: false,
+      },
+    };
+    render(<TransactionDetailView categories={categories} initialDetail={detail} tags={tags} />);
+
+    expect(screen.getByLabelText("Category")).toHaveValue("cat-1");
+    await user.click(screen.getByRole("button", { name: "Suggested: Travel" }));
+    expect(screen.getByLabelText("Category")).toHaveValue("cat-2");
+  });
+
   it("keeps imported source read-only and requires explicit suggestion acceptance", async () => {
     const user = userEvent.setup();
     const onSaved = vi.fn();

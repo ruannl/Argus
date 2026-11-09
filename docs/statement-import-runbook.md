@@ -203,9 +203,9 @@ are overlapping annotations, not extra buckets.
   the matcher uses maximum-compatible pairing rather than first-fit.
 - Within-file repeats require a deliberate decision; the importer never
   silently drops identical rows.
-- Near matches use the same account and amount with a date within ±3 days and
-  token-set Jaccard similarity of at least 0.5. They are warnings and default to
-  included; they never suppress a row by themselves.
+- Near matches use the same account, the exact transaction date, and the same
+  amount, with token-set Jaccard similarity of at least 0.5. They are warnings
+  and default to included; they never suppress a row by themselves.
 - The statement fingerprint protects whole-statement repeats. A repeat commit
   is refused unless the customer explicitly confirms a statement override.
   Hiding does not release fingerprint protection.
