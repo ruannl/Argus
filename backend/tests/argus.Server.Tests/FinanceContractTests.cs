@@ -954,6 +954,188 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         Assert.Fail("Concurrent alias creates did not reach the advisory-lock wait.");
     }
 
+    [Fact]
+    public async Task MerchantAliasCreateRejectsTagArchivedDuringValidation()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var tagResponse = await SendAsync(Post(TagsPath, Json(new { display_name = "Race target" }), session: session));
+        var tagId = (await BodyAsync(tagResponse)).GetProperty("id").GetGuid();
+
+        var db = Factory.CreateDb();
+        await using var blocker = await db.OpenAsync();
+        await using var transaction = await blocker.BeginTransactionAsync();
+        await using (var archive = blocker.CreateCommand())
+        {
+            archive.Transaction = transaction;
+            archive.CommandText = """
+                UPDATE merchant_tags
+                SET is_archived = TRUE, archived_at = NOW(), updated_at = NOW()
+                WHERE customer_id = @customer_id AND id = @id
+                """;
+            archive.Parameters.AddWithValue("customer_id", customerId);
+            archive.Parameters.AddWithValue("id", tagId);
+            Assert.Equal(1, await archive.ExecuteNonQueryAsync());
+        }
+
+        int blockerPid;
+        await using (var pid = blocker.CreateCommand())
+        {
+            pid.Transaction = transaction;
+            pid.CommandText = "SELECT pg_backend_pid()";
+            blockerPid = (int)(await pid.ExecuteScalarAsync())!;
+        }
+
+        await using var observer = await db.OpenAsync();
+        Task<HttpResponseMessage>? createTask = null;
+        var committed = false;
+        try
+        {
+            createTask = SendAsync(Post(AliasesPath, Json(new
+            {
+                display_alias = "Race alias",
+                merchant_tag_id = tagId,
+            }), session: session));
+            await WaitForBlockedAliasValidationAsync(observer, blockerPid, "merchant_tags");
+            Assert.False(createTask.IsCompleted);
+
+            await transaction.CommitAsync();
+            committed = true;
+            var response = await createTask.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.Equal("not_found", await ErrorKindAsync(response));
+            Assert.Equal(0L, await ScalarAsync($"SELECT COUNT(*) FROM merchant_aliases WHERE customer_id = '{customerId}'"));
+        }
+        finally
+        {
+            if (!committed)
+            {
+                await transaction.RollbackAsync();
+            }
+            if (createTask is not null)
+            {
+                try
+                {
+                    await createTask.WaitAsync(TimeSpan.FromSeconds(10));
+                }
+                catch
+                {
+                    // Preserve the original assertion failure.
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public async Task MerchantAliasUpdateRejectsCategoryArchivedDuringValidation()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var tagResponse = await SendAsync(Post(TagsPath, Json(new { display_name = "Update race tag" }), session: session));
+        var tagId = (await BodyAsync(tagResponse)).GetProperty("id").GetGuid();
+        var categoryResponse = await SendAsync(Post(CategoriesPath, Json(new { display_name = "Update race category", kind = "Expense" }), session: session));
+        var categoryId = (await BodyAsync(categoryResponse)).GetProperty("id").GetGuid();
+        var created = await SendAsync(Post(AliasesPath, Json(new
+        {
+            display_alias = "Race alias",
+            merchant_tag_id = tagId,
+            category_id = categoryId,
+        }), session: session));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var aliasId = (await BodyAsync(created)).GetProperty("id").GetGuid();
+
+        var db = Factory.CreateDb();
+        await using var blocker = await db.OpenAsync();
+        await using var transaction = await blocker.BeginTransactionAsync();
+        await using (var archive = blocker.CreateCommand())
+        {
+            archive.Transaction = transaction;
+            archive.CommandText = """
+                UPDATE categories
+                SET is_archived = TRUE, archived_at = NOW(), updated_at = NOW()
+                WHERE customer_id = @customer_id AND id = @id
+                """;
+            archive.Parameters.AddWithValue("customer_id", customerId);
+            archive.Parameters.AddWithValue("id", categoryId);
+            Assert.Equal(1, await archive.ExecuteNonQueryAsync());
+        }
+
+        int blockerPid;
+        await using (var pid = blocker.CreateCommand())
+        {
+            pid.Transaction = transaction;
+            pid.CommandText = "SELECT pg_backend_pid()";
+            blockerPid = (int)(await pid.ExecuteScalarAsync())!;
+        }
+
+        await using var observer = await db.OpenAsync();
+        Task<HttpResponseMessage>? updateTask = null;
+        var committed = false;
+        try
+        {
+            updateTask = SendAsync(Patch($"{AliasesPath}/{aliasId}", Json(new
+            {
+                display_alias = "Changed alias",
+                merchant_tag_id = tagId,
+                category_id = categoryId,
+            }), session: session));
+            await WaitForBlockedAliasValidationAsync(observer, blockerPid, "categories");
+            Assert.False(updateTask.IsCompleted);
+
+            await transaction.CommitAsync();
+            committed = true;
+            var response = await updateTask.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.Equal("not_found", await ErrorKindAsync(response));
+
+            var aliases = await BodyAsync(await SendAsync(Get(AliasesPath, session: session)));
+            var retained = Assert.Single(aliases.GetProperty("merchant_aliases").EnumerateArray());
+            Assert.Equal("Race alias", retained.GetProperty("display_alias").GetString());
+            Assert.Equal(categoryId, retained.GetProperty("category_id").GetGuid());
+        }
+        finally
+        {
+            if (!committed)
+            {
+                await transaction.RollbackAsync();
+            }
+            if (updateTask is not null)
+            {
+                try
+                {
+                    await updateTask.WaitAsync(TimeSpan.FromSeconds(10));
+                }
+                catch
+                {
+                    // Preserve the original assertion failure.
+                }
+            }
+        }
+    }
+
+    private static async Task WaitForBlockedAliasValidationAsync(NpgsqlConnection observer, int blockerPid, string table)
+    {
+        for (var attempt = 0; attempt < 200; attempt++)
+        {
+            await using var query = observer.CreateCommand();
+            query.CommandText = """
+                SELECT pid FROM pg_stat_activity
+                WHERE @blocker = ANY(pg_blocking_pids(pid))
+                  AND query ILIKE '%FOR SHARE%'
+                  AND query ILIKE @table
+                ORDER BY pid LIMIT 1
+                """;
+            query.Parameters.AddWithValue("blocker", blockerPid);
+            query.Parameters.AddWithValue("table", $"%FROM {table}%");
+            if (await query.ExecuteScalarAsync() is int)
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
+
+        Assert.Fail($"The alias write did not reach the {table} row-lock wait.");
+    }
+
     // --- Concurrency -------------------------------------------------------
 
     [Fact]
