@@ -469,12 +469,11 @@ describe("settings page", () => {
     await openTab(user, "Categories");
     await user.click(screen.getByRole("button", { name: "Edit Groceries" }));
 
-    const confirmation = screen.getByText(
-      /Deleting this category moves 2 transactions to Uncategorised/,
-    );
-    expect(confirmation.textContent).toContain(
-      "Any suggestion aliases that point to this category are also deleted.",
-    );
+    expect(
+      screen.getByText(
+        "Deleting this category moves 2 transactions to Uncategorised. No transactions are deleted.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("shows duplicate-name feedback when a tag create is rejected", async () => {
