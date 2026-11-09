@@ -88,6 +88,10 @@ public sealed class TransactionMigrationTests(KitFactory factory) : IClassFixtur
             Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM pg_indexes " + $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_merchant_key_idx'")));
             Assert.Equal(0L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM merchant_aliases")));
             Assert.Equal(3L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM pg_constraint c " + "JOIN pg_class t ON t.oid = c.conrelid " + "JOIN pg_namespace n ON n.oid = t.relnamespace " + $"WHERE n.nspname = '{schema}' AND t.relname = 'merchant_aliases' AND c.contype = 'f'")));
+            string aliasTagFk = (string)(await ScalarAsync(connection, "SELECT pg_get_constraintdef(c.oid) " + "FROM pg_constraint c " + "JOIN pg_class t ON t.oid = c.conrelid " + "JOIN pg_namespace n ON n.oid = t.relnamespace " + $"WHERE n.nspname = '{schema}' AND t.relname = 'merchant_aliases' " + "AND c.conname = 'merchant_aliases_merchant_tag_id_fkey'"))!;
+            Assert.Contains("ON DELETE CASCADE", aliasTagFk);
+            string aliasCategoryFk = (string)(await ScalarAsync(connection, "SELECT pg_get_constraintdef(c.oid) " + "FROM pg_constraint c " + "JOIN pg_class t ON t.oid = c.conrelid " + "JOIN pg_namespace n ON n.oid = t.relnamespace " + $"WHERE n.nspname = '{schema}' AND t.relname = 'merchant_aliases' " + "AND c.conname = 'merchant_aliases_category_id_fkey'"))!;
+            Assert.Contains("ON DELETE SET NULL", aliasCategoryFk);
             Assert.Equal("migration-identity", (string)(await ScalarAsync(connection, "SELECT identity_key FROM transactions"))!);
             Assert.Equal("-12.34", (string)(await ScalarAsync(connection, "SELECT amount::text FROM transactions"))!);
             Assert.Equal("fingerprint", (string)(await ScalarAsync(connection, "SELECT statement_fingerprint FROM statement_imports"))!);
