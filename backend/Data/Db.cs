@@ -916,6 +916,20 @@ public static class Migrations
                 ON merchant_aliases(customer_id, normalized_alias);
             CREATE INDEX merchant_aliases_customer_idx
                 ON merchant_aliases(customer_id);
+            """),
+        ("0009_alias_ownership", """
+            ALTER TABLE merchant_aliases
+                DROP CONSTRAINT IF EXISTS merchant_aliases_merchant_tag_id_fkey;
+            ALTER TABLE merchant_aliases
+                DROP CONSTRAINT IF EXISTS merchant_aliases_category_id_fkey;
+
+            ALTER TABLE merchant_aliases
+                ADD CONSTRAINT merchant_aliases_tag_owner_fk
+                    FOREIGN KEY (customer_id, merchant_tag_id)
+                    REFERENCES merchant_tags(customer_id, id) ON DELETE CASCADE,
+                ADD CONSTRAINT merchant_aliases_category_owner_fk
+                    FOREIGN KEY (customer_id, category_id)
+                    REFERENCES categories(customer_id, id) ON DELETE CASCADE;
             """)
     ];
 }

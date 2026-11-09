@@ -1057,7 +1057,8 @@ public sealed class StatementImportStore
         foreach (var snapshot in snapshots)
         {
             foreach (var tagId in MerchantSuggestions.Build(
-                         snapshot.Row.NormalizedDescription, activeTags, suggestions).TagIds)
+                         snapshot.Row.NormalizedDescription, activeTags, suggestions)
+                     .TagIds.Take(MerchantSuggestions.MaxSuggestions))
             {
                 snapshot.SuggestedTagIds.Add(tagId);
             }

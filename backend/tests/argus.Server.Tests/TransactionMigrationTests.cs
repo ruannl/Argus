@@ -8,7 +8,7 @@ public sealed class TransactionMigrationTests(KitFactory factory) : IClassFixtur
     private readonly KitFactory _factory = factory;
 
     [Fact]
-    public async Task Populated0006UpgradesAdditivelyAndKeepsManifestRowsWithoutLiveCascades()
+    public async Task Populated0006UpgradesThroughSuggestionLearningAndKeepsManifestRowsWithoutLiveCascades()
     {
         var schema = "txn_migration_" + Guid.NewGuid().ToString("N");
         var db = _factory.CreateDb();
@@ -77,7 +77,26 @@ public sealed class TransactionMigrationTests(KitFactory factory) : IClassFixtur
                 await apply.ExecuteNonQueryAsync();
             }
 
+            await using (var applyLearning = connection.CreateCommand())
+            {
+                applyLearning.CommandText = Migrations.All[7].Sql;
+                await applyLearning.ExecuteNonQueryAsync();
+            }
+
+            await using (var applyAliasOwnership = connection.CreateCommand())
+            {
+                applyAliasOwnership.CommandText = Migrations.All[8].Sql;
+                await applyAliasOwnership.ExecuteNonQueryAsync();
+            }
+
             Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM transactions")));
+            Assert.Equal("migration row", (string)(await ScalarAsync(connection, "SELECT merchant_key FROM transactions"))!);
+            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM pg_indexes " + $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_merchant_key_idx'")));
+            Assert.Equal(0L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM merchant_aliases")));
+            string tagFk = (string)(await ScalarAsync(connection, "SELECT pg_get_constraintdef(oid) FROM pg_constraint " + "WHERE conname = 'merchant_aliases_tag_owner_fk'"))!;
+            Assert.Contains("(customer_id, merchant_tag_id)", tagFk);
+            string categoryFk = (string)(await ScalarAsync(connection, "SELECT pg_get_constraintdef(oid) FROM pg_constraint " + "WHERE conname = 'merchant_aliases_category_owner_fk'"))!;
+            Assert.Contains("(customer_id, category_id)", categoryFk);
             Assert.Equal("migration-identity", (string)(await ScalarAsync(connection, "SELECT identity_key FROM transactions"))!);
             Assert.Equal("-12.34", (string)(await ScalarAsync(connection, "SELECT amount::text FROM transactions"))!);
             Assert.Equal("fingerprint", (string)(await ScalarAsync(connection, "SELECT statement_fingerprint FROM statement_imports"))!);

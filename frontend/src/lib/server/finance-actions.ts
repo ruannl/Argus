@@ -267,7 +267,7 @@ export async function updateMerchantTagAction(formData: FormData): Promise<Finan
   if (!id || displayName === null) {
     return failure("invalid_request");
   }
-  return withSession((token) => updateMerchantTag(token, id, displayName), "Merchant tag renamed.");
+  return withSession((token) => updateMerchantTag(token, id, displayName), "Tag renamed.");
 }
 
 export async function archiveMerchantTagAction(formData: FormData): Promise<FinanceActionResult> {
@@ -275,7 +275,7 @@ export async function archiveMerchantTagAction(formData: FormData): Promise<Fina
   if (!id) {
     return failure("invalid_request");
   }
-  return withSession((token) => archiveMerchantTag(token, id), "Merchant tag archived.");
+  return withSession((token) => archiveMerchantTag(token, id), "Tag archived.");
 }
 
 export async function restoreMerchantTagAction(formData: FormData): Promise<FinanceActionResult> {
@@ -283,7 +283,7 @@ export async function restoreMerchantTagAction(formData: FormData): Promise<Fina
   if (!id) {
     return failure("invalid_request");
   }
-  return withSession((token) => restoreMerchantTag(token, id), "Merchant tag restored.");
+  return withSession((token) => restoreMerchantTag(token, id), "Tag restored.");
 }
 
 export async function deleteMerchantTagAction(formData: FormData): Promise<FinanceActionResult> {

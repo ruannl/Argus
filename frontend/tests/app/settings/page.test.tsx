@@ -282,6 +282,22 @@ describe("settings page", () => {
     expect(within(panel).getByText("Health")).toBeInTheDocument();
   });
 
+  it("keeps the active tab in sync with same-route navigation", async () => {
+    signedIn();
+    loadedWorkspace();
+
+    const view = render(
+      await SettingsPage({ searchParams: Promise.resolve({ tab: "categories" }) }),
+    );
+    expect(screen.getByRole("tab", { name: "Categories" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    view.rerender(await SettingsPage({ searchParams: Promise.resolve({ tab: "profile" }) }));
+    expect(screen.getByRole("tab", { name: "Profile" })).toHaveAttribute("aria-selected", "true");
+  });
+
   it("sorts the category table by name", async () => {
     signedIn();
     vi.mocked(getCurrentAccount).mockResolvedValue(account);

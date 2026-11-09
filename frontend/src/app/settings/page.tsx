@@ -172,6 +172,7 @@ function SettingsWorkspace({
       <SectionTabs
         defaultKey="accounts"
         initialTab={initialTab}
+        key={initialTab}
         label="Settings sections"
         tabs={[
           {

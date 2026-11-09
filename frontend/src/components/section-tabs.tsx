@@ -43,6 +43,7 @@ export default function SectionTabs({
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   function replaceTabInUrl(key: string) {

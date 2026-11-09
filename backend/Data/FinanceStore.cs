@@ -97,6 +97,8 @@ public abstract record MerchantAliasOutcome
 
     public sealed record DuplicateName : MerchantAliasOutcome;
 
+    public sealed record LimitReached : MerchantAliasOutcome;
+
     public sealed record TagNotFound : MerchantAliasOutcome;
 
     public sealed record CategoryNotFound : MerchantAliasOutcome;
@@ -118,6 +120,7 @@ public abstract record MerchantTagDeleteOutcome
 public sealed class FinanceStore(Db db)
 {
     public const int MaxNameRunes = 80;
+    public const int MaxMerchantAliases = 100;
     private const string CustomerIdParameter = "customer_id";
 
     public static readonly (string Name, string Kind, bool IsSystem, int SortOrder)[] DefaultCategories =
@@ -1203,8 +1206,10 @@ public sealed class FinanceStore(Db db)
               ON c.customer_id = a.customer_id AND c.id = a.category_id
             WHERE a.customer_id = @customer_id
             ORDER BY a.display_alias, a.id
+            LIMIT @limit
             """;
         command.Parameters.AddWithValue(CustomerIdParameter, customerId);
+        command.Parameters.AddWithValue("limit", MaxMerchantAliases);
 
         var aliases = new List<MerchantAliasRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1231,6 +1236,16 @@ public sealed class FinanceStore(Db db)
         try
         {
             await using var connection = await db.OpenAsync(cancellationToken);
+            await using (var count = connection.CreateCommand())
+            {
+                count.CommandText = "SELECT COUNT(*) FROM merchant_aliases WHERE customer_id = @customer_id";
+                count.Parameters.AddWithValue(CustomerIdParameter, customerId);
+                long existing = (long)(await count.ExecuteScalarAsync(cancellationToken))!;
+                if (existing >= MaxMerchantAliases)
+                {
+                    return new MerchantAliasOutcome.LimitReached();
+                }
+            }
             if (!await AliasTagExistsAsync(connection, customerId, merchantTagId.Value, cancellationToken))
             {
                 return new MerchantAliasOutcome.TagNotFound();

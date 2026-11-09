@@ -7,7 +7,7 @@ namespace argus.Server.Data;
 /// <summary>
 /// Loads suggestion inputs for a customer: the tags and categories they chose
 /// for the same generic merchant key, plus their explicit alias rules.
-/// Read-only and bounded by the supplied keys.
+/// Read-only and bounded by the supplied keys and the alias limit.
 /// </summary>
 public static class SuggestionLoader
 {
@@ -135,8 +135,10 @@ public static class SuggestionLoader
               ON c.customer_id = a.customer_id AND c.id = a.category_id
             WHERE a.customer_id = @customer_id
             ORDER BY a.normalized_alias, a.id
+            LIMIT @limit
             """;
         command.Parameters.AddWithValue("customer_id", customerId);
+        command.Parameters.AddWithValue("limit", FinanceStore.MaxMerchantAliases);
 
         var aliases = new List<AliasRule>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);

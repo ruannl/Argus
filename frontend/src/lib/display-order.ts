@@ -6,6 +6,6 @@ type Named = { display_name: string };
  */
 export function sortByDisplayName<T extends Named>(items: readonly T[]): T[] {
   return [...items].sort((left, right) =>
-    left.display_name.localeCompare(right.display_name, undefined, { sensitivity: "base" }),
+    left.display_name.localeCompare(right.display_name, "en", { sensitivity: "base" }),
   );
 }

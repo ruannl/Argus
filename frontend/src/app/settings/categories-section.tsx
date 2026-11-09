@@ -185,7 +185,8 @@ function CategoryRow({ category }: { category: Category }) {
             <p className="mt-3 text-sm leading-6 text-warning-ink">
               Deleting this category moves {category.transaction_count}{" "}
               {category.transaction_count === 1 ? "transaction" : "transactions"} to Uncategorised.
-              No transactions are deleted.
+              No transactions are deleted. Any suggestion aliases that point to this category are
+              also deleted.
             </p>
             <form
               action={async (formData) => {

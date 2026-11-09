@@ -141,7 +141,11 @@ function AliasRow({
               }}
             >
               <input name="id" type="hidden" value={alias.id} />
-              <button className={BUTTON_CLASS} type="submit">
+              <button
+                aria-label={`Delete alias ${alias.display_alias}`}
+                className={BUTTON_CLASS}
+                type="submit"
+              >
                 Delete
               </button>
             </form>
@@ -179,7 +183,7 @@ export default function AliasesSection({
 }) {
   const [createResult, setCreateResult] = useState<AliasActionResult | null>(null);
   const ordered = [...aliases].sort((left, right) =>
-    left.display_alias.localeCompare(right.display_alias, undefined, { sensitivity: "base" }),
+    left.display_alias.localeCompare(right.display_alias, "en", { sensitivity: "base" }),
   );
 
   return (
@@ -192,7 +196,8 @@ export default function AliasesSection({
       </h2>
       <p className="mt-3 max-w-2xl text-base leading-7 text-muted">
         Map a bank description to a tag and an optional category. Suggestions use your own aliases
-        first, then what you previously chose for the same merchant, then matching name tokens.
+        first, then what you previously chose for the same merchant, then matching name tokens. If
+        an alias points to an archived tag or category, choose an active replacement before saving.
       </p>
 
       <form

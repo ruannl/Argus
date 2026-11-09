@@ -263,7 +263,7 @@ describe("import review page", () => {
       within(row as HTMLElement).getByLabelText("New tag name for row 1"),
       "Landlord",
     );
-    await user.click(within(row as HTMLElement).getByRole("button", { name: "Create and add" }));
+    await user.click(within(row as HTMLElement).getByRole("button", { name: /Create and add/ }));
 
     await waitFor(() => expect(createMerchantTagAction).toHaveBeenCalledTimes(1));
     await waitFor(() =>
@@ -405,14 +405,18 @@ describe("import review page", () => {
     expect(row).not.toBeNull();
     expect(screen.getByText("Matches an existing occurrence")).not.toBeVisible();
 
-    await user.click(within(row as HTMLElement).getByRole("button", { name: "Details" }));
+    await user.click(
+      within(row as HTMLElement).getByRole("button", { name: "Show details for row 3" }),
+    );
 
     expect(
-      within(row as HTMLElement).getByRole("button", { name: "Hide details" }),
+      within(row as HTMLElement).getByRole("button", { name: "Hide details for row 3" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Matches an existing occurrence")).toBeVisible();
 
-    await user.click(within(row as HTMLElement).getByRole("button", { name: "Hide details" }));
+    await user.click(
+      within(row as HTMLElement).getByRole("button", { name: "Hide details for row 3" }),
+    );
     expect(screen.getByText("Matches an existing occurrence")).not.toBeVisible();
   });
 
@@ -519,6 +523,32 @@ describe("import review page", () => {
       false,
     );
     expect(screen.getByLabelText("Rows per page")).toHaveValue("50");
+  });
+
+  it("removes a row that stops matching the untagged filter", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getImportReview).mockResolvedValue({
+      ok: true,
+      value: { summary, page: { rows: [rows[0]], total: 1, page: 1, page_size: 50 } },
+    });
+    vi.mocked(patchImportReviewAction).mockResolvedValue({
+      ok: true,
+      message: "Review updated.",
+      review: { ...summary, version: 4 },
+    });
+
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({ untagged: "true" }),
+      }),
+    );
+
+    expect(screen.getAllByText("Woolworths groceries").length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "Add Woolworths" }));
+
+    await waitFor(() => expect(patchImportReviewAction).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryAllByText("Woolworths groceries")).toHaveLength(0));
   });
 
   it("explains that repeated-row groups block commit", async () => {

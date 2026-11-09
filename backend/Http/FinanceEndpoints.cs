@@ -540,6 +540,8 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
                 return Errors.InvalidRequest();
             case MerchantAliasOutcome.DuplicateName:
                 return Errors.DuplicateName();
+            case MerchantAliasOutcome.LimitReached:
+                return Errors.InvalidRequest();
             case MerchantAliasOutcome.TagNotFound:
             case MerchantAliasOutcome.CategoryNotFound:
             case MerchantAliasOutcome.NotFound:

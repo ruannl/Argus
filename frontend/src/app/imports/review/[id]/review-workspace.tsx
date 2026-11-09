@@ -173,11 +173,11 @@ export default function ReviewWorkspace({
   /**
    * Applies a successful decision to the visible rows. The review page used to
    * re-fetch the whole review after every decision, which doubled the finance
-   * requests and could exhaust the 300-request IP budget during a large review.
+   * requests and could exhaust the finance IP budget during a large review.
    */
   function applyDecision(decision: ImportReviewDecision) {
-    setRows((current) =>
-      current.map((row) => {
+    setRows((current) => {
+      const updated = current.map((row) => {
         if (decision.within_file_action) {
           if (row.within_file_group !== decision.within_file_group) {
             return row;
@@ -200,8 +200,18 @@ export default function ReviewWorkspace({
           within_file_state: decision.within_file_state ?? row.within_file_state,
           selected_tag_ids: decision.selected_tag_ids ?? row.selected_tag_ids,
         };
-      }),
-    );
+      });
+
+      return updated.filter((row) => {
+        if (possibleOnly && row.skip) {
+          return false;
+        }
+        if (untaggedOnly && row.selected_tag_ids.length > 0) {
+          return false;
+        }
+        return true;
+      });
+    });
   }
 
   function patch(decision: ImportReviewDecision, statementOverride?: boolean) {
@@ -464,7 +474,7 @@ export default function ReviewWorkspace({
                 const suggestions = row.suggested_tag_ids
                   .filter((id) => !row.selected_tag_ids.includes(id))
                   .map((id) => tagsById.get(id))
-                  .filter((tag): tag is MerchantTag => tag !== undefined);
+                  .filter((tag): tag is MerchantTag => tag !== undefined && !tag.is_archived);
                 const selected = row.selected_tag_ids.map((id) => ({
                   id,
                   tag: tagsById.get(id),
@@ -660,6 +670,7 @@ export default function ReviewWorkspace({
                             />
                           </label>
                           <button
+                            aria-label={`Create and add a tag for row ${row.source_row_number}`}
                             className="w-fit rounded-full border border-line px-3 py-1.5 text-xs font-bold text-ink disabled:opacity-60"
                             disabled={busy}
                             type="submit"
@@ -697,6 +708,7 @@ export default function ReviewWorkspace({
                           <button
                             aria-controls={detailId}
                             aria-expanded={isExpanded}
+                            aria-label={`${isExpanded ? "Hide" : "Show"} details for row ${row.source_row_number}`}
                             className="rounded-full border border-line px-3 py-1.5 text-xs font-bold text-ink"
                             onClick={() =>
                               setExpandedRowId((current) =>

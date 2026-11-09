@@ -17,10 +17,12 @@ public sealed record SuggestionResult(Guid[] TagIds, Guid? CategoryId);
 /// <summary>
 /// Combines explicit user aliases, the user's own historical choices, and the
 /// token fallback. Aliases win over history; history wins over token matching.
-/// Suggestions are advisory and are capped for a bounded response.
+/// Suggestions are advisory; callers cap the returned list for a bounded response.
 /// </summary>
 public static class MerchantSuggestions
 {
+    public const int MaxSuggestions = 20;
+
     public static SuggestionResult Build(string normalizedDescription,
                                          IReadOnlyList<(Guid Id, string[] Tokens)> activeTags,
                                          SuggestionData data)

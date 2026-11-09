@@ -286,6 +286,7 @@ export default function ImportWorkspace({
         clearParams={["cursor"]}
         defaultKey="new"
         initialTab={initialTab}
+        key={initialTab}
         label="Import sections"
         tabs={[
           {

@@ -121,7 +121,7 @@ function MerchantTagRow({ tag }: { tag: MerchantTag }) {
             <p className="mt-3 text-sm leading-6 text-warning-ink">
               Deleting this tag removes it from {tag.transaction_count}{" "}
               {tag.transaction_count === 1 ? "transaction" : "transactions"}. The transactions
-              themselves are kept.
+              themselves are kept. Any suggestion aliases that use this tag are also deleted.
             </p>
             <form
               action={async (formData) => {

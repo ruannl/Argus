@@ -618,24 +618,26 @@ export default function TransactionDetailView({
           Suggested tags
         </h3>
         <p className="mt-1 text-sm text-muted">
-          Suggestions come from your active tags and this description. Nothing is applied until you
-          accept it.
+          Suggestions come from your aliases, history, and active tags for this description. Nothing
+          is applied until you accept it.
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           {detail.suggested_tags.length === 0 ? (
             <span className="text-sm text-muted">No suggestions for this description.</span>
           ) : null}
-          {detail.suggested_tags.map((tag) => (
-            <button
-              className="rounded-full border border-suggestion-line bg-suggestion-soft px-3 py-1 text-xs font-bold text-suggestion-ink disabled:opacity-60"
-              disabled={busy || classificationDisabled || requiresReload}
-              key={tag.id}
-              onClick={() => void acceptSuggestion(tag.id)}
-              type="button"
-            >
-              Suggested: {tag.display_name} — add
-            </button>
-          ))}
+          {detail.suggested_tags
+            .filter((tag) => !tag.is_archived)
+            .map((tag) => (
+              <button
+                className="rounded-full border border-suggestion-line bg-suggestion-soft px-3 py-1 text-xs font-bold text-suggestion-ink disabled:opacity-60"
+                disabled={busy || classificationDisabled || requiresReload}
+                key={tag.id}
+                onClick={() => void acceptSuggestion(tag.id)}
+                type="button"
+              >
+                Suggested: {tag.display_name} — add
+              </button>
+            ))}
         </div>
         {detail.has_more_suggestions ? (
           <p className="mt-2 text-xs text-muted">
