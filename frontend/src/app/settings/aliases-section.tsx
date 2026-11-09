@@ -27,14 +27,18 @@ import {
   TH_CLASS,
 } from "./settings-ui";
 
+const MAX_ALIASES = 100;
+
 function AliasEditorFields({
   alias,
   categories,
   tags,
+  disabled = false,
 }: {
   alias?: MerchantAlias;
   categories: Category[];
   tags: MerchantTag[];
+  disabled?: boolean;
 }) {
   return (
     <div className="grid gap-4 sm:grid-cols-3">
@@ -45,6 +49,7 @@ function AliasEditorFields({
         <input
           className={FIELD_CLASS}
           defaultValue={alias?.display_alias ?? ""}
+          disabled={disabled}
           id={`alias-name-${alias?.id ?? "new"}`}
           name="display_alias"
           placeholder="e.g. apteek"
@@ -58,6 +63,7 @@ function AliasEditorFields({
         <select
           className={FIELD_CLASS}
           defaultValue={alias?.merchant_tag_id ?? ""}
+          disabled={disabled}
           id={`alias-tag-${alias?.id ?? "new"}`}
           name="merchant_tag_id"
           required
@@ -82,6 +88,7 @@ function AliasEditorFields({
         <select
           className={FIELD_CLASS}
           defaultValue={alias?.category_id ?? ""}
+          disabled={disabled}
           id={`alias-category-${alias?.id ?? "new"}`}
           name="category_id"
         >
@@ -114,6 +121,7 @@ function AliasRow({
   tags: MerchantTag[];
 }) {
   const [editing, setEditing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [result, setResult] = useState<AliasActionResult | null>(null);
   const editorId = `alias-editor-${alias.id}`;
 
@@ -135,20 +143,40 @@ function AliasRow({
             >
               {editing ? "Close" : "Edit"}
             </button>
-            <form
-              action={async (formData) => {
-                setResult(await deleteAliasAction(formData));
-              }}
-            >
-              <input name="id" type="hidden" value={alias.id} />
+            {confirmingDelete ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  className={BUTTON_CLASS}
+                  onClick={() => setConfirmingDelete(false)}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <form
+                  action={async (formData) => {
+                    setResult(await deleteAliasAction(formData));
+                  }}
+                >
+                  <input name="id" type="hidden" value={alias.id} />
+                  <button
+                    aria-label={`Confirm delete alias ${alias.display_alias}`}
+                    className="inline-flex items-center justify-center rounded-full border border-warning-line bg-warning-soft px-4 py-2 text-sm font-bold text-warning-ink"
+                    type="submit"
+                  >
+                    Confirm delete
+                  </button>
+                </form>
+              </div>
+            ) : (
               <button
                 aria-label={`Delete alias ${alias.display_alias}`}
                 className={BUTTON_CLASS}
-                type="submit"
+                onClick={() => setConfirmingDelete(true)}
+                type="button"
               >
                 Delete
               </button>
-            </form>
+            )}
           </div>
         </td>
       </tr>
@@ -182,6 +210,7 @@ export default function AliasesSection({
   tags: MerchantTag[];
 }) {
   const [createResult, setCreateResult] = useState<AliasActionResult | null>(null);
+  const atAliasLimit = aliases.length >= MAX_ALIASES;
   const ordered = [...aliases].sort((left, right) =>
     left.display_alias.localeCompare(right.display_alias, "en", { sensitivity: "base" }),
   );
@@ -206,10 +235,19 @@ export default function AliasesSection({
         }}
         className="mt-5 rounded-3xl border border-line bg-surface p-4 sm:p-5"
       >
-        <AliasEditorFields categories={categories} tags={tags} />
-        <button className={`${PRIMARY_BUTTON_CLASS} mt-4`} type="submit">
+        <AliasEditorFields categories={categories} disabled={atAliasLimit} tags={tags} />
+        <button
+          className={`${PRIMARY_BUTTON_CLASS} mt-4 disabled:opacity-60`}
+          disabled={atAliasLimit}
+          type="submit"
+        >
           Add alias
         </button>
+        {atAliasLimit ? (
+          <p className="mt-3 text-sm font-semibold text-warning-ink" role="status">
+            You have reached the {MAX_ALIASES}-alias limit. Delete an alias before adding another.
+          </p>
+        ) : null}
       </form>
       <FormResult result={createResult} />
 

@@ -776,6 +776,64 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         Assert.Equal(HttpStatusCode.NotFound, deletedAgain.StatusCode);
     }
 
+    [Fact]
+    public async Task MerchantAliasLifecycleNilsTheCategoryAndCascadesWithTheTag()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var tagResponse = await SendAsync(Post(TagsPath, Json(new { display_name = "Serene Pharmacy" }), session: session));
+        var tagId = (await BodyAsync(tagResponse)).GetProperty("id").GetGuid();
+        var categoryResponse = await SendAsync(Post(CategoriesPath, Json(new { display_name = "Pharmacy and personal care", kind = "Expense" }), session: session));
+        var categoryId = (await BodyAsync(categoryResponse)).GetProperty("id").GetGuid();
+        const string aliasesPath = "/v1/finance/merchant-aliases";
+
+        var created = await SendAsync(Post(aliasesPath, Json(new
+        {
+            display_alias = "apteek",
+            merchant_tag_id = tagId,
+            category_id = categoryId,
+        }), session: session));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+
+        var categoryDelete = await SendAsync(Delete($"{CategoriesPath}/{categoryId}", session: session));
+        Assert.Equal(HttpStatusCode.OK, categoryDelete.StatusCode);
+
+        var afterCategory = await BodyAsync(await SendAsync(Get(aliasesPath, session: session)));
+        var retained = Assert.Single(afterCategory.GetProperty("merchant_aliases").EnumerateArray());
+        Assert.Equal(tagId, retained.GetProperty("merchant_tag_id").GetGuid());
+        Assert.Equal(JsonValueKind.Null, retained.GetProperty("category_id").ValueKind);
+
+        var tagDelete = await SendAsync(Delete($"{TagsPath}/{tagId}", session: session));
+        Assert.Equal(HttpStatusCode.OK, tagDelete.StatusCode);
+
+        var afterTag = await BodyAsync(await SendAsync(Get(aliasesPath, session: session)));
+        Assert.Empty(afterTag.GetProperty("merchant_aliases").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task MerchantAliasesAreCappedPerCustomer()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var tagResponse = await SendAsync(Post(TagsPath, Json(new { display_name = "Capped target" }), session: session));
+        var tagId = (await BodyAsync(tagResponse)).GetProperty("id").GetGuid();
+        await ExecuteSqlAsync($"""
+            INSERT INTO merchant_aliases (
+                id, customer_id, display_alias, normalized_alias,
+                merchant_tag_id, category_id, created_at, updated_at)
+            SELECT gen_random_uuid(), '{customerId}', 'Alias ' || n, 'alias ' || n,
+                   '{tagId}', NULL, NOW(), NOW()
+            FROM generate_series(1, 100) AS n
+            """);
+
+        var refused = await SendAsync(Post("/v1/finance/merchant-aliases", Json(new
+        {
+            display_alias = "One too many",
+            merchant_tag_id = tagId,
+        }), session: session));
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal("invalid_request", await ErrorKindAsync(refused));
+    }
+
     // --- Concurrency -------------------------------------------------------
 
     [Fact]

@@ -1236,8 +1236,21 @@ public sealed class FinanceStore(Db db)
         try
         {
             await using var connection = await db.OpenAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+            // Serialize alias creation per customer so the cap cannot be
+            // exceeded by two concurrent requests observing the same count.
+            await using (var lockCustomer = connection.CreateCommand())
+            {
+                lockCustomer.Transaction = transaction;
+                lockCustomer.CommandText = "SELECT pg_advisory_xact_lock(hashtextextended(@customer_id::text, 0))";
+                lockCustomer.Parameters.AddWithValue(CustomerIdParameter, customerId);
+                await lockCustomer.ExecuteScalarAsync(cancellationToken);
+            }
+
             await using (var count = connection.CreateCommand())
             {
+                count.Transaction = transaction;
                 count.CommandText = "SELECT COUNT(*) FROM merchant_aliases WHERE customer_id = @customer_id";
                 count.Parameters.AddWithValue(CustomerIdParameter, customerId);
                 long existing = (long)(await count.ExecuteScalarAsync(cancellationToken))!;
@@ -1246,16 +1259,17 @@ public sealed class FinanceStore(Db db)
                     return new MerchantAliasOutcome.LimitReached();
                 }
             }
-            if (!await AliasTagExistsAsync(connection, customerId, merchantTagId.Value, cancellationToken))
+            if (!await AliasTagExistsAsync(connection, transaction, customerId, merchantTagId.Value, cancellationToken))
             {
                 return new MerchantAliasOutcome.TagNotFound();
             }
-            if (categoryId is Guid selectedCategory && !await AliasCategoryExistsAsync(connection, customerId, selectedCategory, cancellationToken))
+            if (categoryId is Guid selectedCategory && !await AliasCategoryExistsAsync(connection, transaction, customerId, selectedCategory, cancellationToken))
             {
                 return new MerchantAliasOutcome.CategoryNotFound();
             }
 
             await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = """
                 INSERT INTO merchant_aliases (
                     id, customer_id, display_alias, normalized_alias,
@@ -1271,6 +1285,7 @@ public sealed class FinanceStore(Db db)
             command.Parameters.AddWithValue("merchant_tag_id", merchantTagId.Value);
             command.Parameters.AddWithValue("category_id", NpgsqlDbType.Uuid, (object?)categoryId ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         catch (PostgresException exception) when (IsUniqueViolation(exception))
         {
@@ -1296,11 +1311,11 @@ public sealed class FinanceStore(Db db)
         try
         {
             await using var connection = await db.OpenAsync(cancellationToken);
-            if (!await AliasTagExistsAsync(connection, customerId, merchantTagId.Value, cancellationToken))
+            if (!await AliasTagExistsAsync(connection, null, customerId, merchantTagId.Value, cancellationToken))
             {
                 return new MerchantAliasOutcome.TagNotFound();
             }
-            if (categoryId is Guid selectedCategory && !await AliasCategoryExistsAsync(connection, customerId, selectedCategory, cancellationToken))
+            if (categoryId is Guid selectedCategory && !await AliasCategoryExistsAsync(connection, null, customerId, selectedCategory, cancellationToken))
             {
                 return new MerchantAliasOutcome.CategoryNotFound();
             }
@@ -1368,11 +1383,13 @@ public sealed class FinanceStore(Db db)
     }
 
     private static async Task<bool> AliasTagExistsAsync(NpgsqlConnection connection,
+                                                        NpgsqlTransaction? transaction,
                                                         Guid customerId,
                                                         Guid merchantTagId,
                                                         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             SELECT 1 FROM merchant_tags
             WHERE customer_id = @customer_id AND id = @id AND is_archived = FALSE
@@ -1384,11 +1401,13 @@ public sealed class FinanceStore(Db db)
     }
 
     private static async Task<bool> AliasCategoryExistsAsync(NpgsqlConnection connection,
+                                                             NpgsqlTransaction? transaction,
                                                              Guid customerId,
                                                              Guid categoryId,
                                                              CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             SELECT 1 FROM categories
             WHERE customer_id = @customer_id AND id = @id

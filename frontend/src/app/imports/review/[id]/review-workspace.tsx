@@ -218,6 +218,11 @@ export default function ReviewWorkspace({
     void run(
       () => patchImportReviewAction(summary.id, version, [decision], statementOverride),
       () => applyDecision(decision),
+      // A filtered view can gain rows as well as lose them after a group or
+      // tag decision. Reload the filtered page so its membership and counts
+      // stay authoritative; the local update still makes the current row
+      // respond immediately.
+      possibleOnly || untaggedOnly,
     );
   }
 
