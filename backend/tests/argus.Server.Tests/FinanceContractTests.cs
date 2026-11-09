@@ -3,6 +3,7 @@ using System.Net;
 using System.Text.Json;
 using argus.Server.Data;
 using argus.Server.Security;
+using Npgsql;
 
 namespace argus.Server.Tests;
 
@@ -14,6 +15,7 @@ namespace argus.Server.Tests;
 public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(factory)
 {
     private const string AccountsPath = "/v1/finance/accounts";
+    private const string AliasesPath = "/v1/finance/merchant-aliases";
     private const string CategoriesPath = "/v1/finance/categories";
     private const string TagsPath = "/v1/finance/merchant-tags";
 
@@ -832,6 +834,124 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
 
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         Assert.Equal("invalid_request", await ErrorKindAsync(refused));
+    }
+
+    [Fact]
+    public async Task MerchantAliasCapSerializesConcurrentCreates()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var tagResponse = await SendAsync(Post(TagsPath, Json(new { display_name = "Concurrent target" }), session: session));
+        var tagId = (await BodyAsync(tagResponse)).GetProperty("id").GetGuid();
+        await ExecuteSqlAsync($"""
+            INSERT INTO merchant_aliases (
+                id, customer_id, display_alias, normalized_alias,
+                merchant_tag_id, category_id, created_at, updated_at)
+            SELECT gen_random_uuid(), '{customerId}', 'Seed ' || n, 'seed ' || n,
+                   '{tagId}', NULL, NOW(), NOW()
+            FROM generate_series(1, 99) AS n
+            """);
+
+        var db = Factory.CreateDb();
+        await using var blocker = await db.OpenAsync();
+        await using var observer = await db.OpenAsync();
+        Task<HttpResponseMessage>? first = null;
+        Task<HttpResponseMessage>? second = null;
+        var lockHeld = false;
+        try
+        {
+            await using (var hold = blocker.CreateCommand())
+            {
+                hold.CommandText = "SELECT pg_advisory_lock(hashtextextended(@customer_id::text, 0))";
+                hold.Parameters.AddWithValue("customer_id", customerId);
+                await hold.ExecuteNonQueryAsync();
+                lockHeld = true;
+            }
+
+            int blockerPid;
+            await using (var pid = blocker.CreateCommand())
+            {
+                pid.CommandText = "SELECT pg_backend_pid()";
+                blockerPid = (int)(await pid.ExecuteScalarAsync())!;
+            }
+
+            first = SendAsync(Post(AliasesPath, Json(new
+            {
+                display_alias = "Concurrent alpha",
+                merchant_tag_id = tagId,
+            }), session: session));
+            second = SendAsync(Post(AliasesPath, Json(new
+            {
+                display_alias = "Concurrent beta",
+                merchant_tag_id = tagId,
+            }), session: session));
+
+            await WaitForBlockedAliasCreatesAsync(observer, blockerPid, 2);
+            Assert.False(first.IsCompleted);
+            Assert.False(second.IsCompleted);
+
+            await using (var release = blocker.CreateCommand())
+            {
+                release.CommandText = "SELECT pg_advisory_unlock(hashtextextended(@customer_id::text, 0))";
+                release.Parameters.AddWithValue("customer_id", customerId);
+                Assert.Equal(true, await release.ExecuteScalarAsync());
+                lockHeld = false;
+            }
+
+            var firstResponse = await first.WaitAsync(TimeSpan.FromSeconds(10));
+            var secondResponse = await second.WaitAsync(TimeSpan.FromSeconds(10));
+            HttpStatusCode[] statuses = [firstResponse.StatusCode, secondResponse.StatusCode];
+            Assert.Contains(HttpStatusCode.Created, statuses);
+            Assert.Contains(HttpStatusCode.BadRequest, statuses);
+            var rejected = firstResponse.StatusCode == HttpStatusCode.BadRequest ? firstResponse : secondResponse;
+            Assert.Equal("invalid_request", await ErrorKindAsync(rejected));
+            Assert.Equal(100L, await ScalarAsync($"SELECT COUNT(*) FROM merchant_aliases WHERE customer_id = '{customerId}'"));
+        }
+        finally
+        {
+            if (lockHeld)
+            {
+                await using var release = blocker.CreateCommand();
+                release.CommandText = "SELECT pg_advisory_unlock(hashtextextended(@customer_id::text, 0))";
+                release.Parameters.AddWithValue("customer_id", customerId);
+                await release.ExecuteScalarAsync();
+            }
+            foreach (var pending in new[] { first, second })
+            {
+                if (pending is not null)
+                {
+                    try
+                    {
+                        await pending.WaitAsync(TimeSpan.FromSeconds(10));
+                    }
+                    catch
+                    {
+                        // Preserve the original assertion failure.
+                    }
+                }
+            }
+        }
+    }
+
+    private static async Task WaitForBlockedAliasCreatesAsync(NpgsqlConnection observer, int blockerPid, int expected)
+    {
+        for (var attempt = 0; attempt < 200; attempt++)
+        {
+            await using var query = observer.CreateCommand();
+            query.CommandText = """
+                SELECT COUNT(*) FROM pg_stat_activity
+                WHERE @blocker = ANY(pg_blocking_pids(pid))
+                  AND query ILIKE '%pg_advisory_xact_lock%'
+                """;
+            query.Parameters.AddWithValue("blocker", blockerPid);
+            if (Convert.ToInt64(await query.ExecuteScalarAsync()) >= expected)
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
+
+        Assert.Fail("Concurrent alias creates did not reach the advisory-lock wait.");
     }
 
     // --- Concurrency -------------------------------------------------------

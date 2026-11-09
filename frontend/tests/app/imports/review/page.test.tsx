@@ -549,6 +549,40 @@ describe("import review page", () => {
 
     await waitFor(() => expect(patchImportReviewAction).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryAllByText("Woolworths groceries")).toHaveLength(0));
+    await waitFor(() => expect(testRouter.refresh).toHaveBeenCalledTimes(1));
+  });
+
+  it("refreshes the possible-duplicates view after a group decision", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getImportReview).mockResolvedValue({
+      ok: true,
+      value: { summary, page: { rows: [rows[3]], total: 1, page: 1, page_size: 50 } },
+    });
+    vi.mocked(patchImportReviewAction).mockResolvedValue({
+      ok: true,
+      message: "Review updated.",
+      review: { ...summary, version: 4 },
+    });
+
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({ duplicates: "possible" }),
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Show details for row 4" }));
+    await user.click(screen.getByRole("button", { name: "Keep all in group" }));
+
+    await waitFor(() =>
+      expect(patchImportReviewAction).toHaveBeenCalledWith(
+        "review-id",
+        3,
+        [{ row_id: "row-4", within_file_group: "group-1", within_file_action: "keep_all" }],
+        undefined,
+      ),
+    );
+    await waitFor(() => expect(testRouter.refresh).toHaveBeenCalledTimes(1));
   });
 
   it("explains that repeated-row groups block commit", async () => {
