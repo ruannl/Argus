@@ -55,6 +55,7 @@ import {
   listMerchantTags,
 } from "@/lib/server/backend-client";
 import { createAccountAction, createMerchantTagAction } from "@/lib/server/finance-actions";
+import { deleteAliasAction } from "@/lib/server/alias-actions";
 
 const account = {
   id: "account-id",
@@ -128,6 +129,17 @@ const woolworths = {
   updated_at: "2026-01-01T00:00:00.0000000Z",
 };
 
+const pharmacyAlias = {
+  id: "alias-id",
+  display_alias: "apteek",
+  merchant_tag_id: "tag-id",
+  tag_display_name: "Serene Pharmacy",
+  category_id: "category-id",
+  category_display_name: "Health",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+};
+
 function signedIn() {
   vi.mocked(auth).mockResolvedValue({
     expires: "2030-01-01T00:00:00.000Z",
@@ -170,6 +182,7 @@ describe("settings page", () => {
     vi.mocked(listMerchantTags).mockReset();
     vi.mocked(createAccountAction).mockReset();
     vi.mocked(createMerchantTagAction).mockReset();
+    vi.mocked(deleteAliasAction).mockReset();
     vi.mocked(redirect).mockReset();
     vi.mocked(listMerchantAliases).mockResolvedValue({
       ok: true,
@@ -280,6 +293,42 @@ describe("settings page", () => {
     expect(within(panel).getByText("apteek")).toBeInTheDocument();
     expect(within(panel).getByText("Serene Pharmacy")).toBeInTheDocument();
     expect(within(panel).getByText("Health")).toBeInTheDocument();
+  });
+
+  it("shows a failed alias delete without opening the editor", async () => {
+    signedIn();
+    loadedWorkspace();
+    vi.mocked(listMerchantAliases).mockResolvedValue({
+      ok: true,
+      value: { merchant_aliases: [pharmacyAlias] },
+    });
+    vi.mocked(deleteAliasAction).mockResolvedValue({
+      ok: false,
+      message: "That alias no longer exists. Refresh the page and try again.",
+      errorKind: "not_found",
+    });
+    const user = userEvent.setup();
+
+    render(await SettingsPage());
+    await openTab(user, "Aliases");
+
+    const panel = activePanel();
+    expect(within(panel).getByRole("button", { name: "Edit alias apteek" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await user.click(within(panel).getByRole("button", { name: "Delete alias apteek" }));
+    await user.click(within(panel).getByRole("button", { name: "Confirm delete alias apteek" }));
+
+    await waitFor(() =>
+      expect(within(panel).getByRole("status")).toHaveTextContent(
+        "That alias no longer exists. Refresh the page and try again.",
+      ),
+    );
+    expect(within(panel).getByRole("button", { name: "Edit alias apteek" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
   });
 
   it("keeps the active tab in sync with same-route navigation", async () => {
