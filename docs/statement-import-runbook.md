@@ -140,9 +140,10 @@ only. The original filename is not displayed in the UI.
 3. **Review** reads the durable rows. Invalid rows must be skipped. Repeated
    identical rows require a keep-all, skip-all, or per-row decision. A row
    that matches an existing occurrence is suppressed unless explicitly
-   overridden. Tag suggestions are unselected and only use the customer's
-   active tags whose normalized name is a complete token sequence in the
-   description.
+   overridden. Tag suggestions are unselected and combine the customer's
+   active tag names, explicit aliases, and the customer's own historical tag
+   choices for the generated merchant key; exact tokens rank before truncated
+   prefixes. Import review does not assign a category.
 4. **Refresh** recomputes duplicate state under the account lock. It preserves
    skips and selected tag IDs, but resets overrides and group decisions that
    depend on changed duplicate state; the customer must renew confirmation.
@@ -153,6 +154,15 @@ only. The original filename is not displayed in the UI.
    only a minimal terminal header for 30 days. Neither action can undo a
    committed import. Expiry cleanup locks the review header before deleting its
    child rows, matching the commit/edit lock order.
+
+### Suggestion sources (2026-11-09)
+
+Import-review tag suggestions are advisory and start unselected. They combine
+the customer's active tag names, explicit aliases from Settings, and the
+customer's own historical tag choices for a generic merchant key. Exact tokens
+rank before truncated-prefix matches. They never auto-apply, never read another
+customer's history, and never assign a category; rows still commit as
+Uncategorised unless the customer explicitly selects tags.
 
 ### Absolute commit expiry (revision 6)
 

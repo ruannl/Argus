@@ -18,7 +18,7 @@ commands with the working directory inside the relevant tree.
 │   ├── Data/                 Npgsql connection, migrations, Store, FinanceStore,
 │   │                         StatementImportStore, TransactionStore, cleanup services
 │   ├── Transactions/         filter/action/limit contracts, fault seam, shared DTOs
-│   ├── Finance/              pure tag-suggestion matcher shared with imports
+│   ├── Finance/              merchant-key, alias/history and tag-token suggestion helpers shared with imports
 │   ├── Imports/              bounded FNB/generic CSV parsers, identity/fingerprint
 │   │                         code, and the dormant PDF parser/child runner
 │   ├── Security/             argon2id, tokens, policy, rate limiter, HIBP

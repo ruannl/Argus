@@ -12,6 +12,21 @@
 > offers only FNB CSV/ZIP and generic mapped CSV. The PDF requirements and
 > criteria below remain future scope, not current release scope. The pending
 > production-PDF amendment at the end is deferred, not accepted.
+>
+> **Behavior amendment (2026-11-09, operator-approved):** The following replace
+> the earlier whole-token-only suggestion and ±3-day near-duplicate wording.
+> Suggestions may use explicit customer aliases, the customer's own historical
+> tag/category choices keyed by a generic merchant key, and truncated-prefix
+> token matching with exact tokens ranked first; they remain advisory and are
+> never auto-applied. Transaction detail may show an advisory suggested
+> category. Near-duplicate warnings require the exact transaction date, exact
+> signed amount and normalized-description token-set similarity of at least 0.5.
+> The finance IP limit is 1000 requests per 15 minutes. Applied bulk outcomes
+> auto-dismiss the client receipt identity and show a persistent status line.
+> Detailed authority is in Plan 1 revision 2, Plan 2 revision 7 and Plan 3
+> revision 4; Thread #1 Decision `e69aabc8-c55b-4e83-b7a9-95a782423ecb` records
+> approval. The four-plan topology, CSV-only delivery, PDF deferral and
+> no-deployment state are unchanged.
 
 ## 1. Executive summary
 
@@ -438,7 +453,7 @@ On small screens, the same four destinations must remain reachable. Tables shoul
 - **IMP-19:** PDF descriptions that wrap are joined to the preceding transaction. Page headers, page footers, statement metadata, and summary or balance-only rows are skipped.
 - **IMP-20:** PDF transaction dates use two-digit years. Resolve them against the confirmed statement period (`start_date` to `end_date`, pre-filled from the period printed in the PDF when present); if the period is missing or ambiguous, require the user to confirm the statement start/end dates and year.
 - **IMP-21:** PDF review shows the page number and source context for each extracted row. The raw PDF is not retained after the import or an abandoned review.
-- **IMP-22:** The import review may suggest merchant tags from the transaction description and the user's existing tag names. A suggestion is never applied automatically; the user accepts, changes, or ignores it.
+- **IMP-22:** The import review may suggest merchant tags from the transaction description using the customer's active tag names, explicit per-customer aliases, and the customer's own historical tag choices keyed by a generic merchant key. Exact tokens rank before truncated-prefix matches. A suggestion is never applied automatically; the user accepts, changes, or ignores it. Import review does not suggest or assign a category; category suggestions are detail-only and advisory.
 - **IMP-23:** A user can hide or restore individual transactions and bulk-hide selected or all matching transactions. Hidden transactions are excluded from calculations and default lists but retained for duplicate prevention and idempotency unless their parent statement import is deleted.
 
 ### 6.3 Duplicate prevention and transaction idempotency
@@ -481,7 +496,7 @@ On small screens, the same four destinations must remain reachable. Tables shoul
 - **CAT-3:** Every category has a visible kind: Income, Expense, Transfer, or Excluded. The kind determines whether the category participates in the overview and how it is grouped. Changing a kind changes reported totals and requires a warning.
 - **CAT-4:** Archived categories remain visible on historical transactions but cannot be chosen for new assignments.
 - **CAT-5:** Category and merchant-tag assignment are available inline in the list and in the transaction detail view. Bulk assignment is available from the list.
-- **CAT-6:** The MVP does not auto-categorise or auto-apply merchant tags, remember rules, or learn from corrections. Tag suggestions are allowed but require confirmation. The manual and bulk workflow must stand on its own.
+- **CAT-6:** The MVP does not auto-categorise or auto-apply tags. Suggestions may use explicit customer aliases and the customer's own historical choices, but they remain advisory and require confirmation; there is no global merchant dictionary or cross-customer learning. The manual and bulk workflow must stand on its own.
 - **CAT-7:** Category management shows the transaction count and kind for each category so the user can see the effect of archiving or deleting it.
 - **TAG-1:** Merchant tags are workspace-wide user labels for stores or merchants such as Woolworths, Checkers, and Uber Eats. A user can create, rename, archive, restore, and delete them. Tag names are case-insensitive unique.
 - **TAG-2:** A transaction can have zero, one, or many merchant tags. The category remains single-select; multiple categories require split transactions, which are future.
@@ -490,9 +505,9 @@ On small screens, the same four destinations must remain reachable. Tables shoul
 - **TAG-5:** The transaction list can be filtered by one merchant tag in the MVP, with an Untagged option. Combined tag filters are future.
 - **TAG-6:** A merchant-tag detail view shows its transactions, total, count, trend, comparison, and category mix. Because a transaction can have multiple tags, tag totals overlap and are not additive.
 - **TAG-7:** Tag management shows the assigned transaction count and allows archive, restore, and delete. Deleting a tag removes it from transactions; it never deletes transactions.
-- **TAG-8:** Argus may suggest tags from the description and the user's existing tag names. There is no external merchant directory, and no suggestion is applied automatically.
+- **TAG-8:** Argus may suggest tags from the description using active tag names, explicit customer aliases, and the customer's own historical tag choices. Exact tokens rank before truncated-prefix matches. There is no external merchant directory or cross-customer learning, and no suggestion is applied automatically. Transaction detail may show an advisory suggested category from the same sources; it changes nothing until the user saves it.
 - **TAG-9:** Untagged transactions remain visible in the transaction list and tag views, and the product reports tag coverage.
-- **TAG-10:** Automatic merchant normalisation, remembered tag rules, tag merge, and combined tag filters are future capabilities.
+- **TAG-10:** Global merchant dictionaries, cross-customer learning, automatic rule application, tag merge, and combined tag filters are future capabilities.
 
 Category and merchant tag are independent dimensions. A category describes the purpose of the money; a merchant tag describes where it went. A Woolworths purchase can be categorised as Groceries or Clothing, and both transactions can carry the Woolworths tag.
 
@@ -530,7 +545,7 @@ Category and merchant tag are independent dimensions. A category describes the p
 - **EXP-1:** A category detail view shows the category's transactions, gross inflows and outflows, net for the category, transaction count, and change versus the comparison period.
 - **EXP-2:** The user can filter the overview and transaction list by financial account. The "all accounts" view is valid because the MVP is ZAR-only.
 - **EXP-3:** A period comparison view lists the categories with the largest absolute change between the selected period and its comparison. It appears only when both periods have data.
-- **EXP-4:** Search is by the raw transaction description and by merchant tag. Automatic merchant normalisation is future; merchant-level insight uses the user's tags.
+- **EXP-4:** Search is by the raw transaction description and by merchant tag. External or cross-customer automatic merchant normalisation is future; a customer-local derived merchant key may group suggestion history, and merchant-level insight uses the user's tags.
 - **EXP-5:** Filters and charts share one state. A chart never shows a different period, account, category, or tag scope from the list it links to.
 - **EXP-6:** A merchant-tag detail view shows its transactions, total, transaction count, trend, comparison, and category mix. It makes clear that tag totals overlap when a transaction has multiple tags.
 - **EXP-7:** Top merchant tags link to the tag detail and to a transaction list filtered by that tag. The Untagged view is available from the same place.
@@ -668,8 +683,8 @@ The recommended MVP model uses **gross directional flows** as the headline, with
 21. PDF-derived rows retain their page number and source context for review. The raw PDF is not retained after the import or an abandoned review.
 22. If a PDF transaction row has values in more than one flow column, flag it invalid in review (requiring the user to skip it) rather than summing the columns silently.
 23. If a PDF row has no flow amount, treat it as a summary or metadata row and skip it unless it is clearly a transaction with a missing amount, in which case flag it invalid.
-24. Transaction descriptions are unstructured merchant text. Argus may use them for search and as a suggestion source, but merchant tags are user-assigned and never inferred as fact.
-25. Suggested merchant tags are suggestions only. They are never applied automatically and never change the transaction's category.
+24. Transaction descriptions are unstructured merchant text. Argus may use them for search, explicit aliases and advisory suggestions; tags and categories remain user-assigned and are never recorded as fact until the user explicitly saves them.
+25. Suggested tags and suggested categories are suggestions only. They are never applied automatically. Accepting a tag suggestion writes only that tag; a suggested category is staged and saved only by an explicit category change.
 26. A transaction's date, description, amount, account, and source are strictly read-only both during the pre-commit import review and after commit. Invalid rows in the pre-commit review must be marked to be skipped (or fixed in the source file before re-uploading). After commit, only category, merchant tags, and hidden state can change.
 
 ### 7.5 Duplicate rules
@@ -677,7 +692,7 @@ The recommended MVP model uses **gross directional flows** as the headline, with
 1. **Exact duplicate:** same financial account, same transaction date, same signed amount, and same normalised description. Normalisation collapses whitespace and case but does not rewrite the description.
 2. **Statement repeat:** same financial account and the same stable statement fingerprint. The product blocks or prominently flags the repeat and links to the existing import.
 3. **Within-file duplicate:** two rows in the same file that match on the exact key. They are flagged, but the user decides; two identical coffees on the same day are legitimate.
-4. **Near duplicate:** same account and amount within a short date window (proposed ±3 days), with a similar description. Near duplicates are warnings, not automatic exclusions.
+4. **Near duplicate:** same account, exact transaction date and exact signed amount, with normalized-description token-set similarity of at least 0.5. Near duplicates are warnings, not automatic exclusions.
 5. Exact matches against already-imported transactions default to suppressed. Exact duplicates within the incoming file are flagged for a user decision. Near duplicates default to included. All three are visible in the review with a reason.
 6. An override is explicit, recorded in the import summary, and visible after import.
 7. A statement-level repeat can only be imported after the user confirms an override or deletes/hides the prior import.
@@ -722,7 +737,7 @@ These must hold for every selected period and account filter:
 - Merchant-level insight must state that it uses user-assigned tags, not an automatic merchant directory. Tag totals overlap when a transaction has multiple tags.
 - Never claim a recurring expense, anomaly, or saving opportunity without a published, testable rule. Those are future capabilities.
 - Every calculated insight must state its period, account scope, and whether transfers, excluded transactions, or uncategorised transactions are included.
-- A "How this is calculated" disclosure must use the same definitions as the metric dictionary in this brief. Suggested tags are clearly suggestions, not confirmed facts.
+- A "How this is calculated" disclosure must use the same definitions as the metric dictionary in this brief. Suggested tags and suggested categories are clearly suggestions, not confirmed facts.
 - Hidden transactions are not deleted. Never describe them as deleted; show the hidden count and the restore path, and state that they are excluded from the displayed totals.
 
 ## 8. Prioritised scope
@@ -794,7 +809,7 @@ These are product-coherence corrections, not finance features:
 | Direct bank connections | Adds providers, consent, connectivity, regulatory, and support complexity; conflicts with the privacy-first manual import hypothesis. | Strong evidence that manual import is the main adoption blocker. |
 | Auto-categorisation and remembered tag rules | Useful, but the manual and bulk workflow must work first; rules can create invisible errors. | Categorisation or tagging volume is high enough that bulk actions are insufficient. |
 | Undo for bulk edits | Helpful, but re-assignment is the basic correction path; undo adds history and concurrency complexity. | Usability testing shows bulk mis-assignment is common. |
-| Automatic merchant normalisation and external merchant directory | The MVP uses user-assigned tags; an external directory adds maintenance, coverage, and privacy questions. | Descriptions are consistent enough to build a validated normaliser, or users need automatic enrichment. |
+| External merchant directories or cross-customer automatic merchant normalisation | The MVP uses user-assigned tags plus a customer-local derived merchant key for advisory history; an external directory adds maintenance, coverage and privacy questions. | Descriptions are consistent enough to build a validated external normaliser, or users need automatic enrichment. |
 | Combined tag filters and tag merge | One-tag filtering and manual tags are enough for the first release; combined filters and merging add UI and reconciliation complexity. | Users have many overlapping tags and routinely need AND/OR filters or duplicate-tag cleanup. |
 | Line and area chart variants | Bar charts are the default and first priority; line charts add a second chart language and interaction model. | Bar charts prove insufficient for trend or distribution questions. |
 | Recurring transaction detection | Requires a defensible definition and several periods of data; false positives damage trust. | Users have enough history and repeatedly ask for subscription/recurring views. |
@@ -877,7 +892,7 @@ These are product-coherence corrections, not finance features:
 - **AC-TAG-3:** Given N selected transactions, when the user bulk-adds or bulk-removes a tag, then the confirmation states N, unrelated tags remain, and the tag views update.
 - **AC-TAG-4:** Given a merchant tag, when the user opens its detail view, then the total and count equal the transactions carrying that tag.
 - **AC-TAG-5:** Given a transaction with multiple tags, when tag totals are displayed, then the view states that tag totals overlap and does not sum them to reconcile to money in or money out.
-- **AC-TAG-6:** Given a tag suggestion from the description, when the suggestion is shown, then it is labelled as suggested and is not applied until the user confirms it.
+- **AC-TAG-6:** Given a tag suggestion from the customer's description, aliases or own history, when the suggestion is shown, then it is labelled as suggested and is not applied until the user confirms it.
 - **AC-TAG-7:** Given transactions with no tags, when the tag view is displayed, then they appear in Untagged and the tag-coverage indicator includes them.
 - **AC-TAG-8:** Given a tag deletion, when the user confirms, then the tag is removed from its transactions and no transaction is deleted.
 
@@ -1041,7 +1056,7 @@ These are initial hypotheses, not commitments. Establish a baseline before setti
 | **Comparison usage** | Share of overview sessions that select a comparison period or view a category change. | Measures whether trend insight is used. | 20% or higher. |
 | **Merchant-tag adoption** | Share of included outflow value carrying at least one merchant tag within 7 days of import. | Tags are only useful when coverage is high. | 70% or higher. |
 | **Untagged residual** | Share of included value with no merchant tag after 30 days. | Measures whether bulk tagging and suggestions are sufficient. | Under 10% for active users. |
-| **Tag suggestion acceptance** | Suggested tags accepted divided by suggested tags shown. | Shows whether description-based suggestions are useful. | 60% or higher. |
+| **Tag suggestion acceptance** | Suggested tags accepted divided by suggested tags shown. | Shows whether advisory description/history suggestions are useful. | 60% or higher. |
 | **Chart view usage** | Share of overview sessions that open the Chart view. | Measures whether the visual lens is discoverable. | 40% or higher. |
 | **Chart drill-down rate** | Share of Chart view sessions that open a filtered transaction list or detail view. | Measures whether charts lead to explanation, not just display. | 25% or higher. |
 | **Trust defects** | Confirmed reconciliation or calculation defects reported by users or found in QA. | A finance product cannot survive wrong totals. | Zero in QA; under 0.5% of active users reporting. |
@@ -1066,8 +1081,8 @@ These are initial hypotheses, not commitments. Establish a baseline before setti
 - The MVP is ZAR-only and does not convert foreign transactions.
 - Source transaction `date`, `description`, and `amount` are strictly read-only both during the pre-commit import review and after commit. Invalid rows in the pre-commit review must be marked to be skipped (or fixed in the source file and re-uploaded); there is no in-review or post-import editing of source fields.
 - Individual transactions are never deleted (they are hidden and restored only). Committed statement imports can be hidden, restored, or permanently deleted (removing that statement, its transactions, and its duplicate-protection identity records). There is no whole-customer account-deletion or data-export action in the MVP; account deletion and data export are future.
-- Split transactions, automatic merchant normalisation, recurring detection, auto-categorisation, and transfer linking are not in the MVP.
-- Merchant tags are user-assigned, with description-based suggestions that require confirmation. There is no external merchant directory and no auto-applied tag.
+- Split transactions, external/cross-customer automatic merchant normalisation, recurring detection, auto-categorisation, and transfer linking are not in the MVP.
+- Merchant tags are user-assigned, with advisory suggestions from descriptions, explicit aliases and the customer's own history that require confirmation. There is no external merchant directory and no auto-applied tag.
 - A transaction can have multiple merchant tags, so tag totals overlap and are not additive. The MVP filters by one tag at a time; combined tag filters, tag merge, and bulk tag replacement are future.
 - The Chart view is bar-first. Line and area chart variants are future.
 - Whole-customer account deletion is outside the MVP. Individual transactions are hidden and restored; committed imports may be hidden, restored, or deleted.
@@ -1090,7 +1105,7 @@ These are initial hypotheses, not commitments. Establish a baseline before setti
 10. One to three financial accounts is the common case.
 11. Monthly or statement-driven usage is the primary cadence.
 12. Users care more about understanding spending than about setting budgets.
-13. A raw description is sufficient for search in the MVP; merchant normalisation can wait.
+13. A raw description is sufficient for search; a generic derived merchant key may group the customer's own suggestion history, but no external merchant directory or cross-customer normalisation is required.
 14. Users will trust a total more when they can see the transactions and the calculation basis.
 
 ### 12.3 Confirmed decisions
@@ -1103,11 +1118,11 @@ These are initial hypotheses, not commitments. Establish a baseline before setti
 - Transactions have one category and zero or more merchant tags. Categories include Groceries, Home loan, Levies, and School fees; merchant tags include Woolworths, Checkers, and Uber Eats.
 - Source transaction `date`, `description`, and `amount` are strictly read-only both during pre-commit review and after commit. Invalid rows in pre-commit review must be marked to be skipped (or fixed in the source file before re-uploading). Only category, merchant tags, and hidden state can change after import.
 - Individual transactions are never deleted (hide and restore only). Committed statement imports can be hidden, restored (preserving individual transaction hide flags), or permanently deleted (removing that statement, its transactions, and its duplicate-protection identity records so it can be re-imported cleanly). Whole-customer account deletion and data export are future.
-- Merchant tags are user-assigned with description-based suggestions; suggestions require confirmation and are never auto-applied.
+- Merchant tags are user-assigned with advisory suggestions from descriptions, explicit aliases and the customer's own history; suggestions require confirmation and are never auto-applied.
 - The MVP includes a bar-first Chart view over the same data and filters.
 - Transaction creation is idempotent across overlapping statement imports and retries. Exact overlaps are suppressed by default; occurrence counts preserve legitimate repeats; an explicit override is available.
 - The metric model is gross directional money in, money out, and net, with additive category breakdowns, overlapping merchant-tag views, transfers and excluded separate, and uncategorised and untagged flagged.
-- Duplicate policy: exact overlaps are suppressed, near duplicates are warned, statement repeats are blocked with an explicit override.
+- Duplicate policy: exact overlaps are suppressed, same-date/same-amount near duplicates with similar descriptions are warned, statement repeats are blocked with an explicit override.
 - Raw-file retention: the uploaded ZIP/CSV/PDF is discarded after import or an abandoned review.
 - Access model: the existing verified-subscriber gate, with no pricing or checkout UI in the MVP.
 
@@ -1151,7 +1166,7 @@ Fixed decisions:
 - Individual transactions are never deleted (hide and restore only). Committed statement imports may be hidden, restored (preserving individual transaction hide flags), or permanently deleted (removing that statement, its transactions, and its duplicate-protection identity records). No whole-customer account deletion or data export in the MVP.
 - Uploaded ZIP/CSV/PDF files are discarded after commit or abandoned review.
 - Gross directional `Money in`, `Money out`, and `Net` metric model with additive category breakdowns and overlapping merchant-tag views.
-- Occurrence-aware transaction-level idempotency across overlapping imports and retries; exact overlaps suppressed by default, near duplicates warned, statement repeats blocked with explicit override.
+- Occurrence-aware transaction-level idempotency across overlapping imports and retries; exact overlaps suppressed by default, same-date/same-amount near duplicates warned, statement repeats blocked with explicit override.
 - Existing verified-subscriber access gate; admin surface shows account state only and never exposes financial data.
 - Bar-first Chart view tab within Overview with accessible table alternatives.
 - Tagline: "See where your money goes".
@@ -1168,13 +1183,13 @@ This brief is stored at `docs/product-brief.md` as the authoritative product req
 Architecture planning and implementation are divided into four sequential, repository-governed plans under `docs/plans/`:
 
 1. **Plan 1 — Foundation, App Shell, and Financial Entities (`docs/plans/01-foundation-and-entities.md`)**
-   - **Scope:** Rewrite landing page and metadata with tagline *"See where your money goes"* and retire `/sample-page` (`MVP-18`); build the authenticated app shell and persistent navigation (`Overview`, `Transactions`, `Imports`, `Settings`), moving `AccountDetails` into `Settings` (`SET-3`); implement PostgreSQL migrations, customer-isolated backend endpoints, and Settings UI for ZAR Financial Accounts (`MVP-1`, `SET-1`), Categories with seeded defaults, system `Uncategorised`, and kinds (`MVP-7`, `CAT-1..7`, `SET-2`), and Merchant Tags (`MVP-22` entity/management foundation, `TAG-1`, `TAG-7`, `SET-2`).
+   - **Scope:** Rewrite landing page and metadata with tagline *"See where your money goes"* and retire `/sample-page` (`MVP-18`); build the authenticated app shell and persistent navigation (`Overview`, `Transactions`, `Imports`, `Settings`), moving `AccountDetails` into `Settings` (`SET-3`); implement PostgreSQL migrations, customer-isolated backend endpoints, and Settings UI for ZAR Financial Accounts (`MVP-1`, `SET-1`), Categories with seeded defaults, system `Uncategorised`, and kinds (`MVP-7`, `CAT-1..7`, `SET-2`), and Merchant Tags (`MVP-22` entity/management foundation, `TAG-1`, `TAG-7`, `SET-2`), plus customer-scoped merchant aliases and the 1000-request/15-minute finance IP bound (Plan 1 revision 2).
    - **Dependencies:** None (root foundation).
 2. **Plan 2 — Statement Import, Parsers, Review, and Idempotency (`docs/plans/02-statement-import.md`)**
-   - **Scope:** FNB CSV/ZIP parser (`MVP-2`, `IMP-14..15`), text-based Standard Bank six-column PDF parser (`MVP-20`, `MVP-21`, `IMP-16..21`), and generic CSV mapping with format disambiguation (`MVP-19`, `IMP-3..4`, `AC-IMP-3`); ZAR and statement `start_date`/`end_date` confirmation (`IMP-12`, `IMP-20`); read-only row validation and skip workflow (`IMP-5..6`, `AC-IMP-2`); exact, statement-level, within-file, and near-duplicate detection with occurrence-aware idempotency (`MVP-4`, `DUP-1..19`); merchant-tag suggestions in review (`IMP-22`); atomic commit, Import History, statement hide/restore (preserving individual transaction hide flags), and committed-import deletion (`MVP-3`, `MVP-24` statement scope, `IMP-7..9`, `AC-IMP-7..8`, `AC-DEL-1`).
+   - **Scope:** FNB CSV/ZIP parser (`MVP-2`, `IMP-14..15`), text-based Standard Bank six-column PDF parser (`MVP-20`, `MVP-21`, `IMP-16..21`), and generic CSV mapping with format disambiguation (`MVP-19`, `IMP-3..4`, `AC-IMP-3`); ZAR and statement `start_date`/`end_date` confirmation (`IMP-12`, `IMP-20`); read-only row validation and skip workflow (`IMP-5..6`, `AC-IMP-2`); exact, statement-level, within-file, and exact-date near-duplicate detection with occurrence-aware idempotency (`MVP-4`, `DUP-1..19`); advisory merchant-tag suggestions in review from active tags, explicit aliases and the customer's own history (`IMP-22`); atomic commit, Import History, statement hide/restore (preserving individual transaction hide flags), and committed-import deletion (`MVP-3`, `MVP-24` statement scope, `IMP-7..9`, `AC-IMP-7..8`, `AC-DEL-1`).
    - **Dependencies:** Requires Plan 1.
 3. **Plan 3 — Transaction Workspace, Bulk Classification, and Hide/Restore (`docs/plans/03-transactions-and-classification.md`)**
-   - **Scope:** Searchable, filterable, sortable, paginated Transaction List with visible count, hidden count, and filtered total (`MVP-5`, `TXN-1..3`, `TXN-7..9`, `TAG-5`); read-only Transaction Detail with category, multi-tag, tag suggestion confirmation, and hide/restore controls (`MVP-6`, `TXN-4`, `TAG-2..3`, `TAG-8`); page-level and filter-wide (`select all matching`) bulk category assignment, non-destructive bulk tag add/remove, and bulk hide/restore with stale-edit concurrency protection (`MVP-8`, `MVP-24` transaction scope, `TXN-5..6`, `TXN-10..12`, `TAG-4`, `AC-CAT-1..7`, `AC-TAG-1..8`, `AC-HIDE-1..5`).
+   - **Scope:** Searchable, filterable, sortable, paginated Transaction List with visible count, hidden count, and filtered total (`MVP-5`, `TXN-1..3`, `TXN-7..9`, `TAG-5`); read-only Transaction Detail with category, multi-tag, advisory tag and category suggestions, and hide/restore controls (`MVP-6`, `TXN-4`, `TAG-2..3`, `TAG-8`); page-level and filter-wide (`select all matching`) bulk category assignment, non-destructive bulk tag add/remove, and bulk hide/restore with stale-edit concurrency protection and an auto-dismissed Applied status (`MVP-8`, `MVP-24` transaction scope, `TXN-5..6`, `TXN-10..12`, `TAG-4`, `AC-CAT-1..7`, `AC-TAG-1..8`, `AC-HIDE-1..5`).
    - **Dependencies:** Requires Plans 1 and 2.
 4. **Plan 4 — Financial Overview, Bar-First Chart View, and Exploration (`docs/plans/04-overview-and-charts.md`)**
    - **Scope:** Overview Summary tab (`MVP-9`, `MVP-11`, `OVR-1..13`, `AC-OVR-1..6`) with period presets/custom ranges, gross directional `Money in`, `Money out`, `Net`, `Needs categorisation`, additive category breakdowns, overlapping merchant-tag rankings, prior-period comparisons (`7.3`), statement-period coverage/gap warnings (`OVR-7`), and metric dictionary disclosure; Overview Chart tab (`MVP-23`, `CHT-1..8`, `AC-CHT-1..5`) with bar-first horizontal and grouped vertical charts and accessible table alternatives; drill-down from every visual plus Category Detail (`MVP-15`), Merchant-Tag Detail (`MVP-22`, `TAG-6`), and Period Comparison (`MVP-16`) views (`MVP-10`, `EXP-1..8`).

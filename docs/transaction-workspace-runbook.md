@@ -17,9 +17,13 @@ and the approved product brief.
   ignores filters; visible and hidden matching counts apply every filter except
   visibility; `filtered_total` applies visibility and drives pagination.
 - `/transactions/{id}` and the list drawer show source identity as read-only
-  text. Category, merchant tags and the individual hide flag are editable.
-- Tag suggestions reuse the import whole-token matcher. They are never applied
-  automatically; accepting a chip sends an explicit versioned add-tag edit.
+  text. Category, tags and the individual hide flag are editable.
+- Tag suggestions combine the customer's explicit aliases, the customer's own
+  history for the generated merchant key, and active tag-name token matching;
+  exact tokens rank before truncated prefixes. Detail may also show an advisory
+  suggested category. Nothing is applied automatically: accepting a tag chip
+  sends an explicit versioned add-tag edit, and a suggested category is staged
+  and saved only by the explicit classification save.
 - Hiding keeps the record and duplicate identity. Parent statement hiding wins;
   individual restore is refused with `parent_hidden` until the statement is
   restored in Imports.
@@ -45,6 +49,7 @@ and the approved product brief.
 | Open prepared operations | 5 per customer |
 | Live manifest entries | 100,000 per customer |
 | Preparation rate | 20 per customer per 15-minute window |
+| Finance IP requests | 1000 per 15-minute window, in-memory per process |
 | Operation expiry | 15 minutes absolute from capture |
 | Workspace statement bound | 30 seconds per statement |
 | Lock wait bound | 5 seconds |
@@ -59,10 +64,15 @@ selected count is refused. Expired and abandoned operations cannot apply.
 
 The current `/transactions` URL may carry a nonsensitive `operation_id` for
 recovery. On reload the page fetches status and never applies automatically.
-Applied receipts and terminal refusals are shown; a still-Prepared operation can
-be abandoned and prepared afresh, but not applied after the original private
-search/filter context is lost. Cleanup expires Prepared operations at startup
-and every fifteen minutes even if no request arrives.
+A still-Prepared operation can be abandoned and prepared afresh, but not applied
+after the original private search/filter context is lost. A known Applied
+outcome clears the client operation identity and recovery parameter
+automatically, shows a persistent status line with the changed/already-matched
+counts, and refetches the list; no separate receipt acknowledgement is required.
+The durable server receipt remains available for status/replay, so a reload that
+still holds the old operation ID recovers the Applied result. Abandoned and
+Expired terminal refusals remain visible. Cleanup expires Prepared operations
+at startup and every fifteen minutes even if no request arrives.
 
 A failed apply leaves the operation Prepared for retry, abandon or expiry; it
 does not imply any row changed. Serialization, deadlock, lock-timeout and
@@ -334,5 +344,9 @@ cookie-persistence observation.
   extensions, full-text services and background bulk jobs are out of scope.
 - Live manifests are capped and expire; terminal receipts remain compact for
   idempotency. A receipt-retention policy change would alter replay guarantees.
+- The finance IP limit is 1000 requests per 15-minute window in each backend
+  process; it resets on restart, is not shared across instances, and is not a
+  per-customer fairness guarantee. Existing per-customer import and
+  bulk-preparation buckets remain separate.
 - Overview, charts, category/tag money totals and coverage analytics belong to
   Thread #5. Standard Bank PDF remains deferred to Thread #6.
