@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using argus.Server.Data;
 using argus.Server.Imports;
 using argus.Server.Security;
@@ -225,7 +226,44 @@ public sealed class StatementImportApi(FinanceGuard guard,
                     return Errors.InvalidRequest();
                 }
 
-                decisions.Add(new ImportDecision(decision.RowId.Value, decision.Skip, decision.Override, decision.WithinFileState, decision.WithinFileGroup, decision.WithinFileAction, decision.SelectedTagIds));
+                JsonElement categoryElement = decision.SelectedCategoryId;
+                bool hasSelectedCategory = categoryElement.ValueKind != JsonValueKind.Undefined;
+                Guid? selectedCategoryId = null;
+                if (hasSelectedCategory)
+                {
+                    if (categoryElement.ValueKind == JsonValueKind.Null)
+                    {
+                        selectedCategoryId = null;
+                    }
+                    else if (categoryElement.ValueKind == JsonValueKind.String &&
+                             Guid.TryParse(categoryElement.GetString(), out var categoryId) &&
+                             categoryId != Guid.Empty)
+                    {
+                        selectedCategoryId = categoryId;
+                    }
+                    else
+                    {
+                        return Errors.InvalidRequest();
+                    }
+                }
+
+                bool resetCategory = decision.ResetCategoryToSuggestion == true;
+                if (resetCategory && hasSelectedCategory)
+                {
+                    return Errors.InvalidRequest();
+                }
+
+                decisions.Add(new ImportDecision(
+                    decision.RowId.Value,
+                    decision.Skip,
+                    decision.Override,
+                    decision.WithinFileState,
+                    decision.WithinFileGroup,
+                    decision.WithinFileAction,
+                    decision.SelectedTagIds,
+                    selectedCategoryId,
+                    hasSelectedCategory,
+                    resetCategory));
             }
 
             var summary = await store.PatchReviewAsync(customerId!.Value, id.Value, parsed.Value.ExpectedReviewVersion.Value, decisions, parsed.Value.StatementOverride, cancellationToken);
@@ -448,6 +486,7 @@ public sealed class StatementImportApi(FinanceGuard guard,
             ImportErrorCodes.AccountArchived => 409,
             ImportErrorCodes.IdentityConflict => 409,
             ImportErrorCodes.TagUnavailable => 409,
+            ImportErrorCodes.CategoryUnavailable => 409,
             _ => 400,
         });
 }
@@ -469,7 +508,9 @@ public sealed record ReviewDecisionRequest(Guid? RowId,
                                            string? WithinFileState,
                                            string? WithinFileGroup,
                                            string? WithinFileAction,
-                                           Guid[]? SelectedTagIds);
+                                           Guid[]? SelectedTagIds,
+                                           JsonElement SelectedCategoryId,
+                                           bool? ResetCategoryToSuggestion);
 
 public sealed record ReviewVersionRequest(int? ExpectedReviewVersion);
 
@@ -524,6 +565,7 @@ public sealed record ReviewSummaryResponse(Guid Id,
                                            int WithinFilePendingCount,
                                            int PossibleDuplicateCount,
                                            int ExactOverrideCount,
+                                           int CategorisedCount,
                                            bool StatementOverride,
                                            int StatementOverrideCount,
                                            string SummaryHash)
@@ -545,6 +587,7 @@ public sealed record ReviewSummaryResponse(Guid Id,
         record.WithinFilePendingCount,
         record.PossibleDuplicateCount,
         record.ExactOverrideCount,
+        record.CategorisedCount,
         record.StatementOverride,
         record.StatementOverrideCount,
         record.SummaryHash);
@@ -582,7 +625,10 @@ public sealed record ReviewRowResponse(Guid RowId,
                                        bool Skip,
                                        bool Override,
                                        Guid[] SuggestedTagIds,
-                                       Guid[] SelectedTagIds)
+                                       Guid[] SelectedTagIds,
+                                       Guid? SuggestedCategoryId,
+                                       Guid? SelectedCategoryId,
+                                       bool CategoryDecided)
 {
     public static ReviewRowResponse From(ImportReviewRowRecord row) => new(
         row.RowId,
@@ -605,7 +651,10 @@ public sealed record ReviewRowResponse(Guid RowId,
         row.Skip,
         row.Override,
         row.SuggestedTagIds.ToArray(),
-        row.SelectedTagIds.ToArray());
+        row.SelectedTagIds.ToArray(),
+        row.SuggestedCategoryId,
+        row.SelectedCategoryId,
+        row.CategoryDecided);
 }
 
 public sealed record NearCandidateResponse(string CandidateId,

@@ -4,7 +4,12 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import AppShell from "@/components/app-shell";
 import WorkspaceExpired from "@/components/workspace-expired";
-import { getCurrentAccount, getImportReview, listMerchantTags } from "@/lib/server/backend-client";
+import {
+  getCurrentAccount,
+  getImportReview,
+  listCategories,
+  listMerchantTags,
+} from "@/lib/server/backend-client";
 import type { ImportErrorKind } from "@/lib/server/backend-client";
 import ReviewWorkspace from "./review-workspace";
 
@@ -82,9 +87,10 @@ export default async function ReviewPage({
   const sortDirection = sortParam === "desc" ? "desc" : "asc";
   const possibleOnly = duplicatesParam === "possible";
   const untaggedOnly = untaggedParam === "true";
-  const [review, tags] = await Promise.all([
+  const [review, tags, categories] = await Promise.all([
     getImportReview(token, id, page, pageSize, sortDirection, possibleOnly, untaggedOnly),
     listMerchantTags(token),
+    listCategories(token),
   ]);
 
   if (!review.ok) {
@@ -105,7 +111,7 @@ export default async function ReviewPage({
     <AppShell
       account={account}
       activeNav="imports"
-      description="Every row is read-only. Decisions are limited to skip, duplicate override, and tag selection."
+      description="Every row is read-only. Decisions are limited to skip, duplicate override, category, and tag selection."
       eyebrow="Workspace"
       title="Import review"
     >
@@ -115,6 +121,8 @@ export default async function ReviewPage({
         possibleOnly={possibleOnly}
         review={review.value}
         untaggedOnly={untaggedOnly}
+        categories={categories.ok ? categories.value.categories : []}
+        categoriesUnavailable={!categories.ok}
         sortDirection={sortDirection}
         tags={tags.ok ? tags.value.merchant_tags : []}
       />

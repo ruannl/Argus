@@ -1376,6 +1376,416 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         Assert.False(Factory.LogCapture.Contains(canary));
     }
 
+    [Fact]
+    public async Task GroupDecisionRejectsRatherThanDiscardingCategoryIntent()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var categoriesBody = await BodyAsync(await SendAsync(Get("/v1/finance/categories", session: session)));
+        var groceriesId = categoriesBody.GetProperty("categories").EnumerateArray().First(item => item.GetProperty("display_name").GetString() == "Groceries").GetProperty("id").GetGuid();
+        var csv = "one\ntwo\nthree\nfour\nfive\nsix\n" + "Date,Amount,Balance,Description\n" + "2025/01/02,-10.00,0.00,Identical coffee\n" + "2025/01/02,-10.00,0.00,Identical coffee\n";
+        var review = await PrepareAsync(session, accountId, Encoding.UTF8.GetBytes(csv), new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31));
+        var reviewId = review.GetProperty("summary").GetProperty("id").GetGuid();
+        var row = Rows(review).First();
+
+        var mixed = await SendAsync(Patch(
+            $"{ReviewsPath}/{reviewId}",
+            Json(new
+            {
+                expected_review_version = Version(review),
+                decisions = new[]
+                {
+                    new
+                    {
+                        row_id = row.GetProperty("row_id").GetGuid(),
+                        within_file_group = row.GetProperty("within_file_group").GetString(),
+                        within_file_action = "keep_all",
+                        selected_category_id = groceriesId,
+                    },
+                },
+            }),
+            session: session));
+        Assert.Equal(HttpStatusCode.BadRequest, mixed.StatusCode);
+        Assert.Equal("invalid_request", await ErrorKindAsync(mixed));
+        var unchanged = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session)));
+        Assert.Equal(Version(review), Version(unchanged));
+        Assert.All(Rows(unchanged), current =>
+        {
+            Assert.Equal("pending", current.GetProperty("within_file_state").GetString());
+            Assert.False(current.GetProperty("category_decided").GetBoolean());
+        });
+    }
+
+    [Fact]
+    public async Task ReviewPreselectsHistoryCategoryAndCommitRecordsProvenance()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var categoriesBody = await BodyAsync(await SendAsync(Get("/v1/finance/categories", session: session)));
+        var categoryList = categoriesBody.GetProperty("categories").EnumerateArray().ToArray();
+        var groceriesId = categoryList.First(item => item.GetProperty("display_name").GetString() == "Groceries").GetProperty("id").GetGuid();
+        var travelId = categoryList.First(item => item.GetProperty("display_name").GetString() == "Travel").GetProperty("id").GetGuid();
+        var systemId = categoryList.First(item => item.GetProperty("is_system").GetBoolean()).GetProperty("id").GetGuid();
+        var header = "one\ntwo\nthree\nfour\nfive\nsix\nDate,Amount,Balance,Description\n";
+
+        var first = await PrepareAsync(
+            session,
+            accountId,
+            Encoding.UTF8.GetBytes(header + "2025/01/02,-10.00,0.00,Synthetic merchant historical\n"),
+            new DateOnly(2025, 1, 1),
+            new DateOnly(2025, 1, 31));
+        var firstCommit = await SendAsync(Post($"{ReviewsPath}/{first.GetProperty("summary").GetProperty("id").GetGuid()}/commit", Json(CommitBody(first)), session: session));
+        Assert.Equal(HttpStatusCode.Created, firstCommit.StatusCode);
+
+        var historicalId = Guid.Parse((await StringScalarAsync($"SELECT id::text FROM transactions WHERE customer_id = '{customerId}' AND description = 'Synthetic merchant historical'"))!);
+        var categorize = await SendAsync(Patch(
+            $"/v1/finance/transactions/{historicalId}",
+            Json(new { expected_version = 1, changes = new { category_id = groceriesId } }),
+            session: session));
+        Assert.Equal(HttpStatusCode.OK, categorize.StatusCode);
+        Assert.True(bool.Parse((await StringScalarAsync($"SELECT category_confirmed::text FROM transactions WHERE id = '{historicalId}'"))!));
+
+        var second = await PrepareAsync(
+            session,
+            accountId,
+            Encoding.UTF8.GetBytes(header +
+                "2025/02/01,-11.00,0.00,Synthetic merchant alpha\n" +
+                "2025/02/02,-12.00,0.00,Synthetic merchant beta\n" +
+                "2025/02/03,-13.00,0.00,Synthetic merchant gamma\n"),
+            new DateOnly(2025, 2, 1),
+            new DateOnly(2025, 2, 28));
+        var secondSummary = second.GetProperty("summary");
+        Assert.Equal(3, secondSummary.GetProperty("categorised_count").GetInt32());
+        var secondRows = Rows(second);
+        Assert.All(secondRows, row =>
+        {
+            Assert.Equal(groceriesId, row.GetProperty("suggested_category_id").GetGuid());
+            Assert.Equal(groceriesId, row.GetProperty("selected_category_id").GetGuid());
+            Assert.False(row.GetProperty("category_decided").GetBoolean());
+        });
+
+        var alpha = secondRows.Single(row => row.GetProperty("description").GetString() == "Synthetic merchant alpha");
+        var beta = secondRows.Single(row => row.GetProperty("description").GetString() == "Synthetic merchant beta");
+        var gamma = secondRows.Single(row => row.GetProperty("description").GetString() == "Synthetic merchant gamma");
+        var patched = await SendAsync(Patch(
+            $"{ReviewsPath}/{secondSummary.GetProperty("id").GetGuid()}",
+            Json(new
+            {
+                expected_review_version = Version(second),
+                decisions = new[]
+                {
+                    new { row_id = beta.GetProperty("row_id").GetGuid(), selected_category_id = (Guid?)travelId },
+                    new { row_id = gamma.GetProperty("row_id").GetGuid(), selected_category_id = (Guid?)null },
+                },
+            }),
+            session: session));
+        Assert.Equal(HttpStatusCode.OK, patched.StatusCode);
+        var patchedBody = await BodyAsync(patched);
+        Assert.Equal(2, patchedBody.GetProperty("categorised_count").GetInt32());
+
+        var decidedAlpha = await BodyAsync(await SendAsync(Patch(
+            $"{ReviewsPath}/{secondSummary.GetProperty("id").GetGuid()}",
+            Json(new
+            {
+                expected_review_version = Version(patchedBody),
+                decisions = new[] { new { row_id = alpha.GetProperty("row_id").GetGuid(), selected_category_id = (Guid?)travelId } },
+            }),
+            session: session)));
+        Assert.Equal(2, decidedAlpha.GetProperty("categorised_count").GetInt32());
+
+        var resetAlpha = await BodyAsync(await SendAsync(Patch(
+            $"{ReviewsPath}/{secondSummary.GetProperty("id").GetGuid()}",
+            Json(new
+            {
+                expected_review_version = Version(decidedAlpha),
+                decisions = new[] { new { row_id = alpha.GetProperty("row_id").GetGuid(), reset_category_to_suggestion = true } },
+            }),
+            session: session)));
+        Assert.Equal(2, resetAlpha.GetProperty("categorised_count").GetInt32());
+
+        var unavailable = await SendAsync(Patch(
+            $"{ReviewsPath}/{secondSummary.GetProperty("id").GetGuid()}",
+            Json(new
+            {
+                expected_review_version = Version(resetAlpha),
+                decisions = new[] { new { row_id = alpha.GetProperty("row_id").GetGuid(), selected_category_id = systemId } },
+            }),
+            session: session));
+        Assert.Equal(HttpStatusCode.Conflict, unavailable.StatusCode);
+        Assert.Equal("category_unavailable", await ErrorKindAsync(unavailable));
+
+        var foreign = await SendAsync(Patch(
+            $"{ReviewsPath}/{secondSummary.GetProperty("id").GetGuid()}",
+            Json(new
+            {
+                expected_review_version = Version(resetAlpha),
+                decisions = new[] { new { row_id = alpha.GetProperty("row_id").GetGuid(), selected_category_id = Guid.NewGuid() } },
+            }),
+            session: session));
+        Assert.Equal(HttpStatusCode.Conflict, foreign.StatusCode);
+        Assert.Equal("category_unavailable", await ErrorKindAsync(foreign));
+
+        var refreshedSummary = await BodyAsync(await SendAsync(Post(
+            $"{ReviewsPath}/{secondSummary.GetProperty("id").GetGuid()}/refresh",
+            Json(new { expected_review_version = Version(resetAlpha) }),
+            session: session)));
+        Assert.Equal(2, refreshedSummary.GetProperty("categorised_count").GetInt32());
+        var refreshed = await BodyAsync(await SendAsync(Get(
+            $"{ReviewsPath}/{secondSummary.GetProperty("id").GetGuid()}",
+            session: session)));
+        var refreshedRows = Rows(refreshed);
+        var refreshedAlpha = refreshedRows.Single(row => row.GetProperty("description").GetString() == "Synthetic merchant alpha");
+        var refreshedBeta = refreshedRows.Single(row => row.GetProperty("description").GetString() == "Synthetic merchant beta");
+        var refreshedGamma = refreshedRows.Single(row => row.GetProperty("description").GetString() == "Synthetic merchant gamma");
+        Assert.Equal(groceriesId, refreshedAlpha.GetProperty("selected_category_id").GetGuid());
+        Assert.False(refreshedAlpha.GetProperty("category_decided").GetBoolean());
+        Assert.Equal(travelId, refreshedBeta.GetProperty("selected_category_id").GetGuid());
+        Assert.True(refreshedBeta.GetProperty("category_decided").GetBoolean());
+        Assert.True(refreshedGamma.GetProperty("selected_category_id").ValueKind == JsonValueKind.Null);
+        Assert.True(refreshedGamma.GetProperty("category_decided").GetBoolean());
+
+        var commit = await SendAsync(Post($"{ReviewsPath}/{secondSummary.GetProperty("id").GetGuid()}/commit", Json(CommitBody(refreshed)), session: session));
+        Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
+
+        Assert.Equal(groceriesId, Guid.Parse((await StringScalarAsync($"SELECT category_id::text FROM transactions WHERE description = 'Synthetic merchant alpha'"))!));
+        Assert.False(bool.Parse((await StringScalarAsync($"SELECT category_confirmed::text FROM transactions WHERE description = 'Synthetic merchant alpha'"))!));
+        Assert.Equal(travelId, Guid.Parse((await StringScalarAsync($"SELECT category_id::text FROM transactions WHERE description = 'Synthetic merchant beta'"))!));
+        Assert.True(bool.Parse((await StringScalarAsync($"SELECT category_confirmed::text FROM transactions WHERE description = 'Synthetic merchant beta'"))!));
+        Assert.Equal(systemId, Guid.Parse((await StringScalarAsync($"SELECT category_id::text FROM transactions WHERE description = 'Synthetic merchant gamma'"))!));
+        Assert.True(bool.Parse((await StringScalarAsync($"SELECT category_confirmed::text FROM transactions WHERE description = 'Synthetic merchant gamma'"))!));
+    }
+
+    [Fact]
+    public async Task UnconfirmedCategoryHistoryDoesNotFeedSuggestionsUntilConfirmed()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var categoriesBody = await BodyAsync(await SendAsync(Get("/v1/finance/categories", session: session)));
+        var groceriesId = categoriesBody.GetProperty("categories").EnumerateArray().First(item => item.GetProperty("display_name").GetString() == "Groceries").GetProperty("id").GetGuid();
+        var header = "one\ntwo\nthree\nfour\nfive\nsix\nDate,Amount,Balance,Description\n";
+
+        Guid statementId = Guid.NewGuid();
+        Guid historicalId = Guid.NewGuid();
+        await ExecuteSqlAsync($"""
+            INSERT INTO statement_imports (
+                id, customer_id, financial_account_id, source_type, statement_label,
+                statement_fingerprint, start_date, end_date, created_at, updated_at)
+            VALUES (
+                '{statementId}', '{customerId}', '{accountId}', 'csv', 'History',
+                'history-fingerprint', DATE '2024-01-01', DATE '2024-01-31', NOW(), NOW());
+            INSERT INTO transactions (
+                id, customer_id, financial_account_id, statement_import_id, transaction_date,
+                description, normalized_description, amount, category_id, category_confirmed,
+                source_type, source_row_number, identity_key, occurrence_index, created_at, updated_at)
+            VALUES (
+                '{historicalId}', '{customerId}', '{accountId}', '{statementId}', DATE '2024-01-05',
+                'Unconfirmed merchant seed', 'unconfirmed merchant seed', -10.00, '{groceriesId}', FALSE,
+                'csv', 1, 'unconfirmed-history', 1, NOW(), NOW());
+            """);
+
+        var first = await PrepareAsync(
+            session,
+            accountId,
+            Encoding.UTF8.GetBytes(header + "2025/03/01,-11.00,0.00,Unconfirmed merchant later\n"),
+            new DateOnly(2025, 3, 1),
+            new DateOnly(2025, 3, 31));
+        var firstRow = Rows(first).Single();
+        Assert.True(firstRow.GetProperty("suggested_category_id").ValueKind == JsonValueKind.Null);
+        Assert.True(firstRow.GetProperty("selected_category_id").ValueKind == JsonValueKind.Null);
+        Assert.False(firstRow.GetProperty("category_decided").GetBoolean());
+        Assert.Equal(0, first.GetProperty("summary").GetProperty("categorised_count").GetInt32());
+
+        var unconfirmedDetail = await BodyAsync(await SendAsync(Get($"/v1/finance/transactions/{historicalId}", session: session)));
+        Assert.True(unconfirmedDetail.GetProperty("suggested_category").ValueKind == JsonValueKind.Null);
+
+        var abandon = await SendAsync(Post(
+            $"{ReviewsPath}/{first.GetProperty("summary").GetProperty("id").GetGuid()}/abandon",
+            Json(new { expected_review_version = Version(first) }),
+            session: session));
+        Assert.Equal(HttpStatusCode.OK, abandon.StatusCode);
+
+        var confirmHistorical = await SendAsync(Patch(
+            $"/v1/finance/transactions/{historicalId}",
+            Json(new { expected_version = 1, changes = new { confirm_category = true } }),
+            session: session));
+        Assert.Equal(HttpStatusCode.OK, confirmHistorical.StatusCode);
+        var confirmedDetail = await BodyAsync(await SendAsync(Get($"/v1/finance/transactions/{historicalId}", session: session)));
+        Assert.Equal(groceriesId, confirmedDetail.GetProperty("suggested_category").GetProperty("id").GetGuid());
+
+        var second = await PrepareAsync(
+            session,
+            accountId,
+            Encoding.UTF8.GetBytes(header + "2025/04/01,-12.00,0.00,Unconfirmed merchant newest\n"),
+            new DateOnly(2025, 4, 1),
+            new DateOnly(2025, 4, 30));
+        var secondRow = Rows(second).Single();
+        Assert.Equal(groceriesId, secondRow.GetProperty("suggested_category_id").GetGuid());
+        Assert.Equal(groceriesId, secondRow.GetProperty("selected_category_id").GetGuid());
+        Assert.False(secondRow.GetProperty("category_decided").GetBoolean());
+        Assert.Equal(1, second.GetProperty("summary").GetProperty("categorised_count").GetInt32());
+    }
+
+    [Fact]
+    public async Task RefreshPersistsChangedCategoryEvidenceAcrossReadsAndCommit()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var categoriesBody = await BodyAsync(await SendAsync(Get("/v1/finance/categories", session: session)));
+        var groceriesId = categoriesBody.GetProperty("categories").EnumerateArray().First(item => item.GetProperty("display_name").GetString() == "Groceries").GetProperty("id").GetGuid();
+        var header = "one\ntwo\nthree\nfour\nfive\nsix\nDate,Amount,Balance,Description\n";
+
+        var review = await PrepareAsync(
+            session,
+            accountId,
+            Encoding.UTF8.GetBytes(header +
+                "2025/02/01,-11.00,0.00,Synthetic merchant alpha\n" +
+                "2025/02/02,-12.00,0.00,Synthetic merchant beta\n"),
+            new DateOnly(2025, 2, 1),
+            new DateOnly(2025, 2, 28));
+        var reviewId = review.GetProperty("summary").GetProperty("id").GetGuid();
+        Assert.All(Rows(review), row => Assert.True(row.GetProperty("suggested_category_id").ValueKind == JsonValueKind.Null));
+
+        Guid statementId = Guid.NewGuid();
+        Guid historicalId = Guid.NewGuid();
+        await ExecuteSqlAsync($"""
+            INSERT INTO statement_imports (
+                id, customer_id, financial_account_id, source_type, statement_label,
+                statement_fingerprint, start_date, end_date, created_at, updated_at)
+            VALUES (
+                '{statementId}', '{customerId}', '{accountId}', 'csv', 'History',
+                'refresh-history-fingerprint', DATE '2024-01-01', DATE '2024-01-31', NOW(), NOW());
+            INSERT INTO transactions (
+                id, customer_id, financial_account_id, statement_import_id, transaction_date,
+                description, normalized_description, amount, category_id, category_confirmed,
+                source_type, source_row_number, identity_key, occurrence_index, created_at, updated_at)
+            VALUES (
+                '{historicalId}', '{customerId}', '{accountId}', '{statementId}', DATE '2024-01-05',
+                'Synthetic merchant historical', 'synthetic merchant historical', -10.00, '{groceriesId}', TRUE,
+                'csv', 1, 'refresh-history', 1, NOW(), NOW());
+            """);
+
+        var beta = Rows(review).Single(row => row.GetProperty("description").GetString() == "Synthetic merchant beta");
+        var patched = await BodyAsync(await SendAsync(Patch(
+            $"{ReviewsPath}/{reviewId}",
+            Json(new
+            {
+                expected_review_version = Version(review),
+                decisions = new[] { new { row_id = beta.GetProperty("row_id").GetGuid(), skip = true } },
+            }),
+            session: session)));
+        Assert.Equal(0, patched.GetProperty("categorised_count").GetInt32());
+
+        var afterPatch = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session)));
+        Assert.All(Rows(afterPatch), row =>
+        {
+            Assert.Equal(groceriesId, row.GetProperty("suggested_category_id").GetGuid());
+            Assert.True(row.GetProperty("selected_category_id").ValueKind == JsonValueKind.Null);
+            Assert.False(row.GetProperty("category_decided").GetBoolean());
+        });
+
+        var populated = await BodyAsync(await SendAsync(Post(
+            $"{ReviewsPath}/{reviewId}/refresh",
+            Json(new { expected_review_version = Version(afterPatch) }),
+            session: session)));
+        Assert.Equal(1, populated.GetProperty("categorised_count").GetInt32());
+        var afterPopulate = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session)));
+        Assert.All(Rows(afterPopulate), row =>
+        {
+            Assert.Equal(groceriesId, row.GetProperty("selected_category_id").GetGuid());
+            Assert.False(row.GetProperty("category_decided").GetBoolean());
+        });
+
+        await ExecuteSqlAsync($"UPDATE transactions SET category_confirmed = FALSE WHERE id = '{historicalId}'");
+        var removed = await BodyAsync(await SendAsync(Post(
+            $"{ReviewsPath}/{reviewId}/refresh",
+            Json(new { expected_review_version = Version(afterPopulate) }),
+            session: session)));
+        Assert.Equal(0, removed.GetProperty("categorised_count").GetInt32());
+        var afterRemove = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session)));
+        Assert.All(Rows(afterRemove), row =>
+        {
+            Assert.True(row.GetProperty("selected_category_id").ValueKind == JsonValueKind.Null);
+            Assert.False(row.GetProperty("category_decided").GetBoolean());
+        });
+
+        await ExecuteSqlAsync($"UPDATE transactions SET category_confirmed = TRUE WHERE id = '{historicalId}'");
+        var restored = await BodyAsync(await SendAsync(Post(
+            $"{ReviewsPath}/{reviewId}/refresh",
+            Json(new { expected_review_version = Version(afterRemove) }),
+            session: session)));
+        Assert.Equal(1, restored.GetProperty("categorised_count").GetInt32());
+        var finalReview = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session)));
+        Assert.All(Rows(finalReview), row =>
+        {
+            Assert.Equal(groceriesId, row.GetProperty("selected_category_id").GetGuid());
+            Assert.False(row.GetProperty("category_decided").GetBoolean());
+        });
+
+        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(finalReview)), session: session));
+        Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
+        Assert.Equal(groceriesId, Guid.Parse((await StringScalarAsync("SELECT category_id::text FROM transactions WHERE description = 'Synthetic merchant alpha'"))!));
+        Assert.False(bool.Parse((await StringScalarAsync("SELECT category_confirmed::text FROM transactions WHERE description = 'Synthetic merchant alpha'"))!));
+        Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM transactions WHERE description = 'Synthetic merchant beta'"));
+    }
+
+    [Fact]
+    public async Task CommitRejectsArchivedSelectedCategoryAtomically()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var categoriesBody = await BodyAsync(await SendAsync(Get("/v1/finance/categories", session: session)));
+        var categoryList = categoriesBody.GetProperty("categories").EnumerateArray().ToArray();
+        var groceriesId = categoryList.First(item => item.GetProperty("display_name").GetString() == "Groceries").GetProperty("id").GetGuid();
+        var travelId = categoryList.First(item => item.GetProperty("display_name").GetString() == "Travel").GetProperty("id").GetGuid();
+        var header = "one\ntwo\nthree\nfour\nfive\nsix\nDate,Amount,Balance,Description\n";
+
+        Guid statementId = Guid.NewGuid();
+        await ExecuteSqlAsync($"""
+            INSERT INTO statement_imports (
+                id, customer_id, financial_account_id, source_type, statement_label,
+                statement_fingerprint, start_date, end_date, created_at, updated_at)
+            VALUES (
+                '{statementId}', '{customerId}', '{accountId}', 'csv', 'History',
+                'archive-history-fingerprint', DATE '2024-01-01', DATE '2024-01-31', NOW(), NOW());
+            INSERT INTO transactions (
+                id, customer_id, financial_account_id, statement_import_id, transaction_date,
+                description, normalized_description, amount, category_id, category_confirmed,
+                source_type, source_row_number, identity_key, occurrence_index, created_at, updated_at)
+            VALUES (
+                '{Guid.NewGuid()}', '{customerId}', '{accountId}', '{statementId}', DATE '2024-01-05',
+                'Category history merchant', 'category history merchant', -10.00, '{groceriesId}', TRUE,
+                'csv', 1, 'archive-history', 1, NOW(), NOW());
+            """);
+
+        var review = await PrepareAsync(
+            session,
+            accountId,
+            Encoding.UTF8.GetBytes(header + "2025/02/01,-11.00,0.00,Category history alpha\n"),
+            new DateOnly(2025, 2, 1),
+            new DateOnly(2025, 2, 28));
+        var reviewId = review.GetProperty("summary").GetProperty("id").GetGuid();
+        var row = Rows(review).Single();
+        Assert.Equal(groceriesId, row.GetProperty("selected_category_id").GetGuid());
+
+        var patched = await BodyAsync(await SendAsync(Patch(
+            $"{ReviewsPath}/{reviewId}",
+            Json(new
+            {
+                expected_review_version = Version(review),
+                decisions = new[] { new { row_id = row.GetProperty("row_id").GetGuid(), selected_category_id = travelId } },
+            }),
+            session: session)));
+        var archive = await SendAsync(Post($"/v1/finance/categories/{travelId}/archive", Json(new { }), session: session));
+        Assert.Equal(HttpStatusCode.OK, archive.StatusCode);
+
+        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(patched)), session: session));
+        Assert.Equal(HttpStatusCode.Conflict, commit.StatusCode);
+        Assert.Equal("category_unavailable", await ErrorKindAsync(commit));
+        Assert.Equal(1L, await ScalarAsync($"SELECT COUNT(*) FROM transactions WHERE customer_id = '{customerId}'"));
+        Assert.Equal(1L, await ScalarAsync($"SELECT COUNT(*) FROM statement_imports WHERE customer_id = '{customerId}'"));
+        Assert.Equal(1L, await ScalarAsync($"SELECT COUNT(*) FROM import_reviews WHERE customer_id = '{customerId}' AND id = '{reviewId}'"));
+    }
+
     private async Task AssertNoImportEffectsAsync()
     {
         Assert.Equal(0L, await CountRowsAsync("import_reviews"));

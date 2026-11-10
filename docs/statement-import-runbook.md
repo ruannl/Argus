@@ -143,7 +143,10 @@ only. The original filename is not displayed in the UI.
    overridden. Tag suggestions are unselected and combine the customer's
    active tag names, explicit aliases, and the customer's own historical tag
    choices for the generated merchant key; exact tokens rank before truncated
-   prefixes. Import review does not assign a category.
+   prefixes. When a category is determined from the customer's aliases or
+   confirmed history, the review preselects it as an unconfirmed default. The
+   customer can change or clear it before commit. Import commit does not confirm
+   the category; confirmation belongs to Transactions.
 4. **Refresh** recomputes duplicate state under the account lock. It preserves
    skips and selected tag IDs, but resets overrides and group decisions that
    depend on changed duplicate state; the customer must renew confirmation.
@@ -160,9 +163,29 @@ only. The original filename is not displayed in the UI.
 Import-review tag suggestions are advisory and start unselected. They combine
 the customer's active tag names, explicit aliases from Settings, and the
 customer's own historical tag choices for a generic merchant key. Exact tokens
-rank before truncated-prefix matches. They never auto-apply, never read another
-customer's history, and never assign a category; rows still commit as
-Uncategorised unless the customer explicitly selects tags.
+rank before truncated-prefix matches. They never auto-apply and never read
+another customer's history.
+
+Category suggestions use the same alias/history composition but contribute no
+tag. Pattern:
+
+- An explicit alias category wins over the most frequent historical category
+  for the generic merchant key.
+- Only active, owned, non-system categories are eligible, and historical counts
+  include only confirmed categories.
+- A determined category is the row's visible default with
+  `category_decided = FALSE`. It is not a confirmation.
+- Changing or clearing the category sets `category_decided = TRUE`; a refresh
+  then preserves that choice. Refresh keeps an untouched default in sync with
+  the latest suggestion.
+- A pre-migration review starts undecided, so its first refresh applies the
+  current suggestion; it remains committable as before until then.
+
+Commit writes each included row's effective category and records
+`category_confirmed = category_decided`. A row that commits Uncategorised because
+no category was determined, or because the customer cleared it, carries the
+matching provenance. After commit the customer confirms or changes the category
+in Transactions.
 
 ### Absolute commit expiry (revision 6)
 
@@ -196,7 +219,9 @@ test-host and PostgreSQL evidence, not a live development-service exercise.
 ### Counts
 
 `total_rows = imported_count + suppressed_count + skipped_count` on every
-review and committed statement. Invalid rows are included in total and count
+review and committed statement. `categorised_count` is a separate projection of
+included rows with a non-null category selection; it is not a reconciliation
+bucket. Invalid rows are included in total and count
 as skipped for reconciliation, but commit still requires each invalid row to
 be explicitly skipped. A nonempty valid review may commit with zero new
 transactions when every valid row is an existing occurrence; that is an honest
@@ -484,8 +509,8 @@ disabled/deferred to Thread #6. No deployment occurred.
 ## Workspace handoff
 
 Committed statements remain the source of the read-only row list shown on
-Imports. Classification, tag changes and the individual hide flag belong to the
-Transactions workspace; each statement links to its rows there and to each
+Imports. Classification, category confirmation, tag changes and the individual hide flag
+belong to the Transactions workspace; each statement links to its rows there and to each
 owned row's detail page. Statement visibility still owns the parent layer, so a
 parent-hidden row is restored from Imports first. See
 `docs/transaction-workspace-runbook.md` for filters, version conflicts, frozen
@@ -508,7 +533,7 @@ diagnostic extraction nor a completed correction changes the recorded NO-GO.
 `invalid_rows`, `duplicate_decision_required`, `no_included_rows`;
 `429 rate_limited`, `import_busy`; `404 not_found`; `409 review_stale`,
 `version_conflict`, `statement_repeat`, `idempotency_conflict`,
-`account_archived`, `identity_conflict`, `tag_unavailable`; `410 review_expired`,
-`import_deleted`; `500 internal_server_error`. Foreign review/import IDs return
+`account_archived`, `identity_conflict`, `tag_unavailable`,
+`category_unavailable`; `410 review_expired`, `import_deleted`; `500 internal_server_error`. Foreign review/import IDs return
 `404`, not `410`. Error bodies never include source text, filenames, or
 exception details.

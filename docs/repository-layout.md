@@ -108,7 +108,7 @@ npm run test:e2e
 | POST | `/v1/finance/imports/reviews` | Prepare a durable, expiring review |
 | GET | `/v1/finance/imports/reviews` | List the customer's open reviews |
 | GET | `/v1/finance/imports/reviews/{id}` | Read a paged review with decisions |
-| PATCH | `/v1/finance/imports/reviews/{id}` | Update skip, override, group, or tag decisions |
+| PATCH | `/v1/finance/imports/reviews/{id}` | Update skip, override, group, tag, or category decisions |
 | POST | `/v1/finance/imports/reviews/{id}/refresh` | Recompute duplicate state under the account lock |
 | POST | `/v1/finance/imports/reviews/{id}/commit` | Atomically commit or replay the same receipt |
 | POST | `/v1/finance/imports/reviews/{id}/abandon` | Purge a review without importing |
@@ -118,8 +118,8 @@ npm run test:e2e
 | POST | `/v1/finance/imports/{id}/restore` | Restore the parent statement layer |
 | DELETE | `/v1/finance/imports/{id}` | Delete the statement and exactly its owned transactions |
 | POST | `/v1/finance/transactions/query` | Owned list with filters, counts and pagination |
-| GET | `/v1/finance/transactions/{id}` | Owned detail with unapplied tag and category suggestions |
-| PATCH | `/v1/finance/transactions/{id}` | Versioned category/tag/hide metadata edit |
+| GET | `/v1/finance/transactions/{id}` | Owned detail with unapplied tag and category suggestions and category provenance |
+| PATCH | `/v1/finance/transactions/{id}` | Versioned category/tag/hide/confirm-category metadata edit |
 | POST | `/v1/finance/transactions/operations/prepare` | Freeze an explicit or all-matching bulk scope |
 | GET | `/v1/finance/transactions/operations/{id}` | Safe operation status and receipt recovery |
 | POST | `/v1/finance/transactions/operations/{id}/apply` | Apply a saved scope atomically once |

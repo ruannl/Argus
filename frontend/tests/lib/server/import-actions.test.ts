@@ -53,6 +53,7 @@ const summary = {
   within_file_pending_count: 0,
   possible_duplicate_count: 0,
   exact_override_count: 0,
+  categorised_count: 0,
   statement_override: false,
   statement_override_count: 0,
   summary_hash: "hash",

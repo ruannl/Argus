@@ -20,10 +20,17 @@ and the approved product brief.
   text. Category, tags and the individual hide flag are editable.
 - Tag suggestions combine the customer's explicit aliases, the customer's own
   history for the generated merchant key, and active tag-name token matching;
-  exact tokens rank before truncated prefixes. Detail may also show an advisory
-  suggested category. Nothing is applied automatically: accepting a tag chip
-  sends an explicit versioned add-tag edit, and a suggested category is staged
-  and saved only by the explicit classification save.
+  exact tokens rank before truncated prefixes. Category suggestions use the
+  same alias/history sources and exclude unconfirmed history. Nothing is applied
+  automatically: accepting a tag chip sends an explicit versioned add-tag edit,
+  and a suggested category is applied only by an explicit versioned save or
+  confirmation.
+- Every row exposes `category_confirmed`. Imported untouched defaults are
+  unconfirmed; existing rows default to confirmed. An unconfirmed non-
+  Uncategorised category shows a blue "Suggested" chip, and the
+  `category_confirmed=false` filter selects suggested or unconfirmed rows.
+  Category assignment, the explicit `confirm_category` action, and the bulk
+  confirm all set the flag without otherwise rewriting the category.
 - Hiding keeps the record and duplicate identity. Parent statement hiding wins;
   individual restore is refused with `parent_hidden` until the statement is
   restored in Imports.
@@ -113,8 +120,11 @@ first lock prefix. Cleanup locks only operation headers.
 
 Migration `0007_transaction_workspace` adds `transaction_operations` and
 `transaction_operation_items`, plus transaction indexes on
-`(customer_id, transaction_date, id)` and `(customer_id, amount, id)`. It is
-additive: it does not backfill or change source identity values. Manifest rows
+`(customer_id, transaction_date, id)` and `(customer_id, amount, id)`. Migration
+`0010_transaction_category_confirmation` adds
+`transactions.category_confirmed BOOLEAN NOT NULL DEFAULT TRUE` and a partial
+index on `(customer_id)` where the flag is false. Both are additive: they do not
+backfill identity values and existing rows read confirmed. Manifest rows
 deliberately have no live transaction/statement foreign key, so a deleted member
 makes apply stale rather than silently shrinking the frozen scope; the parent
 header cascades.
@@ -337,6 +347,26 @@ The 2026-11-08 repeat battery also passed frontend lint and build, **249/249**
 Vitest tests and **17/17** unauthenticated Playwright smoke tests. Those remain
 synthetic/component and unauthenticated smoke evidence, not a live outage or
 cookie-persistence observation.
+
+## Revision 5: category confirmation (2026-11-09)
+
+Import review may preselect a category from the customer's explicit aliases or
+confirmed history. The review row records the suggestion, the effective
+selection, and whether the customer decided it. An untouched default follows a
+refresh and commits as unconfirmed; a customer change or clear is preserved.
+Commit validates every included selected category as owned, active and
+non-system, then writes the selection or the system Uncategorised category plus
+the review row's decision flag.
+
+In Transactions, the unconfirmed filter, blue Suggested chip, detail banner, and
+bulk Confirm category only control all operate on the same flag. Confirming
+never changes the category. `SuggestionLoader` counts only confirmed categories,
+so an unconfirmed guess cannot become precedent; confirming it makes it eligible.
+Tags remain explicit and have no provenance flag. The two migrations are applied
+in `0009` then `0010` order on an existing database.
+
+The 50,000-row bulk-commit stress test remains temporarily skipped in the shared
+PR suite, so P3-N5 bulk evidence is **UNVERIFIED** until a dedicated stress run.
 
 ## Known boundaries
 

@@ -78,6 +78,7 @@ const detail: TransactionDetail = {
       is_system: false,
       is_archived: false,
     },
+    category_confirmed: true,
     merchant_tags: [],
     statement_import: {
       id: "stmt-1",

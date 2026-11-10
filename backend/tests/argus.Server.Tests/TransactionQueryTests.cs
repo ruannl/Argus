@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
 using argus.Server.Finance;
+using argus.Server.Transactions;
 using Xunit.Abstractions;
 
 namespace argus.Server.Tests;
@@ -567,6 +568,49 @@ public sealed class TransactionQueryTests(KitFactory factory, ITestOutputHelper 
             ("category_id", categoryId),
             ("first_row", firstRow),
             ("count", count));
+    }
+
+    [Fact]
+    public void LegacyFilterCanonicalStaysStableWhenConfirmationIsAbsent()
+    {
+        Assert.Equal(
+            "search=|start=|end=|account=|statement=|category=|tag=|untagged=False|kind=|direction=|visibility=Visible",
+            TransactionFilter.Default.Canonical());
+        Assert.EndsWith(
+            "|visibility=Visible|confirmed=False",
+            (TransactionFilter.Default with { CategoryConfirmed = false }).Canonical());
+        Assert.EndsWith(
+            "|visibility=Visible|confirmed=True",
+            (TransactionFilter.Default with { CategoryConfirmed = true }).Canonical());
+    }
+
+    [Fact]
+    public async Task CategoryConfirmedFilterAndProjectionExposeProvenance()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var (_, expenseId) = await DefaultCategoriesAsync(session);
+        var statementId = await SeedStatementAsync(customerId, accountId);
+        await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2024, 4, 1), "Suggested row", -10.00m, 1, categoryConfirmed: false);
+        await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2024, 4, 2), "Confirmed row", -11.00m, 2, categoryConfirmed: true);
+
+        var all = await QueryAsync(session);
+        Assert.Equal(2, Rows(all).Length);
+        Assert.Contains(Rows(all), row => !row.GetProperty("category_confirmed").GetBoolean());
+        Assert.Contains(Rows(all), row => row.GetProperty("category_confirmed").GetBoolean());
+
+        var unconfirmed = await QueryAsync(session, new { filters = new { category_confirmed = false }, });
+        Assert.Single(Rows(unconfirmed));
+        Assert.Equal("Suggested row", Rows(unconfirmed)[0].GetProperty("description").GetString());
+        Assert.False(Rows(unconfirmed)[0].GetProperty("category_confirmed").GetBoolean());
+        Assert.Equal(1, Count(unconfirmed, "filtered_total"));
+
+        var confirmed = await QueryAsync(session, new { filters = new { category_confirmed = true }, });
+        Assert.Single(Rows(confirmed));
+        Assert.Equal("Confirmed row", Rows(confirmed)[0].GetProperty("description").GetString());
+
+        var separate = await QueryAsync(session, new { filters = new { category_confirmed = false, direction = "out" }, });
+        Assert.Single(Rows(separate));
     }
 
     [Fact]

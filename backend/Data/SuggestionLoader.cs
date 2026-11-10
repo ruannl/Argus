@@ -99,6 +99,7 @@ public static class SuggestionLoader
             JOIN categories c
               ON c.customer_id = t.customer_id AND c.id = t.category_id
             WHERE t.customer_id = @customer_id AND t.merchant_key = ANY(@keys)
+              AND t.category_confirmed = TRUE
               AND c.kind <> 'Uncategorised' AND c.is_archived = FALSE
             GROUP BY t.merchant_key, t.category_id, c.display_name
             """;

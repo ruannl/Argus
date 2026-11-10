@@ -916,6 +916,20 @@ public static class Migrations
                 ON merchant_aliases(customer_id, normalized_alias);
             CREATE INDEX merchant_aliases_customer_idx
                 ON merchant_aliases(customer_id);
+            """),
+        ("0009_review_category_suggestion", """
+            ALTER TABLE import_review_rows
+                ADD COLUMN suggested_category_id UUID NULL,
+                ADD COLUMN selected_category_id UUID NULL,
+                ADD COLUMN category_decided BOOLEAN NOT NULL DEFAULT FALSE;
+            """),
+        ("0010_transaction_category_confirmation", """
+            ALTER TABLE transactions
+                ADD COLUMN category_confirmed BOOLEAN NOT NULL DEFAULT TRUE;
+
+            CREATE INDEX transactions_customer_unconfirmed_idx
+                ON transactions(customer_id)
+                WHERE category_confirmed = FALSE;
             """)
     ];
 }

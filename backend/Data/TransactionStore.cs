@@ -331,6 +331,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                 targets.AddTags,
                 targets.RemoveTags,
                 action.IsHiddenByUser,
+                action.ConfirmCategory,
                 false));
 
         return new TransactionOperationPrepareResponse(summary, true);
@@ -672,6 +673,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                                     Guid AccountId,
                                     Guid StatementId,
                                     Guid CategoryId,
+                                    bool CategoryConfirmed,
                                     bool HiddenByUser,
                                     bool StatementHidden,
                                     Guid[] TagIds);
@@ -689,7 +691,8 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
     private sealed record StoredAction(Guid? CategoryId,
                                        Guid[] AddTagIds,
                                        Guid[] RemoveTagIds,
-                                       bool? IsHiddenByUser);
+                                       bool? IsHiddenByUser,
+                                       bool? ConfirmCategory);
 
     private sealed record StoredCategoryStamp(Guid Id,
                                               string DisplayName,
@@ -856,7 +859,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         command.Transaction = transaction;
         command.CommandText = """
             SELECT t.id, t.version, t.financial_account_id, t.statement_import_id,
-                   t.category_id, t.is_hidden_by_user, s.is_hidden
+                   t.category_id, t.category_confirmed, t.is_hidden_by_user, s.is_hidden
             FROM transactions t
             JOIN statement_imports s
               ON s.customer_id = t.customer_id AND s.id = t.statement_import_id
@@ -866,18 +869,18 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, transactionIds);
 
-        var rows = new List<(Guid Id, int Version, Guid AccountId, Guid StatementId, Guid CategoryId, bool HiddenByUser, bool StatementHidden)>();
+        var rows = new List<(Guid Id, int Version, Guid AccountId, Guid StatementId, Guid CategoryId, bool CategoryConfirmed, bool HiddenByUser, bool StatementHidden)>();
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
         {
             while (await reader.ReadAsync(cancellationToken))
             {
-                rows.Add((reader.GetGuid(0), reader.GetInt32(1), reader.GetGuid(2), reader.GetGuid(3), reader.GetGuid(4), reader.GetBoolean(5), reader.GetBoolean(6)));
+                rows.Add((reader.GetGuid(0), reader.GetInt32(1), reader.GetGuid(2), reader.GetGuid(3), reader.GetGuid(4), reader.GetBoolean(5), reader.GetBoolean(6), reader.GetBoolean(7)));
             }
         }
 
         var tags = await LoadMemberTagIdsAsync(connection, transaction, customerId, transactionIds, cancellationToken);
 
-        return rows.Select(row => new MemberRow(row.Id, row.Version, row.AccountId, row.StatementId, row.CategoryId, row.HiddenByUser, row.StatementHidden, tags.GetValueOrDefault(row.Id) ?? [])).ToList();
+        return rows.Select(row => new MemberRow(row.Id, row.Version, row.AccountId, row.StatementId, row.CategoryId, row.CategoryConfirmed, row.HiddenByUser, row.StatementHidden, tags.GetValueOrDefault(row.Id) ?? [])).ToList();
     }
 
     private async Task<List<MemberRow>> CaptureMatchingMembersAsync(NpgsqlConnection connection,
@@ -892,7 +895,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         string where = TransactionSql.BuildWhere(filter, command, includeVisibility: true);
         command.CommandText = $"""
             SELECT t.id, t.version, t.financial_account_id, t.statement_import_id,
-                   t.category_id, t.is_hidden_by_user, s.is_hidden
+                   t.category_id, t.category_confirmed, t.is_hidden_by_user, s.is_hidden
             FROM transactions t
             {TransactionSql.Joins}
             WHERE {where}
@@ -902,19 +905,19 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("limit", limit);
 
-        var rows = new List<(Guid Id, int Version, Guid AccountId, Guid StatementId, Guid CategoryId, bool HiddenByUser, bool StatementHidden)>();
+        var rows = new List<(Guid Id, int Version, Guid AccountId, Guid StatementId, Guid CategoryId, bool CategoryConfirmed, bool HiddenByUser, bool StatementHidden)>();
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
         {
             while (await reader.ReadAsync(cancellationToken))
             {
-                rows.Add((reader.GetGuid(0), reader.GetInt32(1), reader.GetGuid(2), reader.GetGuid(3), reader.GetGuid(4), reader.GetBoolean(5), reader.GetBoolean(6)));
+                rows.Add((reader.GetGuid(0), reader.GetInt32(1), reader.GetGuid(2), reader.GetGuid(3), reader.GetGuid(4), reader.GetBoolean(5), reader.GetBoolean(6), reader.GetBoolean(7)));
             }
         }
 
         var ids = rows.Select(row => row.Id).ToArray();
         var tags = await LoadMemberTagIdsAsync(connection, transaction, customerId, ids, cancellationToken);
 
-        return rows.Select(row => new MemberRow(row.Id, row.Version, row.AccountId, row.StatementId, row.CategoryId, row.HiddenByUser, row.StatementHidden, tags.GetValueOrDefault(row.Id) ?? [])).ToList();
+        return rows.Select(row => new MemberRow(row.Id, row.Version, row.AccountId, row.StatementId, row.CategoryId, row.CategoryConfirmed, row.HiddenByUser, row.StatementHidden, tags.GetValueOrDefault(row.Id) ?? [])).ToList();
     }
 
     private static async Task<Dictionary<Guid, Guid[]>> LoadMemberTagIdsAsync(NpgsqlConnection connection,
@@ -1229,7 +1232,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         command.Parameters.AddWithValue("request_digest", requestDigest);
         command.Parameters.AddWithValue("filter_digest", NpgsqlDbType.Text, (object?)filterDigest ?? DBNull.Value);
         command.Parameters.AddWithValue("confirmation_hash", confirmationHash);
-        command.Parameters.AddWithValue("action", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(new StoredAction(action.CategoryId, action.AddTagIds, action.RemoveTagIds, action.IsHiddenByUser), _storedJson));
+        command.Parameters.AddWithValue("action", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(new StoredAction(action.CategoryId, action.AddTagIds, action.RemoveTagIds, action.IsHiddenByUser, action.ConfirmCategory), _storedJson));
         command.Parameters.AddWithValue("targets", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(targets, _storedJson));
         command.Parameters.AddWithValue("selected_count", selectedCount);
         command.Parameters.AddWithValue("changed_count", changedCount);
@@ -1287,6 +1290,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         command.CommandText = """
             UPDATE transactions
             SET category_id = CASE WHEN @set_category THEN @category_id ELSE category_id END,
+                category_confirmed = CASE WHEN @set_category OR @confirm_category THEN TRUE ELSE category_confirmed END,
                 is_hidden_by_user = CASE WHEN @set_hidden THEN @hidden ELSE is_hidden_by_user END,
                 version = version + 1,
                 updated_at = clock_timestamp()
@@ -1294,6 +1298,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             """;
         command.Parameters.AddWithValue("set_category", action.CategoryId is not null);
         command.Parameters.AddWithValue("category_id", NpgsqlDbType.Uuid, (object?)action.CategoryId ?? DBNull.Value);
+        command.Parameters.AddWithValue("confirm_category", action.ConfirmCategory is true);
         command.Parameters.AddWithValue("set_hidden", action.IsHiddenByUser is not null);
         command.Parameters.AddWithValue("hidden", NpgsqlDbType.Boolean, (object?)action.IsHiddenByUser ?? DBNull.Value);
         command.Parameters.AddWithValue("customer_id", customerId);
@@ -1350,6 +1355,16 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
     private static bool IsChanged(MemberRow member, TransactionAction action)
     {
         if (action.CategoryId is not null && action.CategoryId.Value != member.CategoryId)
+        {
+            return true;
+        }
+
+        if (action.CategoryId is not null && !member.CategoryConfirmed)
+        {
+            return true;
+        }
+
+        if (action.ConfirmCategory is true && !member.CategoryConfirmed)
         {
             return true;
         }
@@ -1592,7 +1607,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             .Select(id => current[id])
             .ToArray();
 
-        return new TransactionOperationActionResponse(category, RefsFor(action.AddTagIds), RefsFor(action.RemoveTagIds), action.IsHiddenByUser, stale);
+        return new TransactionOperationActionResponse(category, RefsFor(action.AddTagIds), RefsFor(action.RemoveTagIds), action.IsHiddenByUser, action.ConfirmCategory, stale);
     }
 
     private static TransactionOperationSummaryResponse TerminalSummary(OperationHeader header) => new(
@@ -1703,7 +1718,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
     {
         var stored = JsonSerializer.Deserialize<StoredAction>(json, _storedJson) ?? throw new TransactionStoreException(TransactionErrorCodes.InvalidRequest);
 
-        return new TransactionAction(stored.CategoryId, stored.AddTagIds, stored.RemoveTagIds, stored.IsHiddenByUser);
+        return new TransactionAction(stored.CategoryId, stored.AddTagIds, stored.RemoveTagIds, stored.IsHiddenByUser, stored.ConfirmCategory);
     }
 
     private static StoredTargets DeserializeTargets(string json) =>
@@ -1937,6 +1952,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                                  string CategoryKind,
                                  bool CategorySystem,
                                  bool CategoryArchived,
+                                 bool CategoryConfirmed,
                                  Guid StatementId,
                                  string StatementLabel,
                                  string StatementSourceType,
@@ -1949,6 +1965,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         t.id, t.version, t.transaction_date, t.description, t.normalized_description, t.amount,
         a.id, a.display_name, a.is_archived,
         c.id, c.display_name, c.kind, c.is_system, c.is_archived,
+        t.category_confirmed,
         s.id, s.statement_label, s.source_type, s.is_hidden,
         t.is_hidden_by_user, t.source_page, t.source_row_number
         """;
@@ -1968,13 +1985,14 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         reader.GetString(11),
         reader.GetBoolean(12),
         reader.GetBoolean(13),
-        reader.GetGuid(14),
-        reader.GetString(15),
+        reader.GetBoolean(14),
+        reader.GetGuid(15),
         reader.GetString(16),
-        reader.GetBoolean(17),
+        reader.GetString(17),
         reader.GetBoolean(18),
-        reader.IsDBNull(19) ? null : reader.GetInt32(19),
-        reader.GetInt32(20));
+        reader.GetBoolean(19),
+        reader.IsDBNull(20) ? null : reader.GetInt32(20),
+        reader.GetInt32(21));
 
     private static RowData MapRow(RawRow raw, IReadOnlyDictionary<Guid, TransactionTagRef[]> tags)
     {
@@ -1998,6 +2016,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                 raw.CategoryKind,
                 raw.CategorySystem,
                 raw.CategoryArchived),
+            raw.CategoryConfirmed,
             tags.GetValueOrDefault(raw.Id) ?? [],
             new TransactionStatementRef(
                 raw.StatementId,

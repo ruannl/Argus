@@ -169,6 +169,7 @@ export default function TransactionDetailView({
       add_tag_ids?: string[];
       remove_tag_ids?: string[];
       is_hidden_by_user?: boolean;
+      confirm_category?: boolean;
     },
     successText: string,
   ) {
@@ -253,6 +254,26 @@ export default function TransactionDetailView({
       return;
     }
     await saveMetadata(changes, "Transaction classification saved.");
+  }
+
+  async function confirmCurrentCategory() {
+    await saveMetadata({ confirm_category: true }, "Category confirmed.");
+  }
+
+  function stageSuggestedCategory() {
+    const suggested = detail.suggested_category;
+    if (!suggested) {
+      return;
+    }
+    setCategoryId(suggested.id);
+    setMessage({
+      tone: "status",
+      text: `Suggested category “${suggested.display_name}” selected. Save classification to apply it.`,
+    });
+  }
+
+  function focusCategoryPicker() {
+    document.getElementById("detail-category")?.focus();
   }
 
   async function acceptSuggestion(tagId: string) {
@@ -444,6 +465,50 @@ export default function TransactionDetailView({
         </div>
       ) : null}
 
+      {!transaction.category_confirmed && detail.suggested_category ? (
+        <section
+          aria-labelledby="suggested-category-title"
+          className="mt-4 rounded-2xl border border-suggestion-line bg-suggestion-soft p-4"
+        >
+          <h3 className="text-sm font-bold text-suggestion-ink" id="suggested-category-title">
+            Suggested category, not yet confirmed
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-suggestion-ink">
+            {detail.suggested_category.id === transaction.category.id
+              ? `“${detail.suggested_category.display_name}” is suggested from your history or alias. Confirm it or choose another category.`
+              : `“${detail.suggested_category.display_name}” is suggested from your history or alias, while this transaction is categorised as “${transaction.category.display_name}”. Use the suggestion, confirm the current category, or choose another.`}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {detail.suggested_category.id !== transaction.category.id ? (
+              <button
+                className="rounded-full border border-suggestion-line bg-surface px-3 py-1.5 text-xs font-bold text-suggestion-ink disabled:opacity-60"
+                disabled={busy || classificationDisabled || requiresReload}
+                onClick={stageSuggestedCategory}
+                type="button"
+              >
+                Use suggestion
+              </button>
+            ) : null}
+            <button
+              className="rounded-full border border-suggestion-line bg-surface px-3 py-1.5 text-xs font-bold text-suggestion-ink disabled:opacity-60"
+              disabled={busy || classificationDisabled || requiresReload}
+              onClick={() => void confirmCurrentCategory()}
+              type="button"
+            >
+              Confirm current
+            </button>
+            <button
+              className="rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-bold text-ink disabled:opacity-60"
+              disabled={busy || classificationDisabled || requiresReload}
+              onClick={focusCategoryPicker}
+              type="button"
+            >
+              Change
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       <fieldset
         className="mt-6 rounded-2xl border border-line p-4"
         disabled={busy || classificationDisabled || requiresReload}
@@ -475,12 +540,13 @@ export default function TransactionDetailView({
                 ))}
               </select>
             </label>
-            {detail.suggested_category &&
+            {transaction.category_confirmed &&
+            detail.suggested_category &&
             detail.suggested_category.id !== categoryId &&
             transaction.category.kind === "Uncategorised" ? (
               <button
                 className="mt-2 inline-flex items-center rounded-full border border-suggestion-line bg-suggestion-soft px-3 py-1.5 text-xs font-semibold text-suggestion-ink"
-                onClick={() => setCategoryId(detail.suggested_category!.id)}
+                onClick={stageSuggestedCategory}
                 type="button"
               >
                 Suggested: {detail.suggested_category.display_name}
