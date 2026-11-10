@@ -17,16 +17,38 @@
 > the earlier whole-token-only suggestion and ±3-day near-duplicate wording.
 > Suggestions may use explicit customer aliases, the customer's own historical
 > tag/category choices keyed by a generic merchant key, and truncated-prefix
-> token matching with exact tokens ranked first; they remain advisory and are
-> never auto-applied. Transaction detail may show an advisory suggested
-> category. Near-duplicate warnings require the exact transaction date, exact
+> token matching with exact tokens ranked first; tag suggestions remain advisory
+> and are never auto-applied. Import-review category defaults are governed by
+> the category-default amendment below. Transaction detail may show an advisory
+> suggested category. Near-duplicate warnings require the exact transaction date, exact
 > signed amount and normalized-description token-set similarity of at least 0.5.
 > The finance IP limit is 1000 requests per 15 minutes. Applied bulk outcomes
 > auto-dismiss the client receipt identity and show a persistent status line.
-> Detailed authority is in Plan 1 revision 2, Plan 2 revision 7 and Plan 3
-> revision 4; Thread #1 Decision `e69aabc8-c55b-4e83-b7a9-95a782423ecb` records
+> Detailed authority is in Plan 1 revision 2, Plan 2 revisions 7, 8 and 9, and
+> Plan 3 revisions 4 and 5; Thread #1 Decision `e69aabc8-c55b-4e83-b7a9-95a782423ecb` records
 > approval. The four-plan topology, CSV-only delivery, PDF deferral and
 > no-deployment state are unchanged.
+>
+> **Category-default amendment (2026-11-09, operator-approved):** For import
+> review only, a category determined from the customer's explicit aliases or own
+> historical choices is preselected on the review row. The customer sees and can
+> change or clear it before commit. Uncategorised is the commit outcome only when
+> no category can be determined or the customer explicitly clears the selection.
+> Tags remain advisory and unselected. No cross-customer learning, global
+> dictionary, background assignment, or bulk apply outside the review is
+> authorized. Detailed authority is Plan 2 revision 8 and Thread #3 Decision
+> `a8054d7e-aacc-4981-b5ce-eecc786b287d`; this narrows CAT-6 for import review
+> only. The rest of the 2026-11-09 behavior amendment remains in force.
+>
+> **Category-confirmation amendment (2026-11-09, operator-approved):** Import
+> review may preselect a category, but the transaction remains unconfirmed until
+> the customer confirms it in the transaction workspace. Unconfirmed categories
+> are visibly marked using the existing blue suggestion treatment; confirmation
+> does not change the category. Future suggestions use only confirmed categories
+> and explicit aliases, never the system's own unconfirmed guesses. Tags remain
+> advisory and unselected. Detailed authority is Plan 2 revision 9 and Plan 3
+> revision 5; Thread #1 Decision `bfe620fc-0242-4d27-b6d8-777c78c560ce` records
+> approval.
 
 ## 1. Executive summary
 
@@ -496,7 +518,7 @@ On small screens, the same four destinations must remain reachable. Tables shoul
 - **CAT-3:** Every category has a visible kind: Income, Expense, Transfer, or Excluded. The kind determines whether the category participates in the overview and how it is grouped. Changing a kind changes reported totals and requires a warning.
 - **CAT-4:** Archived categories remain visible on historical transactions but cannot be chosen for new assignments.
 - **CAT-5:** Category and merchant-tag assignment are available inline in the list and in the transaction detail view. Bulk assignment is available from the list.
-- **CAT-6:** The MVP does not auto-categorise or auto-apply tags. Suggestions may use explicit customer aliases and the customer's own historical choices, but they remain advisory and require confirmation; there is no global merchant dictionary or cross-customer learning. The manual and bulk workflow must stand on its own.
+- **CAT-6:** The MVP does not auto-categorise outside import review or auto-apply tags. Suggestions may use explicit customer aliases and the customer's own historical choices. Import review preselects a category when one can be determined; the customer sees and can change or clear it before commit, and Uncategorised is the outcome only when none can be determined or the customer clears it. A preselected category remains unconfirmed until the customer confirms it in the transaction workspace; unconfirmed categories are visibly marked, and confirmation does not change the category. Future suggestions use only confirmed categories and explicit aliases. Tag suggestions remain advisory and require confirmation; there is no global merchant dictionary or cross-customer learning. The manual and bulk workflow must stand on its own.
 - **CAT-7:** Category management shows the transaction count and kind for each category so the user can see the effect of archiving or deleting it.
 - **TAG-1:** Merchant tags are workspace-wide user labels for stores or merchants such as Woolworths, Checkers, and Uber Eats. A user can create, rename, archive, restore, and delete them. Tag names are case-insensitive unique.
 - **TAG-2:** A transaction can have zero, one, or many merchant tags. The category remains single-select; multiple categories require split transactions, which are future.
@@ -505,7 +527,7 @@ On small screens, the same four destinations must remain reachable. Tables shoul
 - **TAG-5:** The transaction list can be filtered by one merchant tag in the MVP, with an Untagged option. Combined tag filters are future.
 - **TAG-6:** A merchant-tag detail view shows its transactions, total, count, trend, comparison, and category mix. Because a transaction can have multiple tags, tag totals overlap and are not additive.
 - **TAG-7:** Tag management shows the assigned transaction count and allows archive, restore, and delete. Deleting a tag removes it from transactions; it never deletes transactions.
-- **TAG-8:** Argus may suggest tags from the description using active tag names, explicit customer aliases, and the customer's own historical tag choices. Exact tokens rank before truncated-prefix matches. There is no external merchant directory or cross-customer learning, and no suggestion is applied automatically. Transaction detail may show an advisory suggested category from the same sources; it changes nothing until the user saves it.
+- **TAG-8:** Argus may suggest tags from the description using active tag names, explicit customer aliases, and the customer's own historical tag choices. Exact tokens rank before truncated-prefix matches. There is no external merchant directory or cross-customer learning, and no tag suggestion is applied automatically. Transaction detail may show an advisory suggested category from the same sources; it changes nothing until the user saves it. Import-review category defaults and confirmation follow CAT-6 and the 2026-11-09 category-default and category-confirmation amendments.
 - **TAG-9:** Untagged transactions remain visible in the transaction list and tag views, and the product reports tag coverage.
 - **TAG-10:** Global merchant dictionaries, cross-customer learning, automatic rule application, tag merge, and combined tag filters are future capabilities.
 
