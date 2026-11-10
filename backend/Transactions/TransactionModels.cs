@@ -43,19 +43,20 @@ public sealed record TransactionFilter(string? Search,
                                        Guid? CategoryId,
                                        Guid? MerchantTagId,
                                        bool Untagged,
+                                       bool? CategoryConfirmed,
                                        string? CategoryKind,
                                        string? Direction,
                                        TransactionVisibility Visibility)
 {
     public static TransactionFilter Default { get; } = new(
-        null, null, null, null, null, null, null, false, null, null, TransactionVisibility.Visible);
+        null, null, null, null, null, null, null, false, null, null, null, TransactionVisibility.Visible);
 
     public string Canonical()
     {
         string search = Search is null ? string.Empty : Convert.ToBase64String(Encoding.UTF8.GetBytes(Search));
 
-        return string.Join(
-            '|',
+        var parts = new List<string>
+        {
             $"search={search}",
             $"start={Format(StartDate)}",
             $"end={Format(EndDate)}",
@@ -66,7 +67,14 @@ public sealed record TransactionFilter(string? Search,
             $"untagged={Untagged}",
             $"kind={CategoryKind ?? string.Empty}",
             $"direction={Direction ?? string.Empty}",
-            $"visibility={Visibility}");
+            $"visibility={Visibility}",
+        };
+        if (CategoryConfirmed is not null)
+        {
+            parts.Add($"confirmed={CategoryConfirmed.Value}");
+        }
+
+        return string.Join('|', parts);
     }
 
     private static string Format(DateOnly? value) =>
@@ -116,6 +124,7 @@ public sealed record TransactionResponse(Guid Id,
                                          string Direction,
                                          TransactionAccountRef FinancialAccount,
                                          TransactionCategoryRef Category,
+                                         bool CategoryConfirmed,
                                          TransactionTagRef[] MerchantTags,
                                          TransactionStatementRef StatementImport,
                                          bool IsHiddenByUser,
@@ -149,18 +158,29 @@ public sealed record TransactionMutationResult(TransactionResponse Transaction,
 public sealed record TransactionAction(Guid? CategoryId,
                                        Guid[] AddTagIds,
                                        Guid[] RemoveTagIds,
-                                       bool? IsHiddenByUser)
+                                       bool? IsHiddenByUser,
+                                       bool? ConfirmCategory)
 {
     public bool IsEmpty =>
         CategoryId is null && AddTagIds.Length == 0 && RemoveTagIds.Length == 0 &&
-        IsHiddenByUser is null;
+        IsHiddenByUser is null && ConfirmCategory is null;
 
-    public string Canonical() => string.Join(
-        '|',
-        $"category={CategoryId?.ToString("N") ?? string.Empty}",
-        $"add={string.Join(',', AddTagIds.Select(id => id.ToString("N")).Order(StringComparer.Ordinal))}",
-        $"remove={string.Join(',', RemoveTagIds.Select(id => id.ToString("N")).Order(StringComparer.Ordinal))}",
-        $"hidden={IsHiddenByUser?.ToString() ?? string.Empty}");
+    public string Canonical()
+    {
+        var parts = new List<string>
+        {
+            $"category={CategoryId?.ToString("N") ?? string.Empty}",
+            $"add={string.Join(',', AddTagIds.Select(id => id.ToString("N")).Order(StringComparer.Ordinal))}",
+            $"remove={string.Join(',', RemoveTagIds.Select(id => id.ToString("N")).Order(StringComparer.Ordinal))}",
+            $"hidden={IsHiddenByUser?.ToString() ?? string.Empty}",
+        };
+        if (ConfirmCategory is not null)
+        {
+            parts.Add($"confirm={ConfirmCategory.Value}");
+        }
+
+        return string.Join('|', parts);
+    }
 }
 
 public sealed record TransactionSelectionMember(Guid Id, int ExpectedVersion);
@@ -291,20 +311,30 @@ public static class TransactionRequestParser
             return false;
         }
 
-        filter = new TransactionFilter(search, startDate, endDate, request.FinancialAccountId, request.StatementImportId, request.CategoryId, merchantTagId, untagged, request.CategoryKind, request.Direction, visibility.Value);
+        filter = new TransactionFilter(search, startDate, endDate, request.FinancialAccountId, request.StatementImportId, request.CategoryId, merchantTagId, untagged, request.CategoryConfirmed, request.CategoryKind, request.Direction, visibility.Value);
 
         return true;
     }
 
     public static bool TryParseAction(TransactionChangesRequest? request, out TransactionAction action)
     {
-        action = new TransactionAction(null, [], [], null);
+        action = new TransactionAction(null, [], [], null, null);
         if (request is null)
         {
             return false;
         }
 
         if (request.CategoryId == Guid.Empty)
+        {
+            return false;
+        }
+
+        if (request.ConfirmCategory == false)
+        {
+            return false;
+        }
+
+        if (request.ConfirmCategory == true && request.CategoryId is not null)
         {
             return false;
         }
@@ -333,7 +363,7 @@ public static class TransactionRequestParser
             return false;
         }
 
-        action = new TransactionAction(request.CategoryId, addSet.Order().ToArray(), removeSet.Order().ToArray(), request.IsHiddenByUser);
+        action = new TransactionAction(request.CategoryId, addSet.Order().ToArray(), removeSet.Order().ToArray(), request.IsHiddenByUser, request.ConfirmCategory);
 
         return !action.IsEmpty;
     }
@@ -421,6 +451,7 @@ public sealed record TransactionFiltersRequest(string? Search,
                                                Guid? StatementImportId,
                                                Guid? CategoryId,
                                                string? MerchantTag,
+                                               bool? CategoryConfirmed,
                                                string? CategoryKind,
                                                string? Direction,
                                                string? Visibility);
@@ -434,7 +465,8 @@ public sealed record TransactionQueryRequest(TransactionFiltersRequest? Filters,
 public sealed record TransactionChangesRequest(Guid? CategoryId,
                                                Guid[]? AddTagIds,
                                                Guid[]? RemoveTagIds,
-                                               bool? IsHiddenByUser);
+                                               bool? IsHiddenByUser,
+                                               bool? ConfirmCategory);
 
 public sealed record TransactionSelectionItem(Guid? Id, int? ExpectedVersion);
 
@@ -454,6 +486,7 @@ public sealed record TransactionOperationActionResponse(TransactionCategoryRef? 
                                                         TransactionTagRef[] AddTags,
                                                         TransactionTagRef[] RemoveTags,
                                                         bool? IsHiddenByUser,
+                                                        bool? ConfirmCategory,
                                                         bool Stale);
 
 public sealed record TransactionOperationSummaryResponse(Guid OperationId,

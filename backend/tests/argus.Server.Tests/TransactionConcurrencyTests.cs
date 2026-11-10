@@ -334,7 +334,7 @@ public sealed class TransactionConcurrencyTests(KitFactory factory) : Transactio
             databaseNow = reader.GetFieldValue<DateTime>(3);
         }
 
-        TransactionAction action = new TransactionAction(targetId, [tagId], [], null);
+        TransactionAction action = new TransactionAction(targetId, [tagId], [], null, null);
         var storeType = typeof(TransactionStore);
         const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
         var targetStamp = storeType.GetMethod("DeserializeTargets", flags)!.Invoke(null, [targetJson])!;

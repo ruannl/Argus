@@ -86,6 +86,12 @@ public static class TransactionSql
                       AND ju.transaction_id = t.id)
                 """);
         }
+        if (filter.CategoryConfirmed is not null)
+        {
+            clauses.Add(filter.CategoryConfirmed.Value
+                ? "t.category_confirmed = TRUE"
+                : "t.category_confirmed = FALSE");
+        }
         if (filter.CategoryKind is not null)
         {
             command.Parameters.AddWithValue("category_kind", filter.CategoryKind);

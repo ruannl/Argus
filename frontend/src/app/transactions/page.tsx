@@ -35,6 +35,7 @@ const ALLOWED_PARAMS = new Set([
   "statement_import_id",
   "category_id",
   "merchant_tag",
+  "category_confirmed",
   "category_kind",
   "direction",
   "visibility",
@@ -148,6 +149,14 @@ function parseState(params: SearchParams): ParsedState {
       return invalid();
     }
     filters.direction = direction as TransactionFilters["direction"];
+  }
+
+  const categoryConfirmed = value("category_confirmed");
+  if (categoryConfirmed !== undefined) {
+    if (!["true", "false"].includes(categoryConfirmed)) {
+      return invalid();
+    }
+    filters.category_confirmed = categoryConfirmed === "true";
   }
 
   const visibility = value("visibility");

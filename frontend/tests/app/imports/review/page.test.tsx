@@ -9,6 +9,7 @@ vi.mock("@/auth", () => ({
 vi.mock("@/lib/server/backend-client", () => ({
   getCurrentAccount: vi.fn(),
   getImportReview: vi.fn(),
+  listCategories: vi.fn(),
   listMerchantTags: vi.fn(),
 }));
 
@@ -33,7 +34,12 @@ import ReviewPage from "@/app/imports/review/[id]/page";
 import { auth } from "@/auth";
 import { testRouter } from "../../../../vitest.setup";
 
-import { getCurrentAccount, getImportReview, listMerchantTags } from "@/lib/server/backend-client";
+import {
+  getCurrentAccount,
+  getImportReview,
+  listCategories,
+  listMerchantTags,
+} from "@/lib/server/backend-client";
 import { createMerchantTagAction } from "@/lib/server/finance-actions";
 import { patchImportReviewAction } from "@/lib/server/import-actions";
 
@@ -65,6 +71,7 @@ const summary = {
   within_file_pending_count: 1,
   possible_duplicate_count: 1,
   exact_override_count: 0,
+  categorised_count: 0,
   statement_override: false,
   statement_override_count: 0,
   summary_hash: "hash",
@@ -93,6 +100,9 @@ const rows = [
     override: false,
     suggested_tag_ids: ["tag-id"],
     selected_tag_ids: [],
+    suggested_category_id: null,
+    selected_category_id: null,
+    category_decided: false,
   },
   {
     row_id: "row-2",
@@ -116,6 +126,9 @@ const rows = [
     override: false,
     suggested_tag_ids: [],
     selected_tag_ids: [],
+    suggested_category_id: null,
+    selected_category_id: null,
+    category_decided: false,
   },
   {
     row_id: "row-3",
@@ -139,6 +152,9 @@ const rows = [
     override: false,
     suggested_tag_ids: [],
     selected_tag_ids: ["tag-id"],
+    suggested_category_id: null,
+    selected_category_id: null,
+    category_decided: false,
   },
   {
     row_id: "row-4",
@@ -162,6 +178,9 @@ const rows = [
     override: false,
     suggested_tag_ids: [],
     selected_tag_ids: [],
+    suggested_category_id: null,
+    selected_category_id: null,
+    category_decided: false,
   },
 ];
 
@@ -180,6 +199,7 @@ describe("import review page", () => {
     vi.mocked(getCurrentAccount).mockReset();
     vi.mocked(getImportReview).mockReset();
     vi.mocked(listMerchantTags).mockReset();
+    vi.mocked(listCategories).mockReset();
     vi.mocked(createMerchantTagAction).mockReset();
     vi.mocked(patchImportReviewAction).mockReset();
     vi.mocked(redirect).mockReset();
@@ -189,6 +209,10 @@ describe("import review page", () => {
       user: { backendToken: "backend-token" },
     } as never);
     vi.mocked(getCurrentAccount).mockResolvedValue(account);
+    vi.mocked(listCategories).mockResolvedValue({
+      ok: true,
+      value: { categories: [] },
+    });
     vi.mocked(listMerchantTags).mockResolvedValue({
       ok: true,
       value: { merchant_tags: [tag] },
@@ -639,6 +663,86 @@ describe("import review page", () => {
     expect(screen.getByText(/Nothing will be imported yet/)).toBeInTheDocument();
   });
 
+  it("shows and edits an unconfirmed suggested category", async () => {
+    const user = userEvent.setup();
+    const groceries = {
+      id: "cat-groceries",
+      display_name: "Groceries",
+      kind: "Expense" as const,
+      is_system: false,
+      is_default: false,
+      is_archived: false,
+      transaction_count: 1,
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+    };
+    const travel = {
+      ...groceries,
+      id: "cat-travel",
+      display_name: "Travel",
+    };
+    const suggestedRow = {
+      ...rows[0],
+      suggested_category_id: groceries.id,
+      selected_category_id: groceries.id,
+      category_decided: false,
+    };
+    vi.mocked(listCategories).mockResolvedValue({
+      ok: true,
+      value: { categories: [groceries, travel] },
+    });
+    vi.mocked(getImportReview).mockResolvedValue({
+      ok: true,
+      value: {
+        summary: { ...summary, imported_count: 1, categorised_count: 1 },
+        page: { rows: [suggestedRow], total: 1, page: 1, page_size: 50 },
+      },
+    });
+    vi.mocked(patchImportReviewAction).mockResolvedValue({
+      ok: true,
+      message: "Review updated.",
+      review: { ...summary, imported_count: 1, categorised_count: 1, version: 4 },
+    });
+
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    expect(screen.getByText("Suggested from your history or alias")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Category for row 1"), travel.id);
+    await waitFor(() =>
+      expect(patchImportReviewAction).toHaveBeenLastCalledWith(
+        "review-id",
+        3,
+        [{ row_id: "row-1", selected_category_id: travel.id }],
+        undefined,
+      ),
+    );
+
+    await user.click(screen.getAllByRole("button", { name: "Clear" })[0]);
+    await waitFor(() =>
+      expect(patchImportReviewAction).toHaveBeenLastCalledWith(
+        "review-id",
+        4,
+        [{ row_id: "row-1", selected_category_id: null }],
+        undefined,
+      ),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Restore suggestion" }));
+    await waitFor(() =>
+      expect(patchImportReviewAction).toHaveBeenLastCalledWith(
+        "review-id",
+        4,
+        [{ row_id: "row-1", reset_category_to_suggestion: true }],
+        undefined,
+      ),
+    );
+  });
+
   it("uses global summary blockers even when the current page has no invalid rows", async () => {
     const pageRows = [rows[0], rows[2]];
     vi.mocked(getImportReview).mockResolvedValue({
@@ -668,6 +772,37 @@ describe("import review page", () => {
       screen.getByText("Invalid rows must be marked as skipped before committing."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Commit import" })).toBeDisabled();
+  });
+
+  it("distinguishes a category-list failure from a missing category", async () => {
+    vi.mocked(listCategories).mockResolvedValue({ ok: false, kind: "unavailable" });
+    const selectedRow = {
+      ...rows[0],
+      suggested_category_id: "cat-1",
+      selected_category_id: "cat-1",
+      category_decided: true,
+    };
+    vi.mocked(getImportReview).mockResolvedValue({
+      ok: true,
+      value: {
+        summary: { ...summary, categorised_count: 1 },
+        page: { rows: [selectedRow], total: 1, page: 1, page_size: 50 },
+      },
+    });
+
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    expect(
+      screen.getByText(/Categories could not be loaded. Category choices are disabled/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Category list unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Unavailable category")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Category for row 1")).toBeDisabled();
   });
 
   it("shows a plain expired-review state", async () => {

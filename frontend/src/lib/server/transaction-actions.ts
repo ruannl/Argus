@@ -100,6 +100,7 @@ function validFilters(value: unknown): value is TransactionFilters {
     "statement_import_id",
     "category_id",
     "merchant_tag",
+    "category_confirmed",
     "category_kind",
     "direction",
     "visibility",
@@ -155,6 +156,9 @@ function validFilters(value: unknown): value is TransactionFilters {
   ) {
     return false;
   }
+  if (filters.category_confirmed !== undefined && typeof filters.category_confirmed !== "boolean") {
+    return false;
+  }
   if (
     filters.visibility !== undefined &&
     !["visible", "hidden", "all"].includes(filters.visibility as string)
@@ -202,7 +206,13 @@ function validChanges(value: unknown): value is TransactionChanges {
     return false;
   }
   const changes = value as Record<string, unknown>;
-  const allowed = new Set(["category_id", "add_tag_ids", "remove_tag_ids", "is_hidden_by_user"]);
+  const allowed = new Set([
+    "category_id",
+    "add_tag_ids",
+    "remove_tag_ids",
+    "is_hidden_by_user",
+    "confirm_category",
+  ]);
   if (Object.keys(changes).some((key) => !allowed.has(key))) {
     return false;
   }
@@ -210,6 +220,12 @@ function validChanges(value: unknown): value is TransactionChanges {
     return false;
   }
   if (changes.is_hidden_by_user !== undefined && typeof changes.is_hidden_by_user !== "boolean") {
+    return false;
+  }
+  if (changes.confirm_category !== undefined && changes.confirm_category !== true) {
+    return false;
+  }
+  if (changes.confirm_category === true && changes.category_id !== undefined) {
     return false;
   }
   const add = changes.add_tag_ids;
@@ -234,6 +250,7 @@ function validChanges(value: unknown): value is TransactionChanges {
   return (
     changes.category_id !== undefined ||
     changes.is_hidden_by_user !== undefined ||
+    changes.confirm_category === true ||
     (Array.isArray(add) && add.length > 0) ||
     (Array.isArray(remove) && remove.length > 0)
   );

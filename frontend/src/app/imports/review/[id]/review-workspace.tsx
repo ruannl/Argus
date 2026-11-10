@@ -23,14 +23,19 @@ import {
 } from "@/lib/server/import-actions";
 import type { ImportActionResult } from "@/lib/server/import-actions";
 import type {
+  Category,
   ImportReviewDecision,
   ImportReviewDetail,
   ImportReviewRow,
   MerchantTag,
 } from "@/lib/server/backend-client";
 
+import { sortByDisplayName } from "@/lib/display-order";
+
 type ReviewWorkspaceProps = {
   review: ImportReviewDetail;
+  categories: Category[];
+  categoriesUnavailable: boolean;
   tags: MerchantTag[];
   pageSize: number;
   possibleOnly: boolean;
@@ -90,6 +95,8 @@ function reviewHref(
 
 export default function ReviewWorkspace({
   review,
+  categories,
+  categoriesUnavailable,
   tags,
   pageSize,
   possibleOnly,
@@ -102,6 +109,11 @@ export default function ReviewWorkspace({
   const [hash, setHash] = useState(summary.summary_hash);
   const [rows, setRows] = useState(review.page.rows);
   const [tagList, setTagList] = useState(tags);
+  const categoryList = categories;
+  const categoriesById = new Map(categoryList.map((category) => [category.id, category]));
+  const assignableCategories = sortByDisplayName(
+    categoryList.filter((category) => !category.is_archived && category.kind !== "Uncategorised"),
+  );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<Message | null>(null);
   const [repeat, setRepeat] = useState<string[] | null>(null);
@@ -193,12 +205,24 @@ export default function ReviewWorkspace({
         if (row.row_id !== decision.row_id) {
           return row;
         }
+        const selectedCategoryId = decision.reset_category_to_suggestion
+          ? row.suggested_category_id
+          : decision.selected_category_id !== undefined
+            ? decision.selected_category_id
+            : row.selected_category_id;
+        const categoryDecided = decision.reset_category_to_suggestion
+          ? false
+          : decision.selected_category_id !== undefined
+            ? true
+            : row.category_decided;
         return {
           ...row,
           skip: decision.skip ?? row.skip,
           override: decision.override ?? row.override,
           within_file_state: decision.within_file_state ?? row.within_file_state,
           selected_tag_ids: decision.selected_tag_ids ?? row.selected_tag_ids,
+          selected_category_id: selectedCategoryId,
+          category_decided: categoryDecided,
         };
       });
 
@@ -262,6 +286,29 @@ export default function ReviewWorkspace({
       row_id: row.row_id,
       selected_tag_ids: row.selected_tag_ids.filter((id) => id !== tagId),
     });
+  }
+
+  function changeCategory(row: ImportReviewRow, categoryId: string) {
+    patch({ row_id: row.row_id, selected_category_id: categoryId });
+  }
+
+  function clearCategory(row: ImportReviewRow) {
+    patch({ row_id: row.row_id, selected_category_id: null });
+  }
+
+  function restoreSuggestedCategory(row: ImportReviewRow) {
+    patch({ row_id: row.row_id, reset_category_to_suggestion: true });
+  }
+
+  function categoryLabel(row: ImportReviewRow): string {
+    if (!row.selected_category_id) {
+      return "Uncategorised";
+    }
+    const category = categoriesById.get(row.selected_category_id);
+    if (!category) {
+      return categoriesUnavailable ? "Category list unavailable" : "Unavailable category";
+    }
+    return `${category.display_name} (${category.kind})${category.is_archived ? " — archived" : ""}`;
   }
 
   async function commit() {
@@ -339,7 +386,8 @@ export default function ReviewWorkspace({
           {summary.source_kind}
         </p>
         <p className="mt-1">
-          Review version {version} · {summary.possible_duplicate_count} possible duplicate
+          Review version {version} · {summary.categorised_count} of {summary.imported_count}{" "}
+          included rows categorised · {summary.possible_duplicate_count} possible duplicate
           {summary.possible_duplicate_count === 1 ? "" : "s"} · {summary.exact_override_count} exact
           override
           {summary.exact_override_count === 1 ? "" : "s"} · expires{" "}
@@ -347,7 +395,21 @@ export default function ReviewWorkspace({
             {new Date(summary.expires_at).toLocaleString()}
           </time>
         </p>
+        <p className="mt-1">
+          Committing an untouched suggested category does not confirm it. Confirm or change it in
+          Transactions after import.
+        </p>
       </section>
+
+      {categoriesUnavailable ? (
+        <p
+          className="rounded-xl border border-warning-line bg-warning-soft p-3 text-sm font-semibold text-warning-ink"
+          role="alert"
+        >
+          Categories could not be loaded. Category choices are disabled until this page reloads; a
+          selected category is not missing merely because this list failed.
+        </p>
+      ) : null}
 
       {message ? (
         <p
@@ -432,12 +494,13 @@ export default function ReviewWorkspace({
         </div>
 
         <div className={TABLE_WRAPPER_CLASS}>
-          <table className={`${TABLE_CLASS} min-w-[50rem] table-fixed`}>
+          <table className={`${TABLE_CLASS} min-w-[58rem] table-fixed`}>
             <colgroup>
               <col className="w-[6rem]" />
               <col className="w-[7rem]" />
               <col />
               <col className="w-[6.5rem]" />
+              <col className="w-[13rem]" />
               <col className="w-[9rem]" />
               <col className="w-[13rem]" />
               <col className="w-[8rem]" />
@@ -457,6 +520,9 @@ export default function ReviewWorkspace({
                   Amount
                 </th>
                 <th className={TH_CLASS} scope="col">
+                  Category
+                </th>
+                <th className={TH_CLASS} scope="col">
                   Status
                 </th>
                 <th className={TH_CLASS} scope="col">
@@ -470,7 +536,7 @@ export default function ReviewWorkspace({
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-6 text-sm text-muted" colSpan={7}>
+                  <td className="px-4 py-6 text-sm text-muted" colSpan={8}>
                     No rows match this filter.
                   </td>
                 </tr>
@@ -485,6 +551,11 @@ export default function ReviewWorkspace({
                   tag: tagsById.get(id),
                 }));
                 const missingSelected = selected.filter((entry) => entry.tag === undefined);
+                const selectedCategory = row.selected_category_id
+                  ? categoriesById.get(row.selected_category_id)
+                  : undefined;
+                const categoryMissing =
+                  !categoriesUnavailable && row.selected_category_id !== null && !selectedCategory;
                 const isExpanded = expandedRowId === row.row_id;
                 const detailId = `review-row-detail-${row.row_id}`;
 
@@ -510,6 +581,92 @@ export default function ReviewWorkspace({
                         className={`${TD_CLASS} text-right font-mono font-semibold whitespace-nowrap tabular-nums text-ink`}
                       >
                         {row.amount ?? "—"}
+                      </td>
+                      <td className={TD_CLASS}>
+                        <div className="flex flex-col gap-2 text-xs">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span
+                              className={
+                                row.selected_category_id === null
+                                  ? "rounded-full border border-warning-line bg-surface px-2 py-1 font-semibold text-ink"
+                                  : row.category_decided
+                                    ? "rounded-full border border-line bg-page px-2 py-1 font-semibold text-ink"
+                                    : "rounded-full border border-suggestion-line bg-suggestion-soft px-2 py-1 font-semibold text-suggestion-ink"
+                              }
+                            >
+                              {categoryLabel(row)}
+                            </span>
+                            {!row.category_decided && row.selected_category_id !== null ? (
+                              <span className="font-semibold text-suggestion-ink">
+                                Suggested from your history or alias
+                              </span>
+                            ) : null}
+                            {!row.category_decided && row.selected_category_id === null ? (
+                              <span className="font-semibold text-muted">No category evidence</span>
+                            ) : null}
+                            {row.category_decided && row.selected_category_id === null ? (
+                              <span className="font-semibold text-muted">Cleared</span>
+                            ) : null}
+                            {categoryMissing ? (
+                              <span className="font-semibold text-warning-ink">
+                                Unavailable — choose again or clear
+                              </span>
+                            ) : null}
+                          </div>
+                          <select
+                            aria-label={`Category for row ${row.source_row_number}`}
+                            className="w-full rounded-lg border border-line bg-page px-2 py-1.5 text-xs font-normal text-ink"
+                            disabled={busy || categoriesUnavailable}
+                            onChange={(event) => {
+                              if (event.target.value) {
+                                changeCategory(row, event.target.value);
+                              }
+                            }}
+                            value={row.selected_category_id ?? ""}
+                          >
+                            <option value="" disabled>
+                              Choose a category…
+                            </option>
+                            {selectedCategory ? (
+                              <option value={selectedCategory.id}>
+                                {selectedCategory.display_name} ({selectedCategory.kind})
+                                {selectedCategory.is_archived ? " — archived" : ""}
+                              </option>
+                            ) : null}
+                            {categoryMissing ? (
+                              <option value={row.selected_category_id!}>
+                                Unavailable category
+                              </option>
+                            ) : null}
+                            {assignableCategories.map((category) => (
+                              <option key={category.id} value={category.id}>
+                                {category.display_name} ({category.kind})
+                              </option>
+                            ))}
+                          </select>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              className="rounded-full border border-line px-2 py-1 text-xs font-bold text-ink disabled:opacity-60"
+                              disabled={
+                                busy || categoriesUnavailable || row.selected_category_id === null
+                              }
+                              onClick={() => clearCategory(row)}
+                              type="button"
+                            >
+                              Clear
+                            </button>
+                            {row.category_decided ? (
+                              <button
+                                className="rounded-full border border-suggestion-line bg-suggestion-soft px-2 py-1 text-xs font-bold text-suggestion-ink disabled:opacity-60"
+                                disabled={busy || categoriesUnavailable}
+                                onClick={() => restoreSuggestedCategory(row)}
+                                type="button"
+                              >
+                                Restore suggestion
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
                       </td>
                       <td className={TD_CLASS}>
                         <div className="flex flex-wrap gap-1.5 text-xs">
@@ -729,7 +886,7 @@ export default function ReviewWorkspace({
                     </tr>
 
                     <tr className={EDITOR_ROW_CLASS} hidden={!isExpanded} id={detailId}>
-                      <td className="px-4 py-4" colSpan={7}>
+                      <td className="px-4 py-4" colSpan={8}>
                         <div className="grid gap-4 lg:grid-cols-2">
                           <div>
                             <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">

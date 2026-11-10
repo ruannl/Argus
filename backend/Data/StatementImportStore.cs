@@ -49,7 +49,10 @@ public sealed record ImportReviewRowRecord(Guid RowId,
                                            bool Skip,
                                            bool Override,
                                            Guid[] SuggestedTagIds,
-                                           Guid[] SelectedTagIds);
+                                           Guid[] SelectedTagIds,
+                                           Guid? SuggestedCategoryId,
+                                           Guid? SelectedCategoryId,
+                                           bool CategoryDecided);
 
 public sealed record ImportReviewSummaryRecord(Guid Id,
                                                Guid FinancialAccountId,
@@ -70,6 +73,7 @@ public sealed record ImportReviewSummaryRecord(Guid Id,
                                                int WithinFilePendingCount,
                                                int PossibleDuplicateCount,
                                                int ExactOverrideCount,
+                                               int CategorisedCount,
                                                bool StatementOverride,
                                                int StatementOverrideCount,
                                                long PayloadBytes,
@@ -147,7 +151,10 @@ public sealed record ImportDecision(Guid RowId,
                                     string? WithinFileState,
                                     string? WithinFileGroup,
                                     string? WithinFileAction,
-                                    Guid[]? SelectedTagIds);
+                                    Guid[]? SelectedTagIds,
+                                    Guid? SelectedCategoryId,
+                                    bool HasSelectedCategory,
+                                    bool ResetCategoryToSuggestion);
 
 public sealed class ImportStoreException(string error) : Exception(error)
 {
@@ -173,6 +180,7 @@ public static class ImportErrorCodes
     public const string AccountArchived = "account_archived";
     public const string IdentityConflict = "identity_conflict";
     public const string TagUnavailable = "tag_unavailable";
+    public const string CategoryUnavailable = "category_unavailable";
     public const string NoIncludedRows = "no_included_rows";
     public const string InvalidRows = "invalid_rows";
     public const string DuplicateDecisionRequired = "duplicate_decision_required";
@@ -258,7 +266,11 @@ public sealed class StatementImportStore
         }
 
         var snapshot = await ComputeDuplicateSnapshotAsync(connection, transaction, customerId, accountId, parsed.Rows, null, cancellationToken);
-        var rows = snapshot.Rows;
+        var rows = snapshot.Rows.Select(row => row with
+        {
+            SelectedCategoryId = row.SuggestedCategoryId,
+            CategoryDecided = false,
+        }).ToArray();
         long payloadBytes = EstimatePayload(parsed, config, rows);
         if (usedPayloadBytes + payloadBytes > ImportLimits.MaxOpenReviewPayloadBytes)
         {
@@ -310,12 +322,13 @@ public sealed class StatementImportStore
             rows.Count(row => row.WithinFileState == "pending"),
             counts.PossibleDuplicates,
             0,
+            CountCategorised(rows),
             false,
             0,
             payloadBytes,
             now,
             now);
-        var page = new ImportReviewPage(rows.Take(ImportLimits.MaxPageSize).ToArray(), rows.Count, 1, ImportLimits.MaxPageSize);
+        var page = new ImportReviewPage(rows.Take(ImportLimits.MaxPageSize).ToArray(), rows.Length, 1, ImportLimits.MaxPageSize);
 
         return new ImportReviewDetail(summary, page);
     }
@@ -433,7 +446,10 @@ public sealed class StatementImportStore
 
             if (decision.WithinFileAction is not null)
             {
-                if (decision.WithinFileGroup is null || decision.WithinFileAction is not ("keep_all" or "skip_all"))
+                if (decision.WithinFileGroup is null ||
+                    decision.WithinFileAction is not ("keep_all" or "skip_all") ||
+                    decision.HasSelectedCategory ||
+                    decision.ResetCategoryToSuggestion)
                 {
                     throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
                 }
@@ -490,7 +506,29 @@ public sealed class StatementImportStore
                 throw new ImportStoreException(ImportErrorCodes.TagUnavailable);
             }
 
-            await UpdateRowDecisionsAsync(connection, transaction, row.RowId, skipValue, overrideValue, withinFileState, selectedTagIds, cancellationToken);
+            Guid? selectedCategoryId = row.SelectedCategoryId;
+            bool categoryDecided = row.CategoryDecided;
+            if (decision.ResetCategoryToSuggestion)
+            {
+                if (decision.HasSelectedCategory)
+                {
+                    throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
+                }
+                selectedCategoryId = row.SuggestedCategoryId;
+                categoryDecided = false;
+            }
+            else if (decision.HasSelectedCategory)
+            {
+                if (decision.SelectedCategoryId is Guid categoryId &&
+                    !await CategorySelectableAsync(connection, transaction, customerId, categoryId, cancellationToken))
+                {
+                    throw new ImportStoreException(ImportErrorCodes.CategoryUnavailable);
+                }
+                selectedCategoryId = decision.SelectedCategoryId;
+                categoryDecided = true;
+            }
+
+            await UpdateRowDecisionsAsync(connection, transaction, row.RowId, skipValue, overrideValue, withinFileState, selectedTagIds, selectedCategoryId, categoryDecided, cancellationToken);
 
             byId[row.RowId] = row with
             {
@@ -498,6 +536,8 @@ public sealed class StatementImportStore
                 Override = overrideValue,
                 WithinFileState = withinFileState,
                 SelectedTagIds = selectedTagIds,
+                SelectedCategoryId = selectedCategoryId,
+                CategoryDecided = categoryDecided,
             };
         }
 
@@ -515,6 +555,7 @@ public sealed class StatementImportStore
                 merged = oldRow with
                 {
                     WithinFileState = oldRow.WithinFileGroup is null ? "none" : "skip",
+                    SuggestedCategoryId = fresh.SuggestedCategoryId,
                 };
             }
             else if (oldRow.Override)
@@ -526,6 +567,7 @@ public sealed class StatementImportStore
                     WithinFileState = fresh.WithinFileGroup is null
                         ? "none"
                         : fresh.WithinFileState == "pending" ? "pending" : oldRow.WithinFileState,
+                    SuggestedCategoryId = fresh.SuggestedCategoryId,
                 };
             }
             else
@@ -536,6 +578,9 @@ public sealed class StatementImportStore
                     Skip = false,
                     Override = false,
                     SelectedTagIds = oldRow.SelectedTagIds,
+                    SuggestedCategoryId = fresh.SuggestedCategoryId,
+                    SelectedCategoryId = oldRow.SelectedCategoryId,
+                    CategoryDecided = oldRow.CategoryDecided,
                     WithinFileState = withinState,
                 };
             }
@@ -570,6 +615,7 @@ public sealed class StatementImportStore
             WithinFilePendingCount = updatedRows.Count(row => row.WithinFileState == "pending"),
             PossibleDuplicateCount = counts.PossibleDuplicates,
             ExactOverrideCount = counts.ExactOverrides,
+            CategorisedCount = CountCategorised(updatedRows),
             StatementOverride = overrideFlag,
             StatementOverrideCount = overrideFlag ? 1 : 0,
             PayloadBytes = payloadBytes,
@@ -614,14 +660,28 @@ public sealed class StatementImportStore
                 refreshedRow = oldRow with
                 {
                     WithinFileState = oldRow.WithinFileGroup is null ? "none" : "skip",
+                    SuggestedCategoryId = fresh.SuggestedCategoryId,
+                    SelectedCategoryId = oldRow.CategoryDecided ? oldRow.SelectedCategoryId : fresh.SuggestedCategoryId,
                 };
             }
             else if (oldRow.Override)
             {
                 bool stillSuppressed = fresh.DuplicateState is "suppressed" or "suppressed_within_file";
                 refreshedRow = stillSuppressed
-                    ? oldRow
-                    : fresh with { Skip = false, Override = false, SelectedTagIds = oldRow.SelectedTagIds };
+                    ? oldRow with
+                    {
+                        SuggestedCategoryId = fresh.SuggestedCategoryId,
+                        SelectedCategoryId = oldRow.CategoryDecided ? oldRow.SelectedCategoryId : fresh.SuggestedCategoryId,
+                    }
+                    : fresh with
+                    {
+                        Skip = false,
+                        Override = false,
+                        SelectedTagIds = oldRow.SelectedTagIds,
+                        SuggestedCategoryId = fresh.SuggestedCategoryId,
+                        SelectedCategoryId = oldRow.CategoryDecided ? oldRow.SelectedCategoryId : fresh.SuggestedCategoryId,
+                        CategoryDecided = oldRow.CategoryDecided,
+                    };
             }
             else
             {
@@ -631,6 +691,9 @@ public sealed class StatementImportStore
                     Skip = false,
                     Override = false,
                     SelectedTagIds = oldRow.SelectedTagIds,
+                    SuggestedCategoryId = fresh.SuggestedCategoryId,
+                    SelectedCategoryId = oldRow.CategoryDecided ? oldRow.SelectedCategoryId : fresh.SuggestedCategoryId,
+                    CategoryDecided = oldRow.CategoryDecided,
                     WithinFileState = withinState,
                 };
             }
@@ -665,6 +728,7 @@ public sealed class StatementImportStore
             WithinFilePendingCount = refreshed.Count(row => row.WithinFileState == "pending"),
             PossibleDuplicateCount = counts.PossibleDuplicates,
             ExactOverrideCount = counts.ExactOverrides,
+            CategorisedCount = CountCategorised(refreshed),
             AccountImportVersion = account.ImportVersion,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -1056,12 +1120,13 @@ public sealed class StatementImportStore
             connection, transaction, customerId, merchantKeys, cancellationToken);
         foreach (var snapshot in snapshots)
         {
-            foreach (var tagId in MerchantSuggestions.Build(
-                         snapshot.Row.NormalizedDescription, activeTags, suggestions)
-                     .TagIds.Take(MerchantSuggestions.MaxSuggestions))
+            SuggestionResult result = MerchantSuggestions.Build(
+                snapshot.Row.NormalizedDescription, activeTags, suggestions);
+            foreach (var tagId in result.TagIds.Take(MerchantSuggestions.MaxSuggestions))
             {
                 snapshot.SuggestedTagIds.Add(tagId);
             }
+            snapshot.SuggestedCategoryId = result.CategoryId;
         }
 
         var rows = new List<ImportReviewRowRecord>(parsedRows.Count);
@@ -1108,7 +1173,10 @@ public sealed class StatementImportStore
                 false,
                 false,
                 snapshot.SuggestedTagIds.Distinct().ToArray(),
-                []));
+                [],
+                snapshot.SuggestedCategoryId,
+                snapshot.SuggestedCategoryId,
+                false));
         }
 
         return new DuplicateSnapshot(rows);
@@ -1365,6 +1433,12 @@ public sealed class StatementImportStore
                    (SELECT COUNT(*) FROM import_review_rows r
                     WHERE r.review_id = import_reviews.id AND r.within_file_state = 'pending') AS within_file_pending_count,
                    possible_duplicate_count, exact_override_count,
+                   (SELECT COUNT(*) FROM import_review_rows r
+                    WHERE r.review_id = import_reviews.id
+                      AND r.skip = FALSE
+                      AND r.transaction_date IS NOT NULL AND r.amount_cents IS NOT NULL
+                      AND (r.duplicate_state NOT IN ('suppressed', 'suppressed_within_file') OR r.override)
+                      AND r.selected_category_id IS NOT NULL) AS categorised_count,
                    statement_override, statement_override_count, payload_bytes, created_at, updated_at
             FROM import_reviews
             WHERE customer_id = @customer_id AND id = @id
@@ -1398,11 +1472,12 @@ public sealed class StatementImportStore
             reader.GetInt32(16),
             reader.GetInt32(17),
             reader.GetInt32(18),
-            reader.GetBoolean(19),
-            reader.GetInt32(20),
-            reader.GetInt64(21),
-            reader.GetFieldValue<DateTime>(22),
-            reader.GetFieldValue<DateTime>(23));
+            reader.GetInt32(19),
+            reader.GetBoolean(20),
+            reader.GetInt32(21),
+            reader.GetInt64(22),
+            reader.GetFieldValue<DateTime>(23),
+            reader.GetFieldValue<DateTime>(24));
     }
 
     private static async Task<IReadOnlyList<ImportReviewRowRecord>> ReadReviewRowsAsync(NpgsqlConnection connection,
@@ -1427,7 +1502,7 @@ public sealed class StatementImportStore
                    duplicate_state, duplicate_reasons::text, matching_transaction_ids::text,
                    matching_import_ids::text, near_candidates::text, near_candidate_total,
                    within_file_group, within_file_state, skip, override, suggested_tag_ids::text,
-                   selected_tag_ids::text
+                   selected_tag_ids::text, suggested_category_id, selected_category_id, category_decided
             FROM import_review_rows
             WHERE review_id = @review_id
               AND (@possible_only = FALSE OR (
@@ -1473,7 +1548,10 @@ public sealed class StatementImportStore
                 reader.GetBoolean(21),
                 reader.GetBoolean(22),
                 JsonSerializer.Deserialize<Guid[]>(reader.GetString(23), _storageJson) ?? [],
-                JsonSerializer.Deserialize<Guid[]>(reader.GetString(24), _storageJson) ?? []));
+                JsonSerializer.Deserialize<Guid[]>(reader.GetString(24), _storageJson) ?? [],
+                reader.IsDBNull(25) ? null : reader.GetGuid(25),
+                reader.IsDBNull(26) ? null : reader.GetGuid(26),
+                reader.GetBoolean(27)));
         }
 
         return rows;
@@ -1572,6 +1650,7 @@ public sealed class StatementImportStore
             "source_id_value, validation_codes, warnings, duplicate_state, duplicate_reasons, " +
             "matching_transaction_ids, matching_import_ids, near_candidates, near_candidate_total, " +
             "within_file_group, within_file_state, skip, override, suggested_tag_ids, selected_tag_ids, " +
+            "suggested_category_id, selected_category_id, category_decided, " +
             "created_at, updated_at" +
             ") FROM STDIN (FORMAT BINARY)",
             cancellationToken);
@@ -1649,6 +1728,23 @@ public sealed class StatementImportStore
                 await copy.WriteAsync(row.Override, NpgsqlDbType.Boolean, cancellationToken);
                 await copy.WriteAsync(JsonSerializer.Serialize(row.SuggestedTagIds, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
                 await copy.WriteAsync(JsonSerializer.Serialize(row.SelectedTagIds, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
+                if (row.SuggestedCategoryId is null)
+                {
+                    await copy.WriteNullAsync(cancellationToken);
+                }
+                else
+                {
+                    await copy.WriteAsync(row.SuggestedCategoryId.Value, NpgsqlDbType.Uuid, cancellationToken);
+                }
+                if (row.SelectedCategoryId is null)
+                {
+                    await copy.WriteNullAsync(cancellationToken);
+                }
+                else
+                {
+                    await copy.WriteAsync(row.SelectedCategoryId.Value, NpgsqlDbType.Uuid, cancellationToken);
+                }
+                await copy.WriteAsync(row.CategoryDecided, NpgsqlDbType.Boolean, cancellationToken);
                 await copy.WriteAsync(now, NpgsqlDbType.TimestampTz, cancellationToken);
                 await copy.WriteAsync(now, NpgsqlDbType.TimestampTz, cancellationToken);
             }
@@ -1691,6 +1787,8 @@ public sealed class StatementImportStore
                                                       bool overrideValue,
                                                       string withinFileState,
                                                       Guid[] selectedTagIds,
+                                                      Guid? selectedCategoryId,
+                                                      bool categoryDecided,
                                                       CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
@@ -1701,6 +1799,8 @@ public sealed class StatementImportStore
                 override = @override,
                 within_file_state = @within_file_state,
                 selected_tag_ids = @selected_tag_ids,
+                selected_category_id = @selected_category_id,
+                category_decided = @category_decided,
                 updated_at = NOW()
             WHERE row_id = @row_id
             """;
@@ -1708,6 +1808,8 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("override", overrideValue);
         command.Parameters.AddWithValue("within_file_state", withinFileState);
         command.Parameters.AddWithValue("selected_tag_ids", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(selectedTagIds, _storageJson));
+        command.Parameters.AddWithValue("selected_category_id", NpgsqlDbType.Uuid, (object?)selectedCategoryId ?? DBNull.Value);
+        command.Parameters.AddWithValue("category_decided", categoryDecided);
         command.Parameters.AddWithValue("row_id", rowId);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -1731,6 +1833,9 @@ public sealed class StatementImportStore
                 within_file_state = @within_file_state,
                 override = @override,
                 suggested_tag_ids = @suggested_tag_ids,
+                suggested_category_id = @suggested_category_id,
+                selected_category_id = @selected_category_id,
+                category_decided = @category_decided,
                 updated_at = NOW()
             WHERE row_id = @row_id
             """;
@@ -1744,6 +1849,9 @@ public sealed class StatementImportStore
         command.Parameters.AddWithValue("within_file_state", row.WithinFileState);
         command.Parameters.AddWithValue("override", row.Override);
         command.Parameters.AddWithValue("suggested_tag_ids", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(row.SuggestedTagIds, _storageJson));
+        command.Parameters.AddWithValue("suggested_category_id", NpgsqlDbType.Uuid, (object?)row.SuggestedCategoryId ?? DBNull.Value);
+        command.Parameters.AddWithValue("selected_category_id", NpgsqlDbType.Uuid, (object?)row.SelectedCategoryId ?? DBNull.Value);
+        command.Parameters.AddWithValue("category_decided", row.CategoryDecided);
         command.Parameters.AddWithValue("row_id", row.RowId);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -1929,6 +2037,14 @@ public sealed class StatementImportStore
         return new RowCounts(total, imported, suppressed, skipped, possibleDuplicates, exactOverrides);
     }
 
+    private static int CountCategorised(IReadOnlyList<ImportReviewRowRecord> rows) =>
+        rows.Count(row =>
+            !row.Skip &&
+            row.TransactionDate is not null &&
+            row.AmountCents is not null &&
+            (row.DuplicateState is not ("suppressed" or "suppressed_within_file") || row.Override) &&
+            row.SelectedCategoryId is not null);
+
     private static string ComputeSummaryHash(Guid reviewId,
                                              int version,
                                              IReadOnlyList<ImportReviewRowRecord> rows,
@@ -1964,6 +2080,7 @@ public sealed class StatementImportStore
             Add(row.DuplicateState);
             Add(string.Join(',', row.DuplicateReasons.Order(StringComparer.Ordinal)));
             Add(string.Join(',', row.SelectedTagIds.Order()));
+            Add(row.SelectedCategoryId?.ToString("N") ?? string.Empty);
         }
 
         return Convert.ToHexStringLower(hash.GetHashAndReset());
@@ -2127,6 +2244,19 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.TagUnavailable);
         }
         _faults.OnStep("tags_validated");
+
+        var selectedCategoryIds = included
+            .Where(row => row.SelectedCategoryId is not null)
+            .Select(row => row.SelectedCategoryId!.Value)
+            .Distinct()
+            .Order()
+            .ToArray();
+        if (selectedCategoryIds.Length > 0 &&
+            !await CategoriesSelectableAsync(connection, transaction, customerId, selectedCategoryIds, cancellationToken))
+        {
+            throw new ImportStoreException(ImportErrorCodes.CategoryUnavailable);
+        }
+
         await ThrowIfCommitExpiredAsync(connection, transaction, review.ExpiresAt, cancellationToken);
 
         var fingerprintMatches = await FingerprintMatchesAsync(connection, transaction, customerId, accountId.Value, review.StatementFingerprint, cancellationToken);
@@ -2201,7 +2331,7 @@ public sealed class StatementImportStore
         await using (var copy = await connection.BeginBinaryImportAsync(
             "COPY transactions (" +
             "id, customer_id, financial_account_id, statement_import_id, transaction_date, " +
-            "description, normalized_description, amount, category_id, source_type, source_page, " +
+            "description, normalized_description, amount, category_id, category_confirmed, source_type, source_page, " +
             "source_row_number, identity_key, occurrence_index, identity_version, source_id_namespace, " +
             "source_id_value, is_hidden_by_user, version, created_at, updated_at" +
             ") FROM STDIN (FORMAT BINARY)", cancellationToken))
@@ -2222,7 +2352,8 @@ public sealed class StatementImportStore
                 copy.Write(row.Description, NpgsqlDbType.Text);
                 copy.Write(row.NormalizedDescription, NpgsqlDbType.Text);
                 copy.Write(row.AmountCents!.Value / 100m, NpgsqlDbType.Numeric);
-                copy.Write(categoryId.Value, NpgsqlDbType.Uuid);
+                copy.Write(row.SelectedCategoryId ?? categoryId.Value, NpgsqlDbType.Uuid);
+                copy.Write(row.CategoryDecided, NpgsqlDbType.Boolean);
                 copy.Write(review.SourceKind, NpgsqlDbType.Text);
                 if (row.SourcePage is null)
                 {
@@ -3123,6 +3254,52 @@ public sealed class StatementImportStore
         return available == tagIds.Length;
     }
 
+    private static async Task<bool> CategorySelectableAsync(NpgsqlConnection connection,
+                                                            NpgsqlTransaction? transaction,
+                                                            Guid customerId,
+                                                            Guid categoryId,
+                                                            CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT 1 FROM categories
+            WHERE customer_id = @customer_id AND id = @id
+              AND is_archived = FALSE AND is_system = FALSE
+            """;
+        command.Parameters.AddWithValue("customer_id", customerId);
+        command.Parameters.AddWithValue("id", categoryId);
+
+        return await command.ExecuteScalarAsync(cancellationToken) is not null;
+    }
+
+    private static async Task<bool> CategoriesSelectableAsync(NpgsqlConnection connection,
+                                                              NpgsqlTransaction transaction,
+                                                              Guid customerId,
+                                                              Guid[] categoryIds,
+                                                              CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT id FROM categories
+            WHERE customer_id = @customer_id AND id = ANY(@ids)
+              AND is_archived = FALSE AND is_system = FALSE
+            ORDER BY id
+            FOR SHARE
+            """;
+        command.Parameters.AddWithValue("customer_id", customerId);
+        command.Parameters.AddWithValue("ids", categoryIds);
+        int available = 0;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            available++;
+        }
+
+        return available == categoryIds.Length;
+    }
+
     private static async Task<IReadOnlyList<Guid>> FingerprintMatchesAsync(NpgsqlConnection connection,
                                                                            NpgsqlTransaction transaction,
                                                                            Guid customerId,
@@ -3287,6 +3464,7 @@ public sealed class StatementImportStore
         public List<Guid> MatchingImportIds { get; } = [];
         public List<Candidate> NearCandidates { get; } = [];
         public List<Guid> SuggestedTagIds { get; } = [];
+        public Guid? SuggestedCategoryId { get; set; }
         public string? WithinFileGroup { get; set; }
         public string WithinFileState { get; set; } = "none";
     }

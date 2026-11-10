@@ -110,7 +110,8 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
                                                     Guid[]? tagIds = null,
                                                     bool hidden = false,
                                                     int version = 1,
-                                                    int? sourcePage = null)
+                                                    int? sourcePage = null,
+                                                    bool categoryConfirmed = true)
     {
         Guid id = Guid.NewGuid();
         await ExecuteSqlParamsAsync(
@@ -118,13 +119,13 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
             INSERT INTO transactions (
                 id, customer_id, financial_account_id, statement_import_id,
                 transaction_date, description, normalized_description, amount,
-                category_id, source_type, source_page, source_row_number,
+                category_id, category_confirmed, source_type, source_page, source_row_number,
                 identity_key, occurrence_index, is_hidden_by_user, version,
                 created_at, updated_at)
             VALUES (
                 @id, @customer_id, @account_id, @statement_id,
                 @date, @description, @normalized, @amount,
-                @category_id, 'fnb_csv', @source_page, @source_row,
+                @category_id, @category_confirmed, 'fnb_csv', @source_page, @source_row,
                 @identity_key, 1, @hidden, @version, NOW(), NOW())
             """,
             ("id", id),
@@ -136,6 +137,7 @@ public abstract class TransactionTestBase(KitFactory factory) : ApiTestBase(fact
             ("normalized", description.ToLowerInvariant()),
             ("amount", amount),
             ("category_id", categoryId),
+            ("category_confirmed", categoryConfirmed),
             ("source_page", sourcePage),
             ("source_row", sourceRowNumber),
             ("identity_key", "seed-" + id.ToString("N")),

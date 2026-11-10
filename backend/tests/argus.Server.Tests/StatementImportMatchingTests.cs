@@ -77,7 +77,7 @@ public sealed class StatementImportMatchingTests(KitFactory factory) : ApiTestBa
         };
         var first = await store.CreateReviewAsync(customerId, accountId, StatementSourceKind.GenericCsv, config, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), Statement(firstRows));
         var identityKey = StatementIdentity.ComputeIdentityKey(new DateOnly(2025, 1, 2), -1000, "coffee");
-        var patched = await store.PatchReviewAsync(customerId, first.Summary.Id, first.Summary.Version, [new ImportDecision(firstRows[0].RowId, null, null, null, identityKey, "keep_all", null)], null);
+        var patched = await store.PatchReviewAsync(customerId, first.Summary.Id, first.Summary.Version, [new ImportDecision(firstRows[0].RowId, null, null, null, identityKey, "keep_all", null, null, false, false)], null);
         var committed = await store.CommitReviewAsync(customerId, first.Summary.Id, patched.Version, patched.SummaryHash);
         Assert.Equal(2, committed.Summary.ImportedCount);
 

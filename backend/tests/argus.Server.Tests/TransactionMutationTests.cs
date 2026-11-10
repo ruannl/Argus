@@ -775,6 +775,83 @@ public sealed class TransactionMutationTests(KitFactory factory, ITestOutputHelp
         Assert.Equal(0L, await ScalarAsync($"SELECT COUNT(*) FROM transactions WHERE customer_id = '{customerId}' AND version > 1"));
     }
 
+    [Fact]
+    public async Task ConfirmCategoryIsIdempotentAndNeverChangesTheCategory()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var (_, expenseId) = await DefaultCategoriesAsync(session);
+        var statementId = await SeedStatementAsync(customerId, accountId);
+        var transactionId = await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2024, 1, 5), "Unconfirmed row", -12.34m, categoryConfirmed: false);
+
+        var first = await SendAsync(Patch(
+            $"/v1/finance/transactions/{transactionId}",
+            Json(new { expected_version = 1, changes = new { confirm_category = true } }),
+            session: session));
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var firstBody = await BodyAsync(first);
+        Assert.True(firstBody.GetProperty("transaction").GetProperty("category_confirmed").GetBoolean());
+        Assert.Equal(expenseId, firstBody.GetProperty("transaction").GetProperty("category").GetProperty("id").GetGuid());
+        Assert.Equal(1, firstBody.GetProperty("changed_count").GetInt32());
+        var version = firstBody.GetProperty("transaction").GetProperty("version").GetInt32();
+
+        var repeat = await SendAsync(Patch(
+            $"/v1/finance/transactions/{transactionId}",
+            Json(new { expected_version = version, changes = new { confirm_category = true } }),
+            session: session));
+        Assert.Equal(HttpStatusCode.OK, repeat.StatusCode);
+        var repeatBody = await BodyAsync(repeat);
+        Assert.Equal(0, repeatBody.GetProperty("changed_count").GetInt32());
+        Assert.Equal(1, repeatBody.GetProperty("unchanged_count").GetInt32());
+        Assert.Equal(version, repeatBody.GetProperty("transaction").GetProperty("version").GetInt32());
+
+        var secondId = await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2024, 1, 6), "Same category row", -13.00m, sourceRowNumber: 2, categoryConfirmed: false);
+        var assigned = await SendAsync(Patch(
+            $"/v1/finance/transactions/{secondId}",
+            Json(new { expected_version = 1, changes = new { category_id = expenseId } }),
+            session: session));
+        Assert.Equal(HttpStatusCode.OK, assigned.StatusCode);
+        var assignedBody = await BodyAsync(assigned);
+        Assert.True(assignedBody.GetProperty("transaction").GetProperty("category_confirmed").GetBoolean());
+        Assert.Equal(expenseId, assignedBody.GetProperty("transaction").GetProperty("category").GetProperty("id").GetGuid());
+        Assert.Equal(1, assignedBody.GetProperty("changed_count").GetInt32());
+    }
+
+    [Fact]
+    public async Task BulkConfirmCategorySetsOnlyTheFlagAcrossMatchingRows()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var (_, expenseId) = await DefaultCategoriesAsync(session);
+        var statementId = await SeedStatementAsync(customerId, accountId);
+        var first = await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2024, 1, 5), "Bulk unconfirmed one", -10.00m, 1, categoryConfirmed: false);
+        var second = await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2024, 1, 6), "Bulk unconfirmed two", -11.00m, 2, categoryConfirmed: false);
+        var confirmed = await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2024, 1, 7), "Bulk confirmed", -12.00m, 3);
+
+        var operationId = Guid.NewGuid();
+        var operation = await PrepareAsync(session, operationId, AllMatching(new { category_confirmed = false }), new { confirm_category = true });
+        var prepared = operation.GetProperty("operation");
+        Assert.Equal(2, prepared.GetProperty("selected_count").GetInt32());
+        Assert.Equal(2, prepared.GetProperty("changed_count").GetInt32());
+        Assert.True(prepared.GetProperty("action").GetProperty("confirm_category").GetBoolean());
+        var actionJson = await ActionJsonAsync(operationId);
+        Assert.Contains("confirm_category", actionJson, StringComparison.Ordinal);
+
+        var applied = await ApplyAsync(session, operation);
+        Assert.Equal(2, applied.GetProperty("changed_count").GetInt32());
+        var replay = await ApplyAsync(session, operation);
+        Assert.True(replay.GetProperty("replayed").GetBoolean());
+        Assert.Equal(2, replay.GetProperty("changed_count").GetInt32());
+        Assert.Equal(0L, await ScalarAsync($"SELECT COUNT(*) FROM transactions WHERE customer_id = '{customerId}' AND category_confirmed = FALSE"));
+        Assert.Equal(expenseId, Guid.Parse((await StringScalarAsync($"SELECT category_id::text FROM transactions WHERE id = '{first}'"))!));
+        Assert.Equal(expenseId, Guid.Parse((await StringScalarAsync($"SELECT category_id::text FROM transactions WHERE id = '{second}'"))!));
+        Assert.True(bool.Parse((await StringScalarAsync($"SELECT category_confirmed::text FROM transactions WHERE id = '{confirmed}'"))!));
+
+        var conflict = await PrepareResponseAsync(session, Guid.NewGuid(), Explicit((first, 2)), new { category_id = expenseId, confirm_category = true });
+        Assert.Equal(HttpStatusCode.BadRequest, conflict.StatusCode);
+        Assert.Equal("invalid_request", await ErrorKindAsync(conflict));
+    }
+
     private async Task SeedBulkTransactionsAsync(Guid customerId,
                                                  Guid accountId,
                                                  Guid statementId,

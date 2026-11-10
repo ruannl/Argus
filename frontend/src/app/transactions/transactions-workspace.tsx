@@ -80,6 +80,8 @@ function omitEmptyFilters(filters: TransactionFilters): TransactionFilters {
   if (filters.statement_import_id) next.statement_import_id = filters.statement_import_id;
   if (filters.category_id) next.category_id = filters.category_id;
   if (filters.merchant_tag) next.merchant_tag = filters.merchant_tag;
+  if (filters.category_confirmed !== undefined)
+    next.category_confirmed = filters.category_confirmed;
   if (filters.category_kind) next.category_kind = filters.category_kind;
   if (filters.direction) next.direction = filters.direction;
   if (filters.visibility) next.visibility = filters.visibility;
@@ -153,6 +155,7 @@ export default function TransactionsWorkspace({
   const [bulkAddTagIds, setBulkAddTagIds] = useState<string[]>([]);
   const [bulkRemoveTagIds, setBulkRemoveTagIds] = useState<string[]>([]);
   const [bulkHidden, setBulkHidden] = useState<boolean | null>(null);
+  const [bulkConfirmCategory, setBulkConfirmCategory] = useState(false);
 
   const [prepared, setPrepared] = useState<TransactionOperation | null>(null);
   const [recovery, setRecovery] = useState<TransactionOperation | null>(null);
@@ -197,7 +200,8 @@ export default function TransactionsWorkspace({
     bulkCategoryId !== "" ||
     bulkAddTagIds.length > 0 ||
     bulkRemoveTagIds.length > 0 ||
-    bulkHidden !== null;
+    bulkHidden !== null ||
+    bulkConfirmCategory;
   const canPrepare = hasBulkAction && (allMatching || selectionCount > 0) && !busy && !operationId;
 
   const selectionLabel = allMatching
@@ -238,6 +242,7 @@ export default function TransactionsWorkspace({
         "statement_import_id",
         "category_id",
         "merchant_tag",
+        "category_confirmed",
         "category_kind",
         "direction",
         "visibility",
@@ -477,6 +482,7 @@ export default function TransactionsWorkspace({
     setBulkAddTagIds([]);
     setBulkRemoveTagIds([]);
     setBulkHidden(null);
+    setBulkConfirmCategory(false);
   }
 
   function syncCurrentUrl() {
@@ -687,7 +693,7 @@ export default function TransactionsWorkspace({
     if (!hasBulkAction) {
       setMessage({
         tone: "error",
-        text: "Choose a category, tag change, or hide/restore action first.",
+        text: "Choose a category, tag change, hide/restore, or category confirmation first.",
       });
       return;
     }
@@ -701,11 +707,13 @@ export default function TransactionsWorkspace({
       add_tag_ids?: string[];
       remove_tag_ids?: string[];
       is_hidden_by_user?: boolean;
+      confirm_category?: boolean;
     } = {};
     if (bulkCategoryId) changes.category_id = bulkCategoryId;
     if (bulkAddTagIds.length > 0) changes.add_tag_ids = bulkAddTagIds;
     if (bulkRemoveTagIds.length > 0) changes.remove_tag_ids = bulkRemoveTagIds;
     if (bulkHidden !== null) changes.is_hidden_by_user = bulkHidden;
+    if (bulkConfirmCategory) changes.confirm_category = true;
 
     if (operationIdRef.current) {
       setMessage({
@@ -1347,6 +1355,22 @@ export default function TransactionsWorkspace({
               {value === "visible" ? "Visible" : value === "hidden" ? "Hidden" : "All"}
             </button>
           ))}
+          <button
+            aria-pressed={filters.category_confirmed === false}
+            className={
+              filters.category_confirmed === false
+                ? "rounded-full border border-suggestion-line bg-suggestion-soft px-4 py-2 text-sm font-bold text-suggestion-ink"
+                : "rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+            }
+            onClick={() =>
+              changeFilters({
+                category_confirmed: filters.category_confirmed === false ? undefined : false,
+              })
+            }
+            type="button"
+          >
+            Suggested or unconfirmed
+          </button>
           <label className="ml-auto text-sm font-semibold text-ink">
             Page size
             <select
@@ -1455,7 +1479,9 @@ export default function TransactionsWorkspace({
                 Set category
                 <select
                   className="mt-1 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
-                  disabled={!canAssignCategories || busy || operationId !== null}
+                  disabled={
+                    !canAssignCategories || busy || operationId !== null || bulkConfirmCategory
+                  }
                   onChange={(event) => setBulkCategoryId(event.target.value)}
                   value={bulkCategoryId}
                 >
@@ -1471,7 +1497,9 @@ export default function TransactionsWorkspace({
                 Add tags
                 <select
                   className="mt-1 h-24 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
-                  disabled={!canAssignCategories || busy || operationId !== null}
+                  disabled={
+                    !canAssignCategories || busy || operationId !== null || bulkConfirmCategory
+                  }
                   multiple
                   onChange={(event) =>
                     setBulkAddTagIds(
@@ -1491,7 +1519,9 @@ export default function TransactionsWorkspace({
                 Remove tags
                 <select
                   className="mt-1 h-24 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
-                  disabled={!canAssignCategories || busy || operationId !== null}
+                  disabled={
+                    !canAssignCategories || busy || operationId !== null || bulkConfirmCategory
+                  }
                   multiple
                   onChange={(event) =>
                     setBulkRemoveTagIds(
@@ -1518,7 +1548,7 @@ export default function TransactionsWorkspace({
                         ? "rounded-full bg-ink px-4 py-2 text-sm font-bold text-page"
                         : "rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
                     }
-                    disabled={busy || operationId !== null}
+                    disabled={busy || operationId !== null || bulkConfirmCategory}
                     onClick={() => setBulkHidden((current) => (current === true ? null : true))}
                     type="button"
                   >
@@ -1531,7 +1561,7 @@ export default function TransactionsWorkspace({
                         ? "rounded-full bg-ink px-4 py-2 text-sm font-bold text-page"
                         : "rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
                     }
-                    disabled={busy || operationId !== null}
+                    disabled={busy || operationId !== null || bulkConfirmCategory}
                     onClick={() => setBulkHidden((current) => (current === false ? null : false))}
                     type="button"
                   >
@@ -1541,6 +1571,34 @@ export default function TransactionsWorkspace({
                 <p className="mt-1 text-xs font-normal text-muted">
                   Restore refuses wholly when any selected transaction has a hidden parent
                   statement.
+                </p>
+              </div>
+              <div className="text-sm font-semibold text-ink">
+                Category confirmation
+                <div className="mt-1">
+                  <button
+                    aria-pressed={bulkConfirmCategory}
+                    className={
+                      bulkConfirmCategory
+                        ? "rounded-full border border-suggestion-line bg-suggestion-soft px-4 py-2 text-sm font-bold text-suggestion-ink"
+                        : "rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                    }
+                    disabled={busy || operationId !== null}
+                    onClick={() => {
+                      setBulkConfirmCategory((current) => !current);
+                      setBulkCategoryId("");
+                      setBulkAddTagIds([]);
+                      setBulkRemoveTagIds([]);
+                      setBulkHidden(null);
+                    }}
+                    type="button"
+                  >
+                    Confirm category only
+                  </button>
+                </div>
+                <p className="mt-1 text-xs font-normal text-muted">
+                  Confirms the current category without changing it. It cannot be combined with
+                  another bulk change.
                 </p>
               </div>
             </div>
@@ -1691,6 +1749,14 @@ export default function TransactionsWorkspace({
                               >
                                 {row.category.display_name} ({row.category.kind})
                               </span>
+                              {!row.category_confirmed && row.category.kind !== "Uncategorised" ? (
+                                <span className="rounded-full border border-suggestion-line bg-suggestion-soft px-2 py-1 font-semibold text-suggestion-ink">
+                                  <span className="sr-only">
+                                    Suggested category, not yet confirmed:{" "}
+                                  </span>
+                                  Suggested
+                                </span>
+                              ) : null}
                               {row.category.is_archived ? (
                                 <span className="rounded-full border border-line bg-elevated px-2 py-1 font-semibold text-muted">
                                   Archived category
@@ -1821,6 +1887,7 @@ export default function TransactionsWorkspace({
           <p className="mt-2 text-sm text-accent-soft-ink">
             Action:{" "}
             {preparedAction?.category ? `category “${preparedAction.category.display_name}”; ` : ""}
+            {preparedAction?.confirm_category ? "confirm the current category; " : ""}
             {preparedAction?.add_tags.length
               ? `add ${sortByDisplayName(preparedAction.add_tags)
                   .map((tag) => tag.display_name)

@@ -78,6 +78,7 @@ const row = {
     is_system: false,
     is_archived: false,
   },
+  category_confirmed: true,
   merchant_tags: [],
   statement_import: {
     id: "stmt-1",
@@ -126,6 +127,7 @@ const prepared: TransactionOperation = {
     add_tags: [],
     remove_tags: [],
     is_hidden_by_user: null,
+    confirm_category: null,
     stale: false,
   },
 };
@@ -295,6 +297,41 @@ describe("transactions workspace", () => {
     });
 
     expect(screen.getByText("Uncategorised (Uncategorised)")).toHaveClass("border-warning-line");
+  });
+
+  it("marks unconfirmed suggested categories and filters to them", async () => {
+    const user = userEvent.setup();
+    const unconfirmed = { ...row, category_confirmed: false };
+    renderWorkspace({ initialPage: { ...pageData, transactions: [unconfirmed] } });
+
+    expect(screen.getByText("Suggested")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Suggested or unconfirmed" }));
+
+    await waitFor(() => {
+      const call = vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0];
+      expect(call?.filters?.category_confirmed).toBe(false);
+    });
+  });
+
+  it("prepares a bulk category confirmation without changing categories", async () => {
+    const user = userEvent.setup();
+    vi.mocked(prepareTransactionsAction).mockResolvedValue({
+      ok: true,
+      value: { operation: prepared, created: true },
+    });
+    renderWorkspace();
+
+    await user.click(screen.getByRole("checkbox", { name: /Select transaction Row one/ }));
+    await user.click(screen.getByRole("button", { name: "Confirm category only" }));
+    await user.click(screen.getByRole("button", { name: "Review change" }));
+
+    await waitFor(() => expect(prepareTransactionsAction).toHaveBeenCalled());
+    const input = vi.mocked(prepareTransactionsAction).mock.calls.at(-1)?.[0];
+    expect(input?.changes).toEqual({ confirm_category: true });
+    expect(input?.selection).toEqual({
+      mode: "explicit",
+      transactions: [{ id: "txn-1", expected_version: 1 }],
+    });
   });
 
   it("sorts category and tag options by name", () => {

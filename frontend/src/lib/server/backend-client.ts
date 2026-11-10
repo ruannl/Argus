@@ -722,6 +722,7 @@ export type TransactionFilters = {
   statement_import_id?: string;
   category_id?: string;
   merchant_tag?: string;
+  category_confirmed?: boolean;
   category_kind?: CategoryKind;
   direction?: "in" | "out" | "zero";
   visibility?: TransactionVisibility;
@@ -772,6 +773,7 @@ export type TransactionRow = {
   direction: "in" | "out" | "zero";
   financial_account: TransactionAccountRef;
   category: TransactionCategoryRef;
+  category_confirmed: boolean;
   merchant_tags: TransactionTagRef[];
   statement_import: TransactionStatementRef;
   is_hidden_by_user: boolean;
@@ -806,6 +808,7 @@ export type TransactionChanges = {
   add_tag_ids?: string[];
   remove_tag_ids?: string[];
   is_hidden_by_user?: boolean;
+  confirm_category?: boolean;
 };
 
 export type TransactionPatchInput = {
@@ -835,6 +838,7 @@ export type TransactionOperationAction = {
   add_tags: TransactionTagRef[];
   remove_tags: TransactionTagRef[];
   is_hidden_by_user: boolean | null;
+  confirm_category: boolean | null;
   stale: boolean;
 };
 
@@ -1152,6 +1156,7 @@ export type ImportErrorKind =
   | "account_archived"
   | "identity_conflict"
   | "tag_unavailable"
+  | "category_unavailable"
   | "no_included_rows"
   | "invalid_rows"
   | "duplicate_decision_required"
@@ -1259,6 +1264,9 @@ export type ImportReviewRow = {
   override: boolean;
   suggested_tag_ids: string[];
   selected_tag_ids: string[];
+  suggested_category_id: string | null;
+  selected_category_id: string | null;
+  category_decided: boolean;
 };
 
 export type ImportReviewSummary = {
@@ -1278,6 +1286,7 @@ export type ImportReviewSummary = {
   within_file_pending_count: number;
   possible_duplicate_count: number;
   exact_override_count: number;
+  categorised_count: number;
   statement_override: boolean;
   statement_override_count: number;
   summary_hash: string;
@@ -1318,6 +1327,8 @@ export type ImportReviewDecision = {
   within_file_group?: string;
   within_file_action?: "keep_all" | "skip_all";
   selected_tag_ids?: string[];
+  selected_category_id?: string | null;
+  reset_category_to_suggestion?: boolean;
 };
 
 export type ImportStatementSummary = {
@@ -1405,6 +1416,7 @@ const IMPORT_ERROR_KINDS = new Set<string>([
   "account_archived",
   "identity_conflict",
   "tag_unavailable",
+  "category_unavailable",
   "no_included_rows",
   "invalid_rows",
   "duplicate_decision_required",

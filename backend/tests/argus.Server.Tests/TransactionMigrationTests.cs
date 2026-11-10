@@ -83,7 +83,22 @@ public sealed class TransactionMigrationTests(KitFactory factory) : IClassFixtur
                 await applyLearning.ExecuteNonQueryAsync();
             }
 
+            await using (var applyCategorySuggestion = connection.CreateCommand())
+            {
+                applyCategorySuggestion.CommandText = Migrations.All[8].Sql;
+                await applyCategorySuggestion.ExecuteNonQueryAsync();
+            }
+
+            await using (var applyCategoryConfirmation = connection.CreateCommand())
+            {
+                applyCategoryConfirmation.CommandText = Migrations.All[9].Sql;
+                await applyCategoryConfirmation.ExecuteNonQueryAsync();
+            }
+
             Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM transactions")));
+            Assert.True((bool)(await ScalarAsync(connection, "SELECT category_confirmed FROM transactions"))!);
+            Assert.Equal(3L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM information_schema.columns " + $"WHERE table_schema = '{schema}' AND table_name = 'import_review_rows' " + "AND column_name IN ('suggested_category_id', 'selected_category_id', 'category_decided')")));
+            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM pg_indexes " + $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_unconfirmed_idx'")));
             Assert.Equal("migration row", (string)(await ScalarAsync(connection, "SELECT merchant_key FROM transactions"))!);
             Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM pg_indexes " + $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_merchant_key_idx'")));
             Assert.Equal(0L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM merchant_aliases")));

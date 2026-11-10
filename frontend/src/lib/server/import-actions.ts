@@ -59,6 +59,8 @@ const ERROR_MESSAGES: Record<ImportErrorKind, string> = {
   account_archived: "That financial account is archived. Restore it in Settings before importing.",
   identity_conflict: "An identity check failed. No records were changed.",
   tag_unavailable: "A selected tag was deleted or archived. Choose it again or remove it.",
+  category_unavailable:
+    "A selected category was deleted, archived, or is not selectable. Choose it again or clear it.",
   no_included_rows:
     "Nothing is included. Skip invalid rows only after including at least one valid row.",
   invalid_rows: "Invalid rows must be marked as skipped before committing.",

@@ -73,6 +73,7 @@ function makeDetail(overrides: Partial<TransactionDetail["transaction"]> = {}): 
         is_system: false,
         is_archived: false,
       },
+      category_confirmed: true,
       merchant_tags: [{ id: "tag-assigned", display_name: "Assigned", is_archived: false }],
       statement_import: {
         id: "stmt-1",
@@ -104,7 +105,7 @@ describe("transaction detail", () => {
     vi.mocked(loadTransactionAction).mockResolvedValue({ ok: true, value: makeDetail() });
   });
 
-  it("offers a suggested category without applying it automatically", async () => {
+  it("marks an unconfirmed suggested category and applies it only on request", async () => {
     const user = userEvent.setup();
     const detail = {
       ...makeDetail({
@@ -115,6 +116,7 @@ describe("transaction detail", () => {
           is_system: true,
           is_archived: false,
         },
+        category_confirmed: false,
       }),
       suggested_category: {
         id: "cat-2",
@@ -126,9 +128,80 @@ describe("transaction detail", () => {
     };
     render(<TransactionDetailView categories={categories} initialDetail={detail} tags={tags} />);
 
+    expect(screen.getByText("Suggested category, not yet confirmed")).toBeInTheDocument();
     expect(screen.getByLabelText("Category")).toHaveValue("cat-1");
+    await user.click(screen.getByRole("button", { name: "Use suggestion" }));
+    expect(screen.getByLabelText("Category")).toHaveValue("cat-2");
+    expect(saveTransactionAction).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Save classification" }));
+    expect(saveTransactionAction).toHaveBeenCalledWith({
+      id: "txn-1",
+      expected_version: 3,
+      changes: { category_id: "cat-2" },
+      confirm: undefined,
+    });
+  });
+
+  it("keeps the advisory category path for a confirmed Uncategorised row", async () => {
+    const user = userEvent.setup();
+    const baseDetail = makeDetail();
+    const detail = {
+      ...baseDetail,
+      transaction: {
+        ...baseDetail.transaction,
+        category: {
+          id: "cat-1",
+          display_name: "Uncategorised",
+          kind: "Uncategorised" as const,
+          is_system: true,
+          is_archived: false,
+        },
+      },
+      suggested_category: {
+        id: "cat-2",
+        display_name: "Travel",
+        kind: "Expense" as const,
+        is_system: false,
+        is_archived: false,
+      },
+    };
+    render(<TransactionDetailView categories={categories} initialDetail={detail} tags={tags} />);
+
     await user.click(screen.getByRole("button", { name: "Suggested: Travel" }));
     expect(screen.getByLabelText("Category")).toHaveValue("cat-2");
+    expect(saveTransactionAction).not.toHaveBeenCalled();
+  });
+
+  it("confirms an unconfirmed category without changing it", async () => {
+    const user = userEvent.setup();
+    const baseDetail = makeDetail({ category_confirmed: false });
+    const detail = {
+      ...baseDetail,
+      suggested_category: baseDetail.transaction.category,
+    };
+    vi.mocked(saveTransactionAction).mockResolvedValue({
+      ok: true,
+      value: {
+        transaction: {
+          ...detail.transaction,
+          category_confirmed: true,
+          version: 4,
+        },
+        selected_count: 1,
+        changed_count: 1,
+        unchanged_count: 0,
+      },
+    });
+    render(<TransactionDetailView categories={categories} initialDetail={detail} tags={tags} />);
+
+    await user.click(screen.getByRole("button", { name: "Confirm current" }));
+    expect(saveTransactionAction).toHaveBeenCalledWith({
+      id: "txn-1",
+      expected_version: 3,
+      changes: { confirm_category: true },
+      confirm: undefined,
+    });
   });
 
   it("keeps imported source read-only and requires explicit suggestion acceptance", async () => {
