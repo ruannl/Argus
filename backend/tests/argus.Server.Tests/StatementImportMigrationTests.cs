@@ -1,4 +1,3 @@
-using argus.Server.Data;
 using argus.Server.Imports;
 using Npgsql;
 
@@ -12,28 +11,13 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
     public async Task Populated0005UpgradesWithoutDataLoss()
     {
         var schema = "migration_" + Guid.NewGuid().ToString("N");
-        var db = _factory.CreateDb();
-        await using var connection = await db.OpenAsync();
+        string databaseUrl = TestEnvironment.RequireTestDatabaseUrl();
+        string schemaUrl = PersistenceTestSupport.SchemaUrl(databaseUrl, schema);
+        await PersistenceTestSupport.CreateSchemaAsync(databaseUrl, schema);
         try
         {
-            await using (var create = connection.CreateCommand())
-            {
-                create.CommandText = $"CREATE SCHEMA {schema}";
-                await create.ExecuteNonQueryAsync();
-            }
-
-            await using (var use = connection.CreateCommand())
-            {
-                use.CommandText = $"SET search_path TO {schema}; " + "CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());";
-                await use.ExecuteNonQueryAsync();
-            }
-
-            foreach (var (_, sql) in Migrations.All.Take(5))
-            {
-                await using var apply = connection.CreateCommand();
-                apply.CommandText = sql;
-                await apply.ExecuteNonQueryAsync();
-            }
+            await PersistenceTestSupport.ApplyLegacyAsync(schemaUrl, 5);
+            await using var connection = await PersistenceTestSupport.OpenSchemaConnectionAsync(schemaUrl);
 
             Guid customerId = Guid.NewGuid();
             Guid accountId = Guid.NewGuid();
@@ -72,15 +56,10 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
                 await seed.ExecuteNonQueryAsync();
             }
 
-            await using (var migrate = connection.CreateCommand())
-            {
-                migrate.CommandText = Migrations.All[5].Sql;
-                await migrate.ExecuteNonQueryAsync();
-            }
-            await Db.BackfillCanonicalIdentitiesAsync(connection);
+            await PersistenceTestSupport.RunCoordinatorAsync(schemaUrl);
 
             var canonicalKey = StatementIdentity.ComputeIdentityKey(new DateOnly(2025, 1, 5), -1234, "migration row");
-            var storedKey = (string)(await ScalarAsync(connection, "SELECT identity_key FROM transactions"))!;
+            var storedKey = (string)(await PersistenceTestSupport.ScalarAsync(connection, "SELECT identity_key FROM transactions"))!;
             Assert.Equal(canonicalKey, storedKey);
             var expectedFingerprint = StatementIdentity.ComputeStatementFingerprint(
                 [
@@ -106,19 +85,19 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
                 ],
                 new DateOnly(2025, 1, 1),
                 new DateOnly(2025, 1, 31));
-            Assert.Equal(expectedFingerprint, (string)(await ScalarAsync(connection, "SELECT statement_fingerprint FROM statement_imports"))!);
+            Assert.Equal(expectedFingerprint, (string)(await PersistenceTestSupport.ScalarAsync(connection, "SELECT statement_fingerprint FROM statement_imports"))!);
 
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM transactions")));
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM statement_imports")));
-            Assert.Equal(0L, Convert.ToInt64(await ScalarAsync(connection, "SELECT import_version FROM financial_accounts")));
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT identity_version FROM transactions")));
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT occurrence_index FROM transactions")));
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT fingerprint_occurrence FROM statement_imports")));
-            Assert.Equal(customerId, (Guid)(await ScalarAsync(connection, "SELECT customer_id FROM transaction_merchant_tags"))!);
+            Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM transactions")));
+            Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM statement_imports")));
+            Assert.Equal(0L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT import_version FROM financial_accounts")));
+            Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT identity_version FROM transactions")));
+            Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT occurrence_index FROM transactions")));
+            Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT fingerprint_occurrence FROM statement_imports")));
+            Assert.Equal(customerId, (Guid)(await PersistenceTestSupport.ScalarAsync(connection, "SELECT customer_id FROM transaction_merchant_tags"))!);
 
             // A second row with the same fallback identity and occurrence must
             // violate the new uniqueness constraint.
-            var duplicate = Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connection, $"""
+            var duplicate = Assert.ThrowsAsync<PostgresException>(() => PersistenceTestSupport.ExecuteAsync(connection, $"""
                 INSERT INTO transactions (
                     id, customer_id, financial_account_id, statement_import_id, transaction_date,
                     description, normalized_description, amount, category_id, source_type,
@@ -133,13 +112,13 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
             // A tag link with a foreign owner is rejected by the composite FK.
             Guid foreignOwner = Guid.NewGuid();
             Guid foreignTagId = Guid.NewGuid();
-            await ExecuteAsync(connection, $"""
+            await PersistenceTestSupport.ExecuteAsync(connection, $"""
                 INSERT INTO customers (id, canonical_email, password_hash, created_at, updated_at)
                 VALUES ('{foreignOwner}', 'foreign-migration@example.test', 'hash', NOW(), NOW());
                 INSERT INTO merchant_tags (id, customer_id, display_name, normalized_name, created_at, updated_at)
                 VALUES ('{foreignTagId}', '{foreignOwner}', 'Foreign tag', 'foreign tag', NOW(), NOW());
                 """);
-            var badLink = Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connection, $"""
+            var badLink = Assert.ThrowsAsync<PostgresException>(() => PersistenceTestSupport.ExecuteAsync(connection, $"""
                 INSERT INTO transaction_merchant_tags (customer_id, transaction_id, merchant_tag_id)
                 VALUES ('{foreignOwner}', '{transactionId}', '{foreignTagId}');
                 """));
@@ -147,9 +126,7 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
         }
         finally
         {
-            await using var drop = connection.CreateCommand();
-            drop.CommandText = $"DROP SCHEMA IF EXISTS {schema} CASCADE";
-            await drop.ExecuteNonQueryAsync();
+            await PersistenceTestSupport.DropSchemaAsync(databaseUrl, schema);
         }
     }
 
@@ -157,32 +134,19 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
     public async Task PopulatedReviewUpgradesThroughCategorySuggestionWithoutDataLoss()
     {
         var schema = "migration_cat_" + Guid.NewGuid().ToString("N");
-        var db = _factory.CreateDb();
-        await using var connection = await db.OpenAsync();
+        string databaseUrl = TestEnvironment.RequireTestDatabaseUrl();
+        string schemaUrl = PersistenceTestSupport.SchemaUrl(databaseUrl, schema);
+        await PersistenceTestSupport.CreateSchemaAsync(databaseUrl, schema);
         try
         {
-            await using (var create = connection.CreateCommand())
-            {
-                create.CommandText = $"CREATE SCHEMA {schema}";
-                await create.ExecuteNonQueryAsync();
-            }
-            await using (var use = connection.CreateCommand())
-            {
-                use.CommandText = $"SET search_path TO {schema}; " + "CREATE TABLE schema_migrations (" + "name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());";
-                await use.ExecuteNonQueryAsync();
-            }
-            foreach (var (_, sql) in Migrations.All.Take(8))
-            {
-                await using var apply = connection.CreateCommand();
-                apply.CommandText = sql;
-                await apply.ExecuteNonQueryAsync();
-            }
+            await PersistenceTestSupport.ApplyLegacyAsync(schemaUrl, 8);
+            await using var connection = await PersistenceTestSupport.OpenSchemaConnectionAsync(schemaUrl);
 
             Guid customerId = Guid.NewGuid();
             Guid accountId = Guid.NewGuid();
             Guid reviewId = Guid.NewGuid();
             Guid rowId = Guid.NewGuid();
-            await ExecuteAsync(connection, $"""
+            await PersistenceTestSupport.ExecuteAsync(connection, $"""
                 INSERT INTO customers (id, canonical_email, password_hash, created_at, updated_at)
                 VALUES ('{customerId}', 'category-migration@example.test', 'hash', NOW(), NOW());
                 INSERT INTO financial_accounts (id, customer_id, display_name, currency, created_at, updated_at)
@@ -207,36 +171,15 @@ public sealed class StatementImportMigrationTests(KitFactory factory) : IClassFi
                     jsonb_build_object(), 'Row', 'row', jsonb_build_array(), jsonb_build_array(), NOW(), NOW());
                 """);
 
-            await using (var migrate = connection.CreateCommand())
-            {
-                migrate.CommandText = Migrations.All[8].Sql;
-                await migrate.ExecuteNonQueryAsync();
-            }
+            await PersistenceTestSupport.RunCoordinatorAsync(schemaUrl);
 
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM import_reviews")));
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM import_review_rows")));
-            Assert.True((bool)(await ScalarAsync(connection, "SELECT suggested_category_id IS NULL AND selected_category_id IS NULL AND category_decided = FALSE FROM import_review_rows"))!);
+            Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM import_reviews")));
+            Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM import_review_rows")));
+            Assert.True((bool)(await PersistenceTestSupport.ScalarAsync(connection, "SELECT suggested_category_id IS NULL AND selected_category_id IS NULL AND category_decided = FALSE FROM import_review_rows"))!);
         }
         finally
         {
-            await using var drop = connection.CreateCommand();
-            drop.CommandText = $"DROP SCHEMA IF EXISTS {schema} CASCADE";
-            await drop.ExecuteNonQueryAsync();
+            await PersistenceTestSupport.DropSchemaAsync(databaseUrl, schema);
         }
-    }
-
-    private static async Task<object?> ScalarAsync(NpgsqlConnection connection, string sql)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-
-        return await command.ExecuteScalarAsync();
-    }
-
-    private static async Task ExecuteAsync(NpgsqlConnection connection, string sql)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        await command.ExecuteNonQueryAsync();
     }
 }

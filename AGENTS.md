@@ -246,6 +246,9 @@ npm run build
 npm run test:e2e
 ```
 
+`dotnet test` excludes tests marked `Category=Performance`, which seed up to
+50,000 rows. CI runs them in a separate step; run them locally with
+`dotnet test tests/argus.Server.Tests -warnaserror --filter "Category=Performance"`.
 `dotnet test` needs `ARGUS_TEST_DATABASE_URL` for the isolation tests;
 the bootstrap creates that database and writes it to `backend/.env`. Export
 the value before running the tests. The suite truncates finance tables and

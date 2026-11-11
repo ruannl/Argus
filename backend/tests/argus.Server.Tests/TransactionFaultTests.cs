@@ -36,7 +36,7 @@ public sealed class TransactionFaultTests
             // This deliberately produces a real PostgreSQL error whose
             // primary message contains a synthetic private-value canary.
             using NpgsqlConnection connection = new NpgsqlConnection(
-                Db.BuildConnectionString(TestEnvironment.RequireTestDatabaseUrl()));
+                PersistenceOptions.BuildConnectionString(TestEnvironment.RequireTestDatabaseUrl()));
             connection.Open();
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT CAST(@payload AS integer)";

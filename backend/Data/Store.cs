@@ -1,5 +1,6 @@
+using argus.Server.Data.Entities;
 using argus.Server.Security;
-using Npgsql;
+using Microsoft.EntityFrameworkCore;
 
 namespace argus.Server.Data;
 
@@ -7,74 +8,87 @@ namespace argus.Server.Data;
 /// All account-authority persistence. One truth lives in PostgreSQL; every
 /// statement here is the only writer for its fact.
 /// </summary>
-public sealed class Store(Db db)
-{
-    public const string CustomerColumns =
-        "id, canonical_email, password_hash, email_verified_at, subscriber_activated_at, " +
-        "next_billing_at, is_lifetime, is_admin, created_at, updated_at, failed_login_count, locked_until";
+public sealed record CustomerRecord(Guid Id,
+                                    string CanonicalEmail,
+                                    string PasswordHash,
+                                    DateTime? EmailVerifiedAt,
+                                    DateTime? SubscriberActivatedAt,
+                                    DateTime? NextBillingAt,
+                                    bool IsLifetime,
+                                    bool IsAdmin,
+                                    DateTime CreatedAt,
+                                    DateTime UpdatedAt,
+                                    int FailedLoginCount,
+                                    DateTime? LockedUntil);
 
+public abstract record ResetRequestOutcome
+{
+    public sealed record Issued(Guid CustomerId, string Recipient, string RawToken) : ResetRequestOutcome;
+
+    public sealed record Shade : ResetRequestOutcome;
+}
+
+public sealed class Store(IDbContextFactory<ArgusDbContext> contextFactory)
+{
     public static readonly TimeSpan SessionAbsoluteTtl = TimeSpan.FromHours(12);
     public static readonly TimeSpan SessionIdleWindow = TimeSpan.FromMinutes(30);
     public static readonly TimeSpan VerificationTokenTtl = TimeSpan.FromHours(24);
     public static readonly TimeSpan ResetTokenTtl = TimeSpan.FromHours(1);
 
-    private static CustomerRecord MapCustomer(NpgsqlDataReader reader) => new(
-        reader.GetGuid(0),
-        reader.GetString(1),
-        reader.GetString(2),
-        reader.IsDBNull(3) ? null : reader.GetFieldValue<DateTime>(3),
-        reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTime>(4),
-        reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTime>(5),
-        reader.GetBoolean(6),
-        reader.GetBoolean(7),
-        reader.GetFieldValue<DateTime>(8),
-        reader.GetFieldValue<DateTime>(9),
-        reader.GetInt32(10),
-        reader.IsDBNull(11) ? null : reader.GetFieldValue<DateTime>(11));
+    private static CustomerRecord MapCustomer(Customer customer) => new(
+        customer.Id,
+        customer.CanonicalEmail,
+        customer.PasswordHash,
+        customer.EmailVerifiedAt,
+        customer.SubscriberActivatedAt,
+        customer.NextBillingAt,
+        customer.IsLifetime,
+        customer.IsAdmin,
+        customer.CreatedAt,
+        customer.UpdatedAt,
+        customer.FailedLoginCount,
+        customer.LockedUntil);
 
     // --- Customers ----------------------------------------------------------
 
     public async Task<CustomerRecord?> FindCustomerByEmailAsync(string canonicalEmail, CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT {CustomerColumns} FROM customers WHERE canonical_email = @email";
-        command.Parameters.AddWithValue("email", canonicalEmail);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        Customer? customer = await context.Customers
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.CanonicalEmail == canonicalEmail, cancellationToken);
 
-        return await reader.ReadAsync(cancellationToken) ? MapCustomer(reader) : null;
+        return customer is null ? null : MapCustomer(customer);
     }
 
     public async Task<CustomerRecord?> FindCustomerByIdAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT {CustomerColumns} FROM customers WHERE id = @id";
-        command.Parameters.AddWithValue("id", customerId);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        Customer? customer = await context.Customers
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == customerId, cancellationToken);
 
-        return await reader.ReadAsync(cancellationToken) ? MapCustomer(reader) : null;
+        return customer is null ? null : MapCustomer(customer);
     }
 
     public async Task<(CustomerRecord Customer, bool Created)> InsertCustomerAsync(string canonicalEmail, string passwordHash, CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using (var insert = connection.CreateCommand())
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        List<Customer> inserted = await context.Customers
+            .FromSqlInterpolated($"""
+                WITH inserted AS (
+                    INSERT INTO customers (id, canonical_email, password_hash, created_at, updated_at)
+                    VALUES ({Guid.NewGuid()}, {canonicalEmail}, {passwordHash}, NOW(), NOW())
+                    ON CONFLICT (canonical_email) DO NOTHING
+                    RETURNING *
+                )
+                SELECT * FROM inserted
+                """)
+            .AsTracking()
+            .ToListAsync(cancellationToken);
+        if (inserted.Count > 0)
         {
-            insert.CommandText = $"""
-                INSERT INTO customers (id, canonical_email, password_hash, created_at, updated_at)
-                VALUES (@id, @email, @hash, NOW(), NOW())
-                ON CONFLICT (canonical_email) DO NOTHING
-                RETURNING {CustomerColumns}
-                """;
-            insert.Parameters.AddWithValue("id", Guid.NewGuid());
-            insert.Parameters.AddWithValue("email", canonicalEmail);
-            insert.Parameters.AddWithValue("hash", passwordHash);
-            await using var reader = await insert.ExecuteReaderAsync(cancellationToken);
-            if (await reader.ReadAsync(cancellationToken))
-            {
-                return (MapCustomer(reader), true);
-            }
+            return (MapCustomer(inserted[0]), true);
         }
 
         var existing = await FindCustomerByEmailAsync(canonicalEmail, cancellationToken);
@@ -88,22 +102,23 @@ public sealed class Store(Db db)
     /// </summary>
     public async Task<bool> RecordFailedLoginAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            UPDATE customers
-            SET failed_login_count = failed_login_count + 1,
-                locked_until = CASE
-                    WHEN failed_login_count + 1 >= 5 THEN NOW() + INTERVAL '900 seconds'
-                    ELSE locked_until
-                END,
-                updated_at = NOW()
-            WHERE id = @id
-            RETURNING failed_login_count >= 5
-            """;
-        command.Parameters.AddWithValue("id", customerId);
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        List<Customer> updated = await context.Customers
+            .FromSqlInterpolated($"""
+                UPDATE customers
+                SET failed_login_count = failed_login_count + 1,
+                    locked_until = CASE
+                        WHEN failed_login_count + 1 >= 5 THEN NOW() + INTERVAL '900 seconds'
+                        ELSE locked_until
+                    END,
+                    updated_at = NOW()
+                WHERE id = {customerId}
+                RETURNING *
+                """)
+            .AsTracking()
+            .ToListAsync(cancellationToken);
 
-        return await command.ExecuteScalarAsync(cancellationToken) is true;
+        return updated.Count > 0 && updated[0].FailedLoginCount >= 5;
     }
 
     // --- Sessions -----------------------------------------------------------
@@ -116,62 +131,50 @@ public sealed class Store(Db db)
     public async Task<(string Token, DateTime ExpiresAt)?> CreateSessionForVerifiedHashAsync(Guid customerId, string verifiedPasswordHash, CancellationToken cancellationToken = default)
     {
         string token = Tokens.NewToken();
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
 
-        await using (var lookup = connection.CreateCommand())
-        {
-            lookup.Transaction = transaction;
-            lookup.CommandText = """
-                SELECT password_hash, email_verified_at, subscriber_activated_at, locked_until
-                FROM customers WHERE id = @id FOR UPDATE
-                """;
-            lookup.Parameters.AddWithValue("id", customerId);
-            await using var reader = await lookup.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken) ||
-                !string.Equals(reader.GetString(0), verifiedPasswordHash, StringComparison.Ordinal) ||
-                reader.IsDBNull(1) ||
-                reader.IsDBNull(2) ||
-                (!reader.IsDBNull(3) && reader.GetFieldValue<DateTime>(3) > DateTime.UtcNow))
-            {
-                await reader.CloseAsync();
-                await transaction.RollbackAsync(cancellationToken);
-                return null;
-            }
-        }
-
-        await using (var clear = connection.CreateCommand())
-        {
-            clear.Transaction = transaction;
-            clear.CommandText = """
-                UPDATE customers
-                SET failed_login_count = 0, locked_until = NULL, updated_at = NOW()
-                WHERE id = @id
-                """;
-            clear.Parameters.AddWithValue("id", customerId);
-            await clear.ExecuteNonQueryAsync(cancellationToken);
-        }
-
+        List<CredentialRow> locked = await context.Database.SqlQuery<CredentialRow>($"""
+            SELECT password_hash AS "PasswordHash",
+                   email_verified_at AS "EmailVerifiedAt",
+                   subscriber_activated_at AS "SubscriberActivatedAt",
+                   locked_until AS "LockedUntil"
+            FROM customers
+            WHERE id = {customerId}
+            FOR UPDATE
+            """).ToListAsync(cancellationToken);
+        CredentialRow? customer = locked.SingleOrDefault();
         var now = DateTime.UtcNow;
-        var expiresAt = now.Add(SessionAbsoluteTtl);
-        await using (var insert = connection.CreateCommand())
+        if (customer is null ||
+            !string.Equals(customer.PasswordHash, verifiedPasswordHash, StringComparison.Ordinal) ||
+            customer.EmailVerifiedAt is null ||
+            customer.SubscriberActivatedAt is null ||
+            (customer.LockedUntil is not null && customer.LockedUntil > now))
         {
-            insert.Transaction = transaction;
-            insert.CommandText = """
-                INSERT INTO sessions (id, customer_id, token_hash, expires_at, revoked_at, last_seen_at, created_at)
-                VALUES (@id, @customer_id, @token_hash, @expires_at, NULL, @now, @now)
-                """;
-            insert.Parameters.AddWithValue("id", Guid.NewGuid());
-            insert.Parameters.AddWithValue("customer_id", customerId);
-            insert.Parameters.AddWithValue("token_hash", Tokens.HashToken(token));
-            insert.Parameters.AddWithValue("expires_at", expiresAt);
-            insert.Parameters.AddWithValue("now", now);
-            await insert.ExecuteNonQueryAsync(cancellationToken);
+            await transaction.RollbackAsync(cancellationToken);
+            return null;
         }
 
+        await context.Customers
+            .Where(item => item.Id == customerId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.FailedLoginCount, 0)
+                .SetProperty(item => item.LockedUntil, (DateTime?)null)
+                .SetProperty(item => item.UpdatedAt, now), cancellationToken);
+        context.Sessions.Add(new Session
+        {
+            Id = Guid.NewGuid(),
+            CustomerId = customerId,
+            TokenHash = Tokens.HashToken(token),
+            ExpiresAt = now.Add(SessionAbsoluteTtl),
+            RevokedAt = null,
+            LastSeenAt = now,
+            CreatedAt = now,
+        });
+        await context.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        return (token, expiresAt);
+        return (token, now.Add(SessionAbsoluteTtl));
     }
 
     /// <summary>
@@ -181,36 +184,38 @@ public sealed class Store(Db db)
     /// </summary>
     public async Task<Guid?> ValidateAndTouchSessionAsync(string tokenHash, CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            UPDATE sessions
-            SET last_seen_at = NOW()
-            WHERE token_hash = @token_hash
-              AND revoked_at IS NULL
-              AND expires_at > NOW()
-              AND last_seen_at > NOW() - INTERVAL '30 minutes'
-            RETURNING customer_id
-            """;
-        command.Parameters.AddWithValue("token_hash", tokenHash);
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        List<Session> updated = await context.Sessions
+            .FromSqlInterpolated($"""
+                UPDATE sessions
+                SET last_seen_at = NOW()
+                WHERE token_hash = {tokenHash}
+                  AND revoked_at IS NULL
+                  AND expires_at > NOW()
+                  AND last_seen_at > NOW() - INTERVAL '30 minutes'
+                RETURNING *
+                """)
+            .AsTracking()
+            .ToListAsync(cancellationToken);
 
-        return await command.ExecuteScalarAsync(cancellationToken) is Guid customerId ? customerId : null;
+        return updated.Count > 0 ? updated[0].CustomerId : null;
     }
 
     /// <summary>Revokes one session; returns the owner when it revoked a live row.</summary>
     public async Task<Guid?> RevokeSessionAsync(string tokenHash, CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            UPDATE sessions
-            SET revoked_at = NOW()
-            WHERE token_hash = @token_hash AND revoked_at IS NULL
-            RETURNING customer_id
-            """;
-        command.Parameters.AddWithValue("token_hash", tokenHash);
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        List<Session> updated = await context.Sessions
+            .FromSqlInterpolated($"""
+                UPDATE sessions
+                SET revoked_at = NOW()
+                WHERE token_hash = {tokenHash} AND revoked_at IS NULL
+                RETURNING *
+                """)
+            .AsTracking()
+            .ToListAsync(cancellationToken);
 
-        return await command.ExecuteScalarAsync(cancellationToken) is Guid customerId ? customerId : null;
+        return updated.Count > 0 ? updated[0].CustomerId : null;
     }
 
     // --- Email verification tokens -----------------------------------------
@@ -218,14 +223,18 @@ public sealed class Store(Db db)
     public async Task<string> CreateVerificationTokenAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
         string token = Tokens.NewToken();
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT INTO email_verification_tokens (id, customer_id, token_hash, expires_at, consumed_at, created_at)
-            VALUES (@id, @customer_id, @token_hash, @expires_at, NULL, NOW())
-            """;
-        AddTokenParameters(command, customerId, token, VerificationTokenTtl);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        var now = DateTime.UtcNow;
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        context.EmailVerificationTokens.Add(new EmailVerificationToken
+        {
+            Id = Guid.NewGuid(),
+            CustomerId = customerId,
+            TokenHash = Tokens.HashToken(token),
+            ExpiresAt = now.Add(VerificationTokenTtl),
+            ConsumedAt = null,
+            CreatedAt = now,
+        });
+        await context.SaveChangesAsync(cancellationToken);
 
         return token;
     }
@@ -233,32 +242,23 @@ public sealed class Store(Db db)
     /// <summary>Consumes every open verification token, then issues exactly one new token.</summary>
     public async Task<string> RotateVerificationTokenAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-
-        await using (var consume = connection.CreateCommand())
-        {
-            consume.Transaction = transaction;
-            consume.CommandText = """
-                UPDATE email_verification_tokens SET consumed_at = NOW()
-                WHERE customer_id = @customer_id AND consumed_at IS NULL
-                """;
-            consume.Parameters.AddWithValue("customer_id", customerId);
-            await consume.ExecuteNonQueryAsync(cancellationToken);
-        }
-
         string token = Tokens.NewToken();
-        await using (var insert = connection.CreateCommand())
+        var now = DateTime.UtcNow;
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        await context.EmailVerificationTokens
+            .Where(item => item.CustomerId == customerId && item.ConsumedAt == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.ConsumedAt, now), cancellationToken);
+        context.EmailVerificationTokens.Add(new EmailVerificationToken
         {
-            insert.Transaction = transaction;
-            insert.CommandText = """
-                INSERT INTO email_verification_tokens (id, customer_id, token_hash, expires_at, consumed_at, created_at)
-                VALUES (@id, @customer_id, @token_hash, @expires_at, NULL, NOW())
-                """;
-            AddTokenParameters(insert, customerId, token, VerificationTokenTtl);
-            await insert.ExecuteNonQueryAsync(cancellationToken);
-        }
-
+            Id = Guid.NewGuid(),
+            CustomerId = customerId,
+            TokenHash = Tokens.HashToken(token),
+            ExpiresAt = now.Add(VerificationTokenTtl),
+            ConsumedAt = null,
+            CreatedAt = now,
+        });
+        await context.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return token;
@@ -271,57 +271,40 @@ public sealed class Store(Db db)
     /// </summary>
     public async Task<Guid?> ConsumeVerificationAndActivateAsync(string tokenHash, CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-
-        Guid customerId;
-        await using (var consume = connection.CreateCommand())
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        List<EmailVerificationToken> consumed = await context.EmailVerificationTokens
+            .FromSqlInterpolated($"""
+                UPDATE email_verification_tokens
+                SET consumed_at = NOW()
+                WHERE token_hash = {tokenHash} AND consumed_at IS NULL AND expires_at > NOW()
+                RETURNING *
+                """)
+            .AsTracking()
+            .ToListAsync(cancellationToken);
+        if (consumed.Count == 0)
         {
-            consume.Transaction = transaction;
-            consume.CommandText = """
-                UPDATE email_verification_tokens SET consumed_at = NOW()
-                WHERE token_hash = @token_hash AND consumed_at IS NULL AND expires_at > NOW()
-                RETURNING customer_id
-                """;
-            consume.Parameters.AddWithValue("token_hash", tokenHash);
-            object? result = await consume.ExecuteScalarAsync(cancellationToken);
-            if (result is not Guid found)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return null;
-            }
-            customerId = found;
+            await transaction.RollbackAsync(cancellationToken);
+            return null;
         }
 
-        await using (var activate = connection.CreateCommand())
+        Guid customerId = consumed[0].CustomerId;
+        var now = DateTime.UtcNow;
+        int activated = await context.Customers
+            .Where(customer => customer.Id == customerId && !customer.IsAdmin && !customer.IsLifetime)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(customer => customer.EmailVerifiedAt, customer => customer.EmailVerifiedAt ?? now)
+                .SetProperty(customer => customer.SubscriberActivatedAt, customer => customer.SubscriberActivatedAt ?? now)
+                .SetProperty(customer => customer.UpdatedAt, now), cancellationToken);
+        if (activated == 0)
         {
-            activate.Transaction = transaction;
-            activate.CommandText = """
-                UPDATE customers
-                SET email_verified_at = COALESCE(email_verified_at, NOW()),
-                    subscriber_activated_at = COALESCE(subscriber_activated_at, NOW()),
-                    updated_at = NOW()
-                WHERE id = @id AND is_admin = FALSE AND is_lifetime = FALSE
-                """;
-            activate.Parameters.AddWithValue("id", customerId);
-            if (await activate.ExecuteNonQueryAsync(cancellationToken) == 0)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return null;
-            }
+            await transaction.RollbackAsync(cancellationToken);
+            return null;
         }
 
-        await using (var clear = connection.CreateCommand())
-        {
-            clear.Transaction = transaction;
-            clear.CommandText = """
-                UPDATE email_verification_tokens SET consumed_at = NOW()
-                WHERE customer_id = @id AND consumed_at IS NULL
-                """;
-            clear.Parameters.AddWithValue("id", customerId);
-            await clear.ExecuteNonQueryAsync(cancellationToken);
-        }
-
+        await context.EmailVerificationTokens
+            .Where(item => item.CustomerId == customerId && item.ConsumedAt == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.ConsumedAt, now), cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return customerId;
@@ -331,50 +314,34 @@ public sealed class Store(Db db)
 
     public async Task<ResetRequestOutcome> RequestPasswordResetAsync(string canonicalEmail, CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-
-        Guid customerId;
-        await using (var lookup = connection.CreateCommand())
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        Guid? found = await context.Customers
+            .Where(customer => customer.CanonicalEmail == canonicalEmail && customer.EmailVerifiedAt != null)
+            .Select(customer => (Guid?)customer.Id)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (found is null)
         {
-            lookup.Transaction = transaction;
-            lookup.CommandText = """
-                SELECT id FROM customers
-                WHERE canonical_email = @email AND email_verified_at IS NOT NULL
-                """;
-            lookup.Parameters.AddWithValue("email", canonicalEmail);
-            object? result = await lookup.ExecuteScalarAsync(cancellationToken);
-            if (result is not Guid found)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return new ResetRequestOutcome.Shade();
-            }
-            customerId = found;
+            await transaction.RollbackAsync(cancellationToken);
+            return new ResetRequestOutcome.Shade();
         }
 
-        await using (var consume = connection.CreateCommand())
-        {
-            consume.Transaction = transaction;
-            consume.CommandText = """
-                UPDATE password_reset_tokens SET consumed_at = NOW()
-                WHERE customer_id = @customer_id AND consumed_at IS NULL
-                """;
-            consume.Parameters.AddWithValue("customer_id", customerId);
-            await consume.ExecuteNonQueryAsync(cancellationToken);
-        }
-
+        Guid customerId = found.Value;
+        var now = DateTime.UtcNow;
+        await context.PasswordResetTokens
+            .Where(item => item.CustomerId == customerId && item.ConsumedAt == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.ConsumedAt, now), cancellationToken);
         string token = Tokens.NewToken();
-        await using (var insert = connection.CreateCommand())
+        context.PasswordResetTokens.Add(new PasswordResetToken
         {
-            insert.Transaction = transaction;
-            insert.CommandText = """
-                INSERT INTO password_reset_tokens (id, customer_id, token_hash, expires_at, consumed_at, created_at)
-                VALUES (@id, @customer_id, @token_hash, @expires_at, NULL, NOW())
-                """;
-            AddTokenParameters(insert, customerId, token, ResetTokenTtl);
-            await insert.ExecuteNonQueryAsync(cancellationToken);
-        }
-
+            Id = Guid.NewGuid(),
+            CustomerId = customerId,
+            TokenHash = Tokens.HashToken(token),
+            ExpiresAt = now.Add(ResetTokenTtl),
+            ConsumedAt = null,
+            CreatedAt = now,
+        });
+        await context.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return new ResetRequestOutcome.Issued(customerId, canonicalEmail, token);
@@ -386,51 +353,32 @@ public sealed class Store(Db db)
     /// </summary>
     public async Task<Guid?> ConsumePasswordResetAsync(string tokenHash, string newPasswordHash, CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-
-        Guid customerId;
-        await using (var consume = connection.CreateCommand())
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        List<PasswordResetToken> consumed = await context.PasswordResetTokens
+            .FromSqlInterpolated($"""
+                UPDATE password_reset_tokens
+                SET consumed_at = NOW()
+                WHERE token_hash = {tokenHash} AND consumed_at IS NULL AND expires_at > NOW()
+                RETURNING *
+                """)
+            .AsTracking()
+            .ToListAsync(cancellationToken);
+        if (consumed.Count == 0)
         {
-            consume.Transaction = transaction;
-            consume.CommandText = """
-                UPDATE password_reset_tokens SET consumed_at = NOW()
-                WHERE token_hash = @token_hash AND consumed_at IS NULL AND expires_at > NOW()
-                RETURNING customer_id
-                """;
-            consume.Parameters.AddWithValue("token_hash", tokenHash);
-            object? result = await consume.ExecuteScalarAsync(cancellationToken);
-            if (result is not Guid found)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return null;
-            }
-            customerId = found;
+            await transaction.RollbackAsync(cancellationToken);
+            return null;
         }
 
-        await using (var update = connection.CreateCommand())
-        {
-            update.Transaction = transaction;
-            update.CommandText = """
-                UPDATE customers SET password_hash = @password_hash, updated_at = NOW()
-                WHERE id = @id
-                """;
-            update.Parameters.AddWithValue("password_hash", newPasswordHash);
-            update.Parameters.AddWithValue("id", customerId);
-            await update.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        await using (var revoke = connection.CreateCommand())
-        {
-            revoke.Transaction = transaction;
-            revoke.CommandText = """
-                UPDATE sessions SET revoked_at = NOW()
-                WHERE customer_id = @id AND revoked_at IS NULL
-                """;
-            revoke.Parameters.AddWithValue("id", customerId);
-            await revoke.ExecuteNonQueryAsync(cancellationToken);
-        }
-
+        Guid customerId = consumed[0].CustomerId;
+        var now = DateTime.UtcNow;
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE customers SET password_hash = {newPasswordHash}, updated_at = NOW()
+            WHERE id = {customerId}
+            """, cancellationToken);
+        await context.Sessions
+            .Where(session => session.CustomerId == customerId && session.RevokedAt == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(session => session.RevokedAt, now), cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return customerId;
@@ -447,47 +395,35 @@ public sealed class Store(Db db)
                                              DateTime? nextBillingAt,
                                              CancellationToken cancellationToken = default)
     {
-        string? sql = eventType switch
-        {
-            "subscription.activated" => """
-                UPDATE customers
-                SET subscriber_activated_at = COALESCE(subscriber_activated_at, NOW()),
-                    next_billing_at = @next_billing_at
-                WHERE id = @id
-                """,
-            "subscription.cancelled" => """
-                UPDATE customers
-                SET subscriber_activated_at = NULL,
-                    next_billing_at = NULL
-                WHERE id = @id
-                """,
-            // payment.failed is advisory: no entitlement change in this kit.
-            _ => null,
-        };
-        if (sql is null)
+        if (eventType is not "subscription.activated" and not "subscription.cancelled")
         {
             return;
         }
 
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        command.Parameters.AddWithValue("id", customerId);
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
         if (eventType == "subscription.activated")
         {
-            command.Parameters.AddWithValue("next_billing_at", (object?)nextBillingAt ?? DBNull.Value);
+            var now = DateTime.UtcNow;
+            await context.Customers
+                .Where(customer => customer.Id == customerId)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(customer => customer.SubscriberActivatedAt, customer => customer.SubscriberActivatedAt ?? now)
+                    .SetProperty(customer => customer.NextBillingAt, nextBillingAt), cancellationToken);
+            return;
         }
-        await command.ExecuteNonQueryAsync(cancellationToken);
+
+        await context.Customers
+            .Where(customer => customer.Id == customerId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(customer => customer.SubscriberActivatedAt, (DateTime?)null)
+                .SetProperty(customer => customer.NextBillingAt, (DateTime?)null), cancellationToken);
     }
 
-    private static void AddTokenParameters(NpgsqlCommand command,
-                                           Guid customerId,
-                                           string token,
-                                           TimeSpan ttl)
+    private sealed class CredentialRow
     {
-        command.Parameters.AddWithValue("id", Guid.NewGuid());
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("token_hash", Tokens.HashToken(token));
-        command.Parameters.AddWithValue("expires_at", DateTime.UtcNow.Add(ttl));
+        public string PasswordHash { get; set; } = string.Empty;
+        public DateTime? EmailVerifiedAt { get; set; }
+        public DateTime? SubscriberActivatedAt { get; set; }
+        public DateTime? LockedUntil { get; set; }
     }
 }

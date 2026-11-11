@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 
 namespace argus.Server.Tests;
 
@@ -45,6 +46,10 @@ public static class TestEnvironment
         Set("BILLING_WEBHOOK_SECRET", BillingSecret);
         Set("LOG_LEVEL", "info");
         Set("LOG_FORMAT", "json");
+
+        // WebApplicationFactory builds a host per test class. Polling avoids
+        // exhausting the OS inotify instance limit during a serialized run.
+        Environment.SetEnvironmentVariable("DOTNET_USE_POLLING_FILE_WATCHER", "1");
     }
 
     private static void Set(string name, string value) =>
@@ -254,8 +259,39 @@ public sealed class KitFactory : WebApplicationFactory<Program>
             services.AddSingleton<IImportFaultInjector>(FaultInjector ?? NoopImportFaultInjector.Instance);
             services.RemoveAll<ITransactionFaultInjector>();
             services.AddSingleton<ITransactionFaultInjector>(TransactionFaultInjector ?? NoopTransactionFaultInjector.Instance);
+
+            // Background cleanup runs immediately on host start. Sharing one
+            // database with parallel resets would let it fight a TRUNCATE, so
+            // tests exercise the cleanup stores directly instead.
+            foreach (ServiceDescriptor descriptor in services
+                         .Where(item => item.ImplementationType == typeof(ImportCleanupService) ||
+                                        item.ImplementationType == typeof(TransactionCleanupService))
+                         .ToList())
+            {
+                services.Remove(descriptor);
+            }
         });
     }
 
-    public Db CreateDb() => new(TestEnvironment.RequireTestDatabaseUrl());
+    public TestDatabase CreateDb() => new(TestEnvironment.RequireTestDatabaseUrl());
+}
+
+/// <summary>
+/// Test-only direct connection helper. Production code never opens a raw
+/// connection; harnesses need one for setup, independent observers and fault
+/// fixtures.
+/// </summary>
+public sealed class TestDatabase(string databaseUrl)
+{
+    private readonly string _connectionString = PersistenceOptions.BuildConnectionString(databaseUrl);
+
+    public NpgsqlConnection Connect() => new(_connectionString);
+
+    public async Task<NpgsqlConnection> OpenAsync(CancellationToken cancellationToken = default)
+    {
+        NpgsqlConnection connection = Connect();
+        await connection.OpenAsync(cancellationToken);
+
+        return connection;
+    }
 }

@@ -3,10 +3,10 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using argus.Server.Data.Entities;
 using argus.Server.Finance;
 using argus.Server.Imports;
-using Npgsql;
-using NpgsqlTypes;
+using Microsoft.EntityFrameworkCore;
 
 namespace argus.Server.Data;
 
@@ -200,22 +200,90 @@ public sealed class StatementImportStore
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    private readonly Db _db;
+    private const int ReviewRowInsertBatchSize = 2_000;
+    private const int TransactionInsertBatchSize = 2_000;
+    private const int TagLinkInsertBatchSize = 5_000;
+
+    private const string StatementSummarySql = """
+        SELECT s.id AS "Id",
+               s.financial_account_id AS "FinancialAccountId",
+               s.source_type AS "SourceType",
+               s.statement_label AS "StatementLabel",
+               s.start_date AS "StartDate",
+               s.end_date AS "EndDate",
+               s.total_rows AS "TotalRows",
+               s.imported_count AS "ImportedCount",
+               s.suppressed_count AS "SuppressedCount",
+               s.skipped_count AS "SkippedCount",
+               s.possible_duplicate_count AS "PossibleDuplicateCount",
+               s.exact_override_count AS "ExactOverrideCount",
+               s.statement_override_count AS "StatementOverrideCount",
+               s.is_hidden AS "IsHidden",
+               s.version AS "Version",
+               COALESCE((
+                   SELECT COUNT(*) FROM transactions t
+                   WHERE t.customer_id = s.customer_id AND t.statement_import_id = s.id
+                     AND (s.is_hidden OR t.is_hidden_by_user)
+               ), 0) AS "LiveHiddenCount",
+               s.created_at AS "CreatedAt",
+               s.updated_at AS "UpdatedAt"
+        FROM statement_imports s
+        WHERE s.customer_id = {0} AND s.id = {1}
+        """;
+
+    private const string HistorySql = """
+        SELECT s.id AS "Id",
+               s.financial_account_id AS "FinancialAccountId",
+               s.source_type AS "SourceType",
+               s.statement_label AS "StatementLabel",
+               s.start_date AS "StartDate",
+               s.end_date AS "EndDate",
+               s.total_rows AS "TotalRows",
+               s.imported_count AS "ImportedCount",
+               s.suppressed_count AS "SuppressedCount",
+               s.skipped_count AS "SkippedCount",
+               s.possible_duplicate_count AS "PossibleDuplicateCount",
+               s.exact_override_count AS "ExactOverrideCount",
+               s.statement_override_count AS "StatementOverrideCount",
+               s.is_hidden AS "IsHidden",
+               s.version AS "Version",
+               COALESCE(h.live_hidden_count, 0) AS "LiveHiddenCount",
+               s.created_at AS "CreatedAt",
+               s.updated_at AS "UpdatedAt"
+        FROM statement_imports s
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*) FILTER (WHERE s.is_hidden OR t.is_hidden_by_user) AS live_hidden_count
+            FROM transactions t
+            WHERE t.customer_id = s.customer_id AND t.statement_import_id = s.id
+        ) h ON TRUE
+        WHERE s.customer_id = {0}
+          AND (CAST({1} AS uuid) IS NULL OR s.financial_account_id = CAST({1} AS uuid))
+          AND ({2} = 'all'
+               OR ({2} = 'hidden' AND COALESCE(h.live_hidden_count, 0) > 0)
+               OR ({2} = 'visible' AND COALESCE(h.live_hidden_count, 0) = 0))
+          AND (CAST({3} AS timestamptz) IS NULL OR (s.created_at, s.id) < (CAST({3} AS timestamptz), CAST({4} AS uuid)))
+        ORDER BY s.created_at DESC, s.id DESC
+        LIMIT {5}
+        """;
+
     private readonly FinanceStore _financeStore;
     private readonly IImportFaultInjector _faults;
+    private readonly IDbContextFactory<ArgusDbContext> _contextFactory;
 
-    public StatementImportStore(Db db, FinanceStore financeStore, IImportFaultInjector faults)
+    public StatementImportStore(FinanceStore financeStore,
+                                IImportFaultInjector faults,
+                                IDbContextFactory<ArgusDbContext> contextFactory)
     {
-        _db = db;
         _financeStore = financeStore;
         _faults = faults;
+        _contextFactory = contextFactory;
     }
 
     public async Task<ImportAccountRecord?> GetAccountAsync(Guid customerId, Guid accountId, CancellationToken cancellationToken = default)
     {
-        await using var connection = await _db.OpenAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
 
-        return await GetAccountAsync(connection, null, customerId, accountId, false, cancellationToken);
+        return await GetAccountAsync(context, customerId, accountId, cancellationToken);
     }
 
     public async Task<ImportReviewDetail> CreateReviewAsync(Guid customerId,
@@ -245,17 +313,13 @@ public sealed class StatementImportStore
         var now = DateTime.UtcNow;
         var expiresAt = now.AddHours(ImportLimits.ReviewLifetimeHours);
 
-        await using var connection = await _db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
 
-        await LockQuotaAsync(connection, transaction, customerId, cancellationToken);
-        long usedPayloadBytes = await EnforceQuotaAsync(connection, transaction, customerId, estimatedPayloadBytes, cancellationToken);
+        await LockQuotaAsync(context, customerId, cancellationToken);
+        long usedPayloadBytes = await EnforceQuotaAsync(context, customerId, estimatedPayloadBytes, cancellationToken);
 
-        var account = await GetAccountAsync(connection, transaction, customerId, accountId, true, cancellationToken);
-        if (account is null)
-        {
-            throw new ImportStoreException(ImportErrorCodes.NotFound);
-        }
+        var account = await LockAccountAsync(context, customerId, accountId, cancellationToken);
         if (account.IsArchived)
         {
             throw new ImportStoreException(ImportErrorCodes.AccountArchived);
@@ -265,7 +329,7 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
 
-        var snapshot = await ComputeDuplicateSnapshotAsync(connection, transaction, customerId, accountId, parsed.Rows, null, cancellationToken);
+        var snapshot = await ComputeDuplicateSnapshotAsync(context, customerId, accountId, parsed.Rows, null, cancellationToken);
         var rows = snapshot.Rows.Select(row => row with
         {
             SelectedCategoryId = row.SuggestedCategoryId,
@@ -281,8 +345,7 @@ public sealed class StatementImportStore
         string statementFingerprint = StatementIdentity.ComputeStatementFingerprint(parsed.Rows, startDate, endDate);
 
         await InsertReviewAsync(
-            connection,
-            transaction,
+            context,
             reviewId,
             customerId,
             accountId,
@@ -335,37 +398,32 @@ public sealed class StatementImportStore
 
     public async Task<IReadOnlyList<ImportOpenReviewSummary>> ListOpenReviewsAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
-        await using var connection = await _db.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT id, financial_account_id, source_kind, start_date, end_date, version,
-                   expires_at, total_rows, imported_count, suppressed_count, skipped_count, created_at
-            FROM import_reviews
-            WHERE customer_id = @customer_id AND status = 'Prepared' AND expires_at > NOW()
-            ORDER BY created_at DESC, id DESC
-            LIMIT 50
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        var items = new List<ImportOpenReviewSummary>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            items.Add(new ImportOpenReviewSummary(
-                reader.GetGuid(0),
-                reader.GetGuid(1),
-                reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetFieldValue<DateOnly>(3),
-                reader.IsDBNull(4) ? null : reader.GetFieldValue<DateOnly>(4),
-                reader.GetInt32(5),
-                reader.GetFieldValue<DateTime>(6),
-                reader.GetInt32(7),
-                reader.GetInt32(8),
-                reader.GetInt32(9),
-                reader.GetInt32(10),
-                reader.GetFieldValue<DateTime>(11)));
-        }
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        List<ImportReview> reviews = await context.ImportReviews
+            .FromSqlInterpolated($"""
+                SELECT * FROM import_reviews
+                WHERE customer_id = {customerId} AND status = 'Prepared' AND expires_at > NOW()
+                ORDER BY created_at DESC, id DESC
+                LIMIT 50
+                """)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
 
-        return items;
+        return reviews
+            .Select(review => new ImportOpenReviewSummary(
+                review.Id,
+                review.FinancialAccountId,
+                review.SourceKind,
+                review.StartDate,
+                review.EndDate,
+                review.Version,
+                review.ExpiresAt,
+                review.TotalRows,
+                review.ImportedCount,
+                review.SuppressedCount,
+                review.SkippedCount,
+                review.CreatedAt))
+            .ToList();
     }
 
     public async Task<ImportReviewDetail> GetReviewAsync(Guid customerId,
@@ -380,8 +438,8 @@ public sealed class StatementImportStore
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, ImportLimits.MaxPageSize);
 
-        await using var connection = await _db.OpenAsync(cancellationToken);
-        var summary = await ReadReviewHeaderAsync(connection, null, customerId, reviewId, false, cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var summary = await ReadReviewHeaderAsync(context, customerId, reviewId, false, cancellationToken);
         if (summary is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
@@ -396,8 +454,8 @@ public sealed class StatementImportStore
         }
 
         bool descending = string.Equals(sortDirection, "desc", StringComparison.OrdinalIgnoreCase);
-        var rows = await ReadReviewRowsAsync(connection, null, reviewId, page, pageSize, descending, possibleDuplicatesOnly, untaggedOnly, cancellationToken);
-        int total = await CountReviewRowsAsync(connection, null, reviewId, possibleDuplicatesOnly, untaggedOnly, cancellationToken);
+        var rows = await ReadReviewRowsAsync(context, reviewId, page, pageSize, descending, possibleDuplicatesOnly, untaggedOnly, cancellationToken);
+        int total = await CountReviewRowsAsync(context, reviewId, possibleDuplicatesOnly, untaggedOnly, cancellationToken);
 
         return new ImportReviewDetail(summary, new ImportReviewPage(rows, total, page, pageSize));
     }
@@ -418,24 +476,24 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
 
-        await using var connection = await _db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
 
-        var accountId = await ReviewAccountIdAsync(connection, transaction, customerId, reviewId, cancellationToken);
+        var accountId = await ReviewAccountIdAsync(context, customerId, reviewId, cancellationToken);
         if (accountId is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
-        await LockQuotaAsync(connection, transaction, customerId, cancellationToken);
-        await LockAccountAsync(connection, transaction, customerId, accountId.Value, cancellationToken);
-        var summary = await ReadReviewHeaderAsync(connection, transaction, customerId, reviewId, true, cancellationToken);
+        await LockQuotaAsync(context, customerId, cancellationToken);
+        await LockAccountAsync(context, customerId, accountId.Value, cancellationToken);
+        var summary = await ReadReviewHeaderAsync(context, customerId, reviewId, true, cancellationToken);
         if (summary is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
         EnsureEditable(summary, expectedVersion);
 
-        var rows = (await ReadReviewRowsAsync(connection, transaction, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, cancellationToken)).ToList();
+        var rows = (await ReadReviewRowsAsync(context, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, cancellationToken)).ToList();
         var byId = rows.ToDictionary(row => row.RowId);
         foreach (var decision in decisions)
         {
@@ -460,7 +518,7 @@ public sealed class StatementImportStore
                 {
                     throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
                 }
-                await SetWithinFileGroupAsync(connection, transaction, reviewId, decision.WithinFileGroup, state, skip, cancellationToken);
+                await SetWithinFileGroupAsync(context, reviewId, decision.WithinFileGroup, state, skip, cancellationToken);
                 foreach (var groupRow in groupRows)
                 {
                     byId[groupRow.RowId] = groupRow with
@@ -501,7 +559,7 @@ public sealed class StatementImportStore
                 throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
             }
             var newlySelected = selectedTagIds.Except(row.SelectedTagIds).ToArray();
-            if (newlySelected.Length > 0 && !await TagsAvailableAsync(connection, transaction, customerId, newlySelected, cancellationToken))
+            if (newlySelected.Length > 0 && !await TagsAvailableAsync(context, customerId, newlySelected, cancellationToken))
             {
                 throw new ImportStoreException(ImportErrorCodes.TagUnavailable);
             }
@@ -520,7 +578,7 @@ public sealed class StatementImportStore
             else if (decision.HasSelectedCategory)
             {
                 if (decision.SelectedCategoryId is Guid categoryId &&
-                    !await CategorySelectableAsync(connection, transaction, customerId, categoryId, cancellationToken))
+                    !await CategorySelectableAsync(context, customerId, categoryId, cancellationToken))
                 {
                     throw new ImportStoreException(ImportErrorCodes.CategoryUnavailable);
                 }
@@ -528,7 +586,7 @@ public sealed class StatementImportStore
                 categoryDecided = true;
             }
 
-            await UpdateRowDecisionsAsync(connection, transaction, row.RowId, skipValue, overrideValue, withinFileState, selectedTagIds, selectedCategoryId, categoryDecided, cancellationToken);
+            await UpdateRowDecisionsAsync(context, row.RowId, skipValue, overrideValue, withinFileState, selectedTagIds, selectedCategoryId, categoryDecided, cancellationToken);
 
             byId[row.RowId] = row with
             {
@@ -543,7 +601,7 @@ public sealed class StatementImportStore
 
         var decidedRows = byId.Values.OrderBy(row => row.SourceRowNumber).ThenBy(row => row.RowId).ToArray();
         var decisionMap = decidedRows.ToDictionary(row => row.RowId, row => new RowDecision(row.Skip, row.Override));
-        var snapshot = await ComputeDuplicateSnapshotAsync(connection, transaction, customerId, accountId.Value, decidedRows.Select(ToParsedRow).ToArray(), decisionMap, cancellationToken);
+        var snapshot = await ComputeDuplicateSnapshotAsync(context, customerId, accountId.Value, decidedRows.Select(ToParsedRow).ToArray(), decisionMap, cancellationToken);
         var freshById = snapshot.Rows.ToDictionary(row => row.RowId);
         var updatedRows = new List<ImportReviewRowRecord>(decidedRows.Length);
         foreach (var oldRow in decidedRows)
@@ -585,14 +643,14 @@ public sealed class StatementImportStore
                 };
             }
             updatedRows.Add(merged);
-            await UpdateDuplicateSnapshotAsync(connection, transaction, merged, cancellationToken);
+            await UpdateDuplicateSnapshotAsync(context, merged, cancellationToken);
         }
 
         bool overrideFlag = statementOverride ?? summary.StatementOverride;
         int oldRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(rows, _storageJson));
         int newRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(updatedRows, _storageJson));
         long payloadBytes = Math.Max(0, summary.PayloadBytes + newRowsJson - oldRowsJson);
-        var (openReviews, usedPayload) = await QuotaUsageExcludingAsync(connection, transaction, customerId, reviewId, cancellationToken);
+        var (openReviews, usedPayload) = await QuotaUsageExcludingAsync(context, customerId, reviewId, cancellationToken);
         if (openReviews >= ImportLimits.MaxOpenReviewsPerCustomer || usedPayload + payloadBytes > ImportLimits.MaxOpenReviewPayloadBytes)
         {
             throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
@@ -600,7 +658,7 @@ public sealed class StatementImportStore
         var counts = CountRows(updatedRows);
         int version = summary.Version + 1;
         string hash = ComputeSummaryHash(reviewId, version, updatedRows, counts, overrideFlag);
-        await UpdateReviewSummaryAsync(connection, transaction, reviewId, version, counts, hash, overrideFlag, payloadBytes, cancellationToken);
+        await UpdateReviewSummaryAsync(context, reviewId, version, counts, hash, overrideFlag, payloadBytes, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return summary with
@@ -628,27 +686,27 @@ public sealed class StatementImportStore
                                                                     int expectedVersion,
                                                                     CancellationToken cancellationToken = default)
     {
-        await using var connection = await _db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
 
-        var accountId = await ReviewAccountIdAsync(connection, transaction, customerId, reviewId, cancellationToken);
+        var accountId = await ReviewAccountIdAsync(context, customerId, reviewId, cancellationToken);
         if (accountId is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
-        await LockQuotaAsync(connection, transaction, customerId, cancellationToken);
-        var account = await LockAccountAsync(connection, transaction, customerId, accountId.Value, cancellationToken);
-        var summary = await ReadReviewHeaderAsync(connection, transaction, customerId, reviewId, true, cancellationToken);
+        await LockQuotaAsync(context, customerId, cancellationToken);
+        var account = await LockAccountAsync(context, customerId, accountId.Value, cancellationToken);
+        var summary = await ReadReviewHeaderAsync(context, customerId, reviewId, true, cancellationToken);
         if (summary is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
         EnsureEditable(summary, expectedVersion);
 
-        var existingRows = await ReadReviewRowsAsync(connection, transaction, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, cancellationToken);
+        var existingRows = await ReadReviewRowsAsync(context, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, cancellationToken);
         var decisionMap = existingRows.ToDictionary(row => row.RowId, row => new RowDecision(row.Skip, row.Override));
         var parsedRows = existingRows.Select(ToParsedRow).ToArray();
-        var snapshot = await ComputeDuplicateSnapshotAsync(connection, transaction, customerId, accountId.Value, parsedRows, decisionMap, cancellationToken);
+        var snapshot = await ComputeDuplicateSnapshotAsync(context, customerId, accountId.Value, parsedRows, decisionMap, cancellationToken);
         var freshById = snapshot.Rows.ToDictionary(row => row.RowId);
         var refreshed = new List<ImportReviewRowRecord>(existingRows.Count);
         foreach (var oldRow in existingRows)
@@ -698,13 +756,13 @@ public sealed class StatementImportStore
                 };
             }
             refreshed.Add(refreshedRow);
-            await UpdateDuplicateSnapshotAsync(connection, transaction, refreshedRow, cancellationToken);
+            await UpdateDuplicateSnapshotAsync(context, refreshedRow, cancellationToken);
         }
 
         int oldRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(existingRows, _storageJson));
         int newRowsJson = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(refreshed, _storageJson));
         long payloadBytes = Math.Max(0, summary.PayloadBytes + newRowsJson - oldRowsJson);
-        var (openReviews, usedPayload) = await QuotaUsageExcludingAsync(connection, transaction, customerId, reviewId, cancellationToken);
+        var (openReviews, usedPayload) = await QuotaUsageExcludingAsync(context, customerId, reviewId, cancellationToken);
         if (openReviews >= ImportLimits.MaxOpenReviewsPerCustomer || usedPayload + payloadBytes > ImportLimits.MaxOpenReviewPayloadBytes)
         {
             throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
@@ -712,8 +770,8 @@ public sealed class StatementImportStore
         var counts = CountRows(refreshed);
         int version = summary.Version + 1;
         string hash = ComputeSummaryHash(reviewId, version, refreshed, counts, summary.StatementOverride);
-        await UpdateReviewSummaryAsync(connection, transaction, reviewId, version, counts, hash, summary.StatementOverride, payloadBytes, cancellationToken);
-        await UpdateReviewAccountVersionAsync(connection, transaction, reviewId, account.ImportVersion, cancellationToken);
+        await UpdateReviewSummaryAsync(context, reviewId, version, counts, hash, summary.StatementOverride, payloadBytes, cancellationToken);
+        await UpdateReviewAccountVersionAsync(context, reviewId, account.ImportVersion, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return summary with
@@ -739,24 +797,23 @@ public sealed class StatementImportStore
                                                               int expectedVersion,
                                                               CancellationToken cancellationToken = default)
     {
-        await using var connection = await _db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
 
         // A committed import purges the review header, so resolve a terminal
         // operation from its receipt before looking for the review.
-        var receiptAccountId = await ReceiptAccountIdAsync(
-            connection, transaction, customerId, reviewId, cancellationToken);
+        var receiptAccountId = await ReceiptAccountIdAsync(context, customerId, reviewId, cancellationToken);
         if (receiptAccountId is not null)
         {
-            await LockAccountAsync(connection, transaction, customerId, receiptAccountId.Value, cancellationToken);
-            var terminal = await ReadReceiptAsync(connection, transaction, customerId, reviewId, true, cancellationToken);
+            await LockAccountAsync(context, customerId, receiptAccountId.Value, cancellationToken);
+            var terminal = await ReadReceiptAsync(context, customerId, reviewId, true, cancellationToken);
             if (terminal is not null)
             {
                 if (terminal.State == "Deleted")
                 {
                     throw new ImportStoreException(ImportErrorCodes.ImportDeleted);
                 }
-                var statement = await ReadStatementSummaryAsync(connection, transaction, customerId, terminal.StatementImportId!.Value, cancellationToken);
+                var statement = await ReadStatementSummaryAsync(context, customerId, terminal.StatementImportId!.Value, cancellationToken);
                 if (statement is not null)
                 {
                     await transaction.CommitAsync(cancellationToken);
@@ -765,21 +822,21 @@ public sealed class StatementImportStore
             }
         }
 
-        var accountId = await ReviewAccountIdAsync(connection, transaction, customerId, reviewId, cancellationToken);
+        var accountId = await ReviewAccountIdAsync(context, customerId, reviewId, cancellationToken);
         if (accountId is null)
         {
-            var lateReceiptAccount = await ReceiptAccountIdAsync(connection, transaction, customerId, reviewId, cancellationToken);
+            var lateReceiptAccount = await ReceiptAccountIdAsync(context, customerId, reviewId, cancellationToken);
             if (lateReceiptAccount is not null)
             {
-                await LockAccountAsync(connection, transaction, customerId, lateReceiptAccount.Value, cancellationToken);
-                var lateReceipt = await ReadReceiptAsync(connection, transaction, customerId, reviewId, true, cancellationToken);
+                await LockAccountAsync(context, customerId, lateReceiptAccount.Value, cancellationToken);
+                var lateReceipt = await ReadReceiptAsync(context, customerId, reviewId, true, cancellationToken);
                 if (lateReceipt is not null)
                 {
                     if (lateReceipt.State == "Deleted")
                     {
                         throw new ImportStoreException(ImportErrorCodes.ImportDeleted);
                     }
-                    var lateStatement = await ReadStatementSummaryAsync(connection, transaction, customerId, lateReceipt.StatementImportId!.Value, cancellationToken);
+                    var lateStatement = await ReadStatementSummaryAsync(context, customerId, lateReceipt.StatementImportId!.Value, cancellationToken);
                     if (lateStatement is not null)
                     {
                         await transaction.CommitAsync(cancellationToken);
@@ -789,16 +846,16 @@ public sealed class StatementImportStore
             }
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
-        await LockAccountAsync(connection, transaction, customerId, accountId.Value, cancellationToken);
+        await LockAccountAsync(context, customerId, accountId.Value, cancellationToken);
 
-        var racedReceipt = await ReadReceiptAsync(connection, transaction, customerId, reviewId, false, cancellationToken);
+        var racedReceipt = await ReadReceiptAsync(context, customerId, reviewId, false, cancellationToken);
         if (racedReceipt is not null)
         {
             if (racedReceipt.State == "Deleted")
             {
                 throw new ImportStoreException(ImportErrorCodes.ImportDeleted);
             }
-            var statement = await ReadStatementSummaryAsync(connection, transaction, customerId, racedReceipt.StatementImportId!.Value, cancellationToken);
+            var statement = await ReadStatementSummaryAsync(context, customerId, racedReceipt.StatementImportId!.Value, cancellationToken);
             if (statement is not null)
             {
                 await transaction.CommitAsync(cancellationToken);
@@ -806,7 +863,7 @@ public sealed class StatementImportStore
             }
         }
 
-        var summary = await ReadReviewHeaderAsync(connection, transaction, customerId, reviewId, true, cancellationToken);
+        var summary = await ReadReviewHeaderAsync(context, customerId, reviewId, true, cancellationToken);
         if (summary is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
@@ -822,41 +879,30 @@ public sealed class StatementImportStore
         }
         EnsureEditable(summary, expectedVersion);
 
-        await using (var deleteRows = connection.CreateCommand())
-        {
-            deleteRows.Transaction = transaction;
-            deleteRows.CommandText = "DELETE FROM import_review_rows WHERE review_id = @review_id";
-            deleteRows.Parameters.AddWithValue("review_id", reviewId);
-            await deleteRows.ExecuteNonQueryAsync(cancellationToken);
-        }
-        await using (var update = connection.CreateCommand())
-        {
-            update.Transaction = transaction;
-            update.CommandText = """
-                UPDATE import_reviews
-                SET status = 'Abandoned',
-                    parser_config = '{}'::jsonb,
-                    start_date = NULL,
-                    end_date = NULL,
-                    statement_fingerprint = '',
-                    summary_hash = '',
-                    total_rows = 0,
-                    imported_count = 0,
-                    suppressed_count = 0,
-                    skipped_count = 0,
-                    possible_duplicate_count = 0,
-                    exact_override_count = 0,
-                    statement_override = FALSE,
-                    statement_override_count = 0,
-                    payload_bytes = 0,
-                    version = version + 1,
-                    updated_at = NOW()
-                WHERE customer_id = @customer_id AND id = @id
-                """;
-            update.Parameters.AddWithValue("customer_id", customerId);
-            update.Parameters.AddWithValue("id", reviewId);
-            await update.ExecuteNonQueryAsync(cancellationToken);
-        }
+        await context.ImportReviewRows
+            .Where(row => row.ReviewId == reviewId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.Database.ExecuteSqlInterpolatedAsync($$"""
+            UPDATE import_reviews
+            SET status = 'Abandoned',
+                parser_config = '{}'::jsonb,
+                start_date = NULL,
+                end_date = NULL,
+                statement_fingerprint = '',
+                summary_hash = '',
+                total_rows = 0,
+                imported_count = 0,
+                suppressed_count = 0,
+                skipped_count = 0,
+                possible_duplicate_count = 0,
+                exact_override_count = 0,
+                statement_override = FALSE,
+                statement_override_count = 0,
+                payload_bytes = 0,
+                version = version + 1,
+                updated_at = NOW()
+            WHERE customer_id = {{customerId}} AND id = {{reviewId}}
+            """, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
 
@@ -865,8 +911,7 @@ public sealed class StatementImportStore
 
     // --- Duplicate snapshot ------------------------------------------------
 
-    private async Task<DuplicateSnapshot> ComputeDuplicateSnapshotAsync(NpgsqlConnection connection,
-                                                                        NpgsqlTransaction transaction,
+    private async Task<DuplicateSnapshot> ComputeDuplicateSnapshotAsync(ArgusDbContext context,
                                                                         Guid customerId,
                                                                         Guid accountId,
                                                                         IReadOnlyList<ParsedStatementRow> parsedRows,
@@ -885,10 +930,8 @@ public sealed class StatementImportStore
         if (identityKeys.Length > 0)
         {
             foreach (var row in await QueryExistingAsync(
-                         connection, transaction, customerId, accountId,
-                         "t.identity_key = ANY(@keys)",
-                         command => command.Parameters.AddWithValue(
-                             "keys", NpgsqlDbType.Array | NpgsqlDbType.Text, identityKeys),
+                         context, customerId, accountId,
+                         query => query.Where(transaction => identityKeys.Contains(transaction.IdentityKey)),
                          cancellationToken))
             {
                 existing[row.Id] = row;
@@ -897,13 +940,10 @@ public sealed class StatementImportStore
         if (namespaces.Length > 0 && ids.Length > 0)
         {
             foreach (var row in await QueryExistingAsync(
-                         connection, transaction, customerId, accountId,
-                         "t.source_id_namespace = ANY(@namespaces) AND t.source_id_value = ANY(@values)",
-                         command =>
-                         {
-                             command.Parameters.AddWithValue("namespaces", NpgsqlDbType.Array | NpgsqlDbType.Text, namespaces);
-                             command.Parameters.AddWithValue("values", NpgsqlDbType.Array | NpgsqlDbType.Text, ids);
-                         },
+                         context, customerId, accountId,
+                         query => query.Where(transaction =>
+                             namespaces.Contains(transaction.SourceIdNamespace!) &&
+                             ids.Contains(transaction.SourceIdValue!)),
                          cancellationToken))
             {
                 existing[row.Id] = row;
@@ -912,13 +952,10 @@ public sealed class StatementImportStore
         if (amounts.Length > 0 && dates.Length > 0)
         {
             foreach (var row in await QueryExistingAsync(
-                         connection, transaction, customerId, accountId,
-                         "t.amount = ANY(@amounts) AND t.transaction_date = ANY(@dates)",
-                         command =>
-                         {
-                             command.Parameters.AddWithValue("amounts", NpgsqlDbType.Array | NpgsqlDbType.Numeric, amounts);
-                             command.Parameters.AddWithValue("dates", NpgsqlDbType.Array | NpgsqlDbType.Date, dates);
-                         },
+                         context, customerId, accountId,
+                         query => query.Where(transaction =>
+                             amounts.Contains(transaction.Amount) &&
+                             dates.Contains(transaction.TransactionDate)),
                          cancellationToken))
             {
                 existing[row.Id] = row;
@@ -1109,7 +1146,7 @@ public sealed class StatementImportStore
             }
         }
 
-        var activeTags = await LoadActiveTagsAsync(connection, transaction, customerId, cancellationToken);
+        var activeTags = await LoadActiveTagsAsync(context, customerId, cancellationToken);
         string[] merchantKeys = snapshots
             .Select(snapshot => MerchantKey.FromDescription(snapshot.Row.NormalizedDescription))
             .Where(key => key is not null)
@@ -1117,7 +1154,7 @@ public sealed class StatementImportStore
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         SuggestionData suggestions = await SuggestionLoader.LoadAsync(
-            connection, transaction, customerId, merchantKeys, cancellationToken);
+            context, customerId, merchantKeys, cancellationToken);
         foreach (var snapshot in snapshots)
         {
             SuggestionResult result = MerchantSuggestions.Build(
@@ -1321,167 +1358,164 @@ public sealed class StatementImportStore
 
     // --- Persistence helpers ------------------------------------------------
 
-    private static async Task<ImportAccountRecord?> GetAccountAsync(NpgsqlConnection connection,
-                                                                    NpgsqlTransaction? transaction,
+    private static async Task<ImportAccountRecord?> GetAccountAsync(ArgusDbContext context,
                                                                     Guid customerId,
                                                                     Guid accountId,
-                                                                    bool forUpdate,
                                                                     CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            SELECT id, display_name, currency, is_archived, import_version
+        return await context.FinancialAccounts
+            .AsNoTracking()
+            .Where(account => account.CustomerId == customerId && account.Id == accountId)
+            .Select(account => new ImportAccountRecord(
+                account.Id,
+                account.DisplayName,
+                account.Currency,
+                account.IsArchived,
+                account.ImportVersion))
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
+    private static async Task<ImportAccountRecord> LockAccountAsync(ArgusDbContext context,
+                                                                    Guid customerId,
+                                                                    Guid accountId,
+                                                                    CancellationToken cancellationToken)
+    {
+        List<AccountLockRow> rows = await context.Database.SqlQueryRaw<AccountLockRow>("""
+            SELECT id AS "Id", display_name AS "DisplayName", currency AS "Currency",
+                   is_archived AS "IsArchived", import_version AS "ImportVersion"
             FROM financial_accounts
-            WHERE customer_id = @customer_id AND id = @account_id
-            {(forUpdate ? "FOR UPDATE" : string.Empty)}
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("account_id", accountId);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            WHERE customer_id = {0} AND id = {1}
+            FOR UPDATE
+            """, customerId, accountId).ToListAsync(cancellationToken);
+        AccountLockRow? row = rows.SingleOrDefault();
 
-        return await reader.ReadAsync(cancellationToken) ? new ImportAccountRecord(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetBoolean(3), reader.GetInt64(4)) : null;
+        return row is null
+            ? throw new ImportStoreException(ImportErrorCodes.NotFound)
+            : new ImportAccountRecord(row.Id, row.DisplayName, row.Currency, row.IsArchived, row.ImportVersion);
     }
 
-    private static async Task<ImportAccountRecord> LockAccountAsync(NpgsqlConnection connection,
-                                                                    NpgsqlTransaction transaction,
-                                                                    Guid customerId,
-                                                                    Guid accountId,
-                                                                    CancellationToken cancellationToken)
-    {
-        var account = await GetAccountAsync(connection, transaction, customerId, accountId, true, cancellationToken);
-
-        return account ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
-    }
-
-    private static async Task LockQuotaAsync(NpgsqlConnection connection,
-                                             NpgsqlTransaction transaction,
+    private static async Task LockQuotaAsync(ArgusDbContext context,
                                              Guid customerId,
                                              CancellationToken cancellationToken)
     {
-        await using (var insert = connection.CreateCommand())
-        {
-            insert.Transaction = transaction;
-            insert.CommandText = "INSERT INTO import_quota_locks (customer_id) VALUES (@customer_id) ON CONFLICT DO NOTHING";
-            insert.Parameters.AddWithValue("customer_id", customerId);
-            await insert.ExecuteNonQueryAsync(cancellationToken);
-        }
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT 1 FROM import_quota_locks WHERE customer_id = @customer_id FOR UPDATE";
-        command.Parameters.AddWithValue("customer_id", customerId);
-        await command.ExecuteScalarAsync(cancellationToken);
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO import_quota_locks (customer_id) VALUES ({customerId}) ON CONFLICT DO NOTHING
+            """, cancellationToken);
+        await context.Database.SqlQuery<int>($"""
+            SELECT 1 AS "Value" FROM import_quota_locks WHERE customer_id = {customerId} FOR UPDATE
+            """).ToListAsync(cancellationToken);
     }
 
-    private static async Task<long> EnforceQuotaAsync(NpgsqlConnection connection,
-                                                      NpgsqlTransaction transaction,
+    private static async Task<long> EnforceQuotaAsync(ArgusDbContext context,
                                                       Guid customerId,
                                                       long payloadBytes,
                                                       CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT COUNT(*), COALESCE(SUM(payload_bytes), 0)
+        List<QuotaUsageRow> usage = await context.Database.SqlQuery<QuotaUsageRow>($"""
+            SELECT COUNT(*) AS "OpenReviews", COALESCE(SUM(payload_bytes), 0) AS "UsedPayload"
             FROM import_reviews
-            WHERE customer_id = @customer_id AND status = 'Prepared' AND expires_at > NOW()
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        await reader.ReadAsync(cancellationToken);
-        long open = reader.GetInt64(0);
-        long used = reader.GetInt64(1);
-        if (open >= ImportLimits.MaxOpenReviewsPerCustomer || used + payloadBytes > ImportLimits.MaxOpenReviewPayloadBytes)
+            WHERE customer_id = {customerId} AND status = 'Prepared' AND expires_at > NOW()
+            """).ToListAsync(cancellationToken);
+        QuotaUsageRow row = usage.Single();
+        if (row.OpenReviews >= ImportLimits.MaxOpenReviewsPerCustomer || row.UsedPayload + payloadBytes > ImportLimits.MaxOpenReviewPayloadBytes)
         {
             throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
         }
 
-        return used;
+        return row.UsedPayload;
     }
 
-    private static async Task<Guid?> ReviewAccountIdAsync(NpgsqlConnection connection,
-                                                          NpgsqlTransaction transaction,
+    private static async Task<Guid?> ReviewAccountIdAsync(ArgusDbContext context,
                                                           Guid customerId,
                                                           Guid reviewId,
                                                           CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT financial_account_id FROM import_reviews WHERE customer_id = @customer_id AND id = @id";
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("id", reviewId);
-
-        return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
+        return await context.ImportReviews
+            .Where(review => review.CustomerId == customerId && review.Id == reviewId)
+            .Select(review => (Guid?)review.FinancialAccountId)
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
-    private static async Task<ImportReviewSummaryRecord?> ReadReviewHeaderAsync(NpgsqlConnection connection,
-                                                                                NpgsqlTransaction? transaction,
+    private static async Task<ImportReviewSummaryRecord?> ReadReviewHeaderAsync(ArgusDbContext context,
                                                                                 Guid customerId,
                                                                                 Guid reviewId,
                                                                                 bool forUpdate,
                                                                                 CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            SELECT id, financial_account_id, source_kind, start_date, end_date, version, status,
-                   expires_at, account_import_version, statement_fingerprint, summary_hash, total_rows, imported_count,
-                   suppressed_count, skipped_count,
+        const string headerSql = """
+            SELECT id AS "Id",
+                   financial_account_id AS "FinancialAccountId",
+                   source_kind AS "SourceKind",
+                   start_date AS "StartDate",
+                   end_date AS "EndDate",
+                   version AS "Version",
+                   status AS "Status",
+                   expires_at AS "ExpiresAt",
+                   account_import_version AS "AccountImportVersion",
+                   statement_fingerprint AS "StatementFingerprint",
+                   summary_hash AS "SummaryHash",
+                   total_rows AS "TotalRows",
+                   imported_count AS "ImportedCount",
+                   suppressed_count AS "SuppressedCount",
+                   skipped_count AS "SkippedCount",
                    (SELECT COUNT(*) FROM import_review_rows r
                     WHERE r.review_id = import_reviews.id
-                      AND jsonb_array_length(r.validation_codes) > 0 AND r.skip = FALSE) AS invalid_unskipped_count,
+                      AND jsonb_array_length(r.validation_codes) > 0 AND r.skip = FALSE) AS "InvalidUnskippedCount",
                    (SELECT COUNT(*) FROM import_review_rows r
-                    WHERE r.review_id = import_reviews.id AND r.within_file_state = 'pending') AS within_file_pending_count,
-                   possible_duplicate_count, exact_override_count,
+                    WHERE r.review_id = import_reviews.id AND r.within_file_state = 'pending') AS "WithinFilePendingCount",
+                   possible_duplicate_count AS "PossibleDuplicateCount",
+                   exact_override_count AS "ExactOverrideCount",
                    (SELECT COUNT(*) FROM import_review_rows r
                     WHERE r.review_id = import_reviews.id
                       AND r.skip = FALSE
                       AND r.transaction_date IS NOT NULL AND r.amount_cents IS NOT NULL
                       AND (r.duplicate_state NOT IN ('suppressed', 'suppressed_within_file') OR r.override)
-                      AND r.selected_category_id IS NOT NULL) AS categorised_count,
-                   statement_override, statement_override_count, payload_bytes, created_at, updated_at
+                      AND r.selected_category_id IS NOT NULL) AS "CategorisedCount",
+                   statement_override AS "StatementOverride",
+                   statement_override_count AS "StatementOverrideCount",
+                   payload_bytes AS "PayloadBytes",
+                   created_at AS "CreatedAt",
+                   updated_at AS "UpdatedAt"
             FROM import_reviews
-            WHERE customer_id = @customer_id AND id = @id
-            {(forUpdate ? "FOR UPDATE" : string.Empty)}
+            WHERE customer_id = {0} AND id = {1}
             """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("id", reviewId);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
-        {
-            return null;
-        }
+        string sql = forUpdate ? string.Concat(headerSql, "\nFOR UPDATE") : headerSql;
+        List<ReviewHeaderRow> rows = await context.Database
+            .SqlQueryRaw<ReviewHeaderRow>(sql, customerId, reviewId)
+            .ToListAsync(cancellationToken);
+        ReviewHeaderRow? row = rows.SingleOrDefault();
 
-        return new ImportReviewSummaryRecord(
-            reader.GetGuid(0),
-            reader.GetGuid(1),
-            reader.GetString(2),
-            reader.IsDBNull(3) ? null : reader.GetFieldValue<DateOnly>(3),
-            reader.IsDBNull(4) ? null : reader.GetFieldValue<DateOnly>(4),
-            reader.GetInt32(5),
-            reader.GetString(6),
-            reader.GetFieldValue<DateTime>(7),
-            reader.GetInt64(8),
-            reader.GetString(9),
-            reader.GetString(10),
-            reader.GetInt32(11),
-            reader.GetInt32(12),
-            reader.GetInt32(13),
-            reader.GetInt32(14),
-            reader.GetInt32(15),
-            reader.GetInt32(16),
-            reader.GetInt32(17),
-            reader.GetInt32(18),
-            reader.GetInt32(19),
-            reader.GetBoolean(20),
-            reader.GetInt32(21),
-            reader.GetInt64(22),
-            reader.GetFieldValue<DateTime>(23),
-            reader.GetFieldValue<DateTime>(24));
+        return row is null
+            ? null
+            : new ImportReviewSummaryRecord(
+                row.Id,
+                row.FinancialAccountId,
+                row.SourceKind,
+                row.StartDate,
+                row.EndDate,
+                row.Version,
+                row.Status,
+                row.ExpiresAt,
+                row.AccountImportVersion,
+                row.StatementFingerprint,
+                row.SummaryHash,
+                row.TotalRows,
+                row.ImportedCount,
+                row.SuppressedCount,
+                row.SkippedCount,
+                row.InvalidUnskippedCount,
+                row.WithinFilePendingCount,
+                row.PossibleDuplicateCount,
+                row.ExactOverrideCount,
+                row.CategorisedCount,
+                row.StatementOverride,
+                row.StatementOverrideCount,
+                row.PayloadBytes,
+                row.CreatedAt,
+                row.UpdatedAt);
     }
 
-    private static async Task<IReadOnlyList<ImportReviewRowRecord>> ReadReviewRowsAsync(NpgsqlConnection connection,
-                                                                                        NpgsqlTransaction? transaction,
+    private static async Task<IReadOnlyList<ImportReviewRowRecord>> ReadReviewRowsAsync(ArgusDbContext context,
                                                                                         Guid reviewId,
                                                                                         int page,
                                                                                         int pageSize,
@@ -1490,101 +1524,111 @@ public sealed class StatementImportStore
                                                                                         bool untaggedOnly,
                                                                                         CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
         string orderBy = descending
             ? "transaction_date DESC NULLS LAST, source_row_number DESC, row_id DESC"
             : "transaction_date ASC NULLS LAST, source_row_number ASC, row_id ASC";
-        command.CommandText = $"""
-            SELECT row_id, source_line, source_page, source_row_number, raw_values::text,
-                   transaction_date, description, normalized_description, amount_cents,
-                   validation_codes::text, warnings::text, source_id_namespace, source_id_value,
-                   duplicate_state, duplicate_reasons::text, matching_transaction_ids::text,
-                   matching_import_ids::text, near_candidates::text, near_candidate_total,
-                   within_file_group, within_file_state, skip, override, suggested_tag_ids::text,
-                   selected_tag_ids::text, suggested_category_id, selected_category_id, category_decided
+        const string rowSql = """
+            SELECT row_id AS "RowId",
+                   source_line AS "SourceLine",
+                   source_page AS "SourcePage",
+                   source_row_number AS "SourceRowNumber",
+                   raw_values::text AS "RawValues",
+                   transaction_date AS "TransactionDate",
+                   description AS "Description",
+                   normalized_description AS "NormalizedDescription",
+                   amount_cents AS "AmountCents",
+                   validation_codes::text AS "ValidationCodes",
+                   warnings::text AS "Warnings",
+                   source_id_namespace AS "SourceIdNamespace",
+                   source_id_value AS "SourceIdValue",
+                   duplicate_state AS "DuplicateState",
+                   duplicate_reasons::text AS "DuplicateReasons",
+                   matching_transaction_ids::text AS "MatchingTransactionIds",
+                   matching_import_ids::text AS "MatchingImportIds",
+                   near_candidates::text AS "NearCandidates",
+                   near_candidate_total AS "NearCandidateTotal",
+                   within_file_group AS "WithinFileGroup",
+                   within_file_state AS "WithinFileState",
+                   skip AS "Skip",
+                   override AS "Override",
+                   suggested_tag_ids::text AS "SuggestedTagIds",
+                   selected_tag_ids::text AS "SelectedTagIds",
+                   suggested_category_id AS "SuggestedCategoryId",
+                   selected_category_id AS "SelectedCategoryId",
+                   category_decided AS "CategoryDecided"
             FROM import_review_rows
-            WHERE review_id = @review_id
-              AND (@possible_only = FALSE OR (
+            WHERE review_id = {0}
+              AND ({1} = FALSE OR (
                     skip = FALSE
                     AND (near_candidate_total > 0 OR duplicate_reasons @> '["stable_id_changed"]'::jsonb)
                   ))
-              AND (@untagged_only = FALSE OR jsonb_array_length(selected_tag_ids) = 0)
-            ORDER BY {orderBy}
-            LIMIT @limit OFFSET @offset
+              AND ({2} = FALSE OR jsonb_array_length(selected_tag_ids) = 0)
+            ORDER BY
             """;
-        command.Parameters.AddWithValue("review_id", reviewId);
-        command.Parameters.AddWithValue("possible_only", possibleDuplicatesOnly);
-        command.Parameters.AddWithValue("untagged_only", untaggedOnly);
-        command.Parameters.AddWithValue("limit", pageSize == int.MaxValue ? 100_000 : pageSize);
-        command.Parameters.AddWithValue("offset", pageSize == int.MaxValue ? 0 : (page - 1) * pageSize);
-        var rows = new List<ImportReviewRowRecord>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            rows.Add(new ImportReviewRowRecord(
-                reader.GetGuid(0),
-                reader.GetInt32(1),
-                reader.IsDBNull(2) ? null : reader.GetInt32(2),
-                reader.GetInt32(3),
-                JsonSerializer.Deserialize<Dictionary<string, string?>>(reader.GetString(4), _storageJson)
-                    ?? new Dictionary<string, string?>(),
-                reader.IsDBNull(5) ? null : reader.GetFieldValue<DateOnly>(5),
-                reader.GetString(6),
-                reader.GetString(7),
-                reader.IsDBNull(8) ? null : reader.GetInt64(8),
-                JsonSerializer.Deserialize<string[]>(reader.GetString(9), _storageJson) ?? [],
-                JsonSerializer.Deserialize<string[]>(reader.GetString(10), _storageJson) ?? [],
-                reader.IsDBNull(11) ? null : reader.GetString(11),
-                reader.IsDBNull(12) ? null : reader.GetString(12),
-                reader.GetString(13),
-                JsonSerializer.Deserialize<string[]>(reader.GetString(14), _storageJson) ?? [],
-                JsonSerializer.Deserialize<Guid[]>(reader.GetString(15), _storageJson) ?? [],
-                JsonSerializer.Deserialize<Guid[]>(reader.GetString(16), _storageJson) ?? [],
-                JsonSerializer.Deserialize<ImportNearCandidateRecord[]>(reader.GetString(17), _storageJson) ?? [],
-                reader.GetInt32(18),
-                reader.IsDBNull(19) ? null : reader.GetString(19),
-                reader.GetString(20),
-                reader.GetBoolean(21),
-                reader.GetBoolean(22),
-                JsonSerializer.Deserialize<Guid[]>(reader.GetString(23), _storageJson) ?? [],
-                JsonSerializer.Deserialize<Guid[]>(reader.GetString(24), _storageJson) ?? [],
-                reader.IsDBNull(25) ? null : reader.GetGuid(25),
-                reader.IsDBNull(26) ? null : reader.GetGuid(26),
-                reader.GetBoolean(27)));
-        }
+        string sql = string.Concat(rowSql, "\n", orderBy, "\nLIMIT {3} OFFSET {4}");
+        List<ReviewRowText> rows = await context.Database.SqlQueryRaw<ReviewRowText>(
+            sql,
+            reviewId,
+            possibleDuplicatesOnly,
+            untaggedOnly,
+            pageSize == int.MaxValue ? 100_000 : pageSize,
+            pageSize == int.MaxValue ? 0 : (page - 1) * pageSize).ToListAsync(cancellationToken);
 
-        return rows;
+        return rows.Select(MapReviewRow).ToList();
     }
 
-    private static async Task<int> CountReviewRowsAsync(NpgsqlConnection connection,
-                                                        NpgsqlTransaction? transaction,
+    private static ImportReviewRowRecord MapReviewRow(ReviewRowText row) => new(
+        row.RowId,
+        row.SourceLine,
+        row.SourcePage,
+        row.SourceRowNumber,
+        JsonSerializer.Deserialize<Dictionary<string, string?>>(row.RawValues, _storageJson)
+            ?? new Dictionary<string, string?>(),
+        row.TransactionDate,
+        row.Description,
+        row.NormalizedDescription,
+        row.AmountCents,
+        JsonSerializer.Deserialize<string[]>(row.ValidationCodes, _storageJson) ?? [],
+        JsonSerializer.Deserialize<string[]>(row.Warnings, _storageJson) ?? [],
+        row.SourceIdNamespace,
+        row.SourceIdValue,
+        row.DuplicateState,
+        JsonSerializer.Deserialize<string[]>(row.DuplicateReasons, _storageJson) ?? [],
+        JsonSerializer.Deserialize<Guid[]>(row.MatchingTransactionIds, _storageJson) ?? [],
+        JsonSerializer.Deserialize<Guid[]>(row.MatchingImportIds, _storageJson) ?? [],
+        JsonSerializer.Deserialize<ImportNearCandidateRecord[]>(row.NearCandidates, _storageJson) ?? [],
+        row.NearCandidateTotal,
+        row.WithinFileGroup,
+        row.WithinFileState,
+        row.Skip,
+        row.Override,
+        JsonSerializer.Deserialize<Guid[]>(row.SuggestedTagIds, _storageJson) ?? [],
+        JsonSerializer.Deserialize<Guid[]>(row.SelectedTagIds, _storageJson) ?? [],
+        row.SuggestedCategoryId,
+        row.SelectedCategoryId,
+        row.CategoryDecided);
+
+    private static async Task<int> CountReviewRowsAsync(ArgusDbContext context,
                                                         Guid reviewId,
                                                         bool possibleDuplicatesOnly,
                                                         bool untaggedOnly,
                                                         CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT COUNT(*)
+        long count = await context.Database.SqlQueryRaw<long>("""
+            SELECT COUNT(*) AS "Value"
             FROM import_review_rows
-            WHERE review_id = @review_id
-              AND (@possible_only = FALSE OR (
+            WHERE review_id = {0}
+              AND ({1} = FALSE OR (
                     skip = FALSE
                     AND (near_candidate_total > 0 OR duplicate_reasons @> '["stable_id_changed"]'::jsonb)
                   ))
-              AND (@untagged_only = FALSE OR jsonb_array_length(selected_tag_ids) = 0)
-            """;
-        command.Parameters.AddWithValue("review_id", reviewId);
-        command.Parameters.AddWithValue("possible_only", possibleDuplicatesOnly);
-        command.Parameters.AddWithValue("untagged_only", untaggedOnly);
+              AND ({2} = FALSE OR jsonb_array_length(selected_tag_ids) = 0)
+            """, reviewId, possibleDuplicatesOnly, untaggedOnly).SingleAsync(cancellationToken);
 
-        return (int)(long)(await command.ExecuteScalarAsync(cancellationToken))!;
+        return (int)count;
     }
 
-    private static async Task InsertReviewAsync(NpgsqlConnection connection,
-                                                NpgsqlTransaction transaction,
+    private static async Task InsertReviewAsync(ArgusDbContext context,
                                                 Guid reviewId,
                                                 Guid customerId,
                                                 Guid accountId,
@@ -1602,186 +1646,281 @@ public sealed class StatementImportStore
                                                 IReadOnlyList<ImportReviewRowRecord> rows,
                                                 CancellationToken cancellationToken)
     {
-        await using (var insert = connection.CreateCommand())
+        context.ImportReviews.Add(new ImportReview
         {
-            insert.Transaction = transaction;
-            insert.CommandText = """
-                INSERT INTO import_reviews (
-                    id, customer_id, financial_account_id, source_kind, parser_config, currency,
-                    start_date, end_date, version, status, expires_at, account_import_version,
-                    duplicate_policy_version, statement_fingerprint, summary_hash, total_rows, imported_count,
-                    suppressed_count, skipped_count, possible_duplicate_count, exact_override_count,
-                    statement_override, statement_override_count, payload_bytes, created_at, updated_at
-                )
-                VALUES (
-                    @id, @customer_id, @financial_account_id, @source_kind, @parser_config, 'ZAR',
-                    @start_date, @end_date, 1, 'Prepared', @expires_at, @account_import_version,
-                    @duplicate_policy_version, @statement_fingerprint, @summary_hash, @total_rows, @imported_count,
-                    @suppressed_count, @skipped_count, @possible_duplicate_count, 0,
-                    FALSE, 0, @payload_bytes, @now, @now
-                )
-                """;
-            insert.Parameters.AddWithValue("id", reviewId);
-            insert.Parameters.AddWithValue("customer_id", customerId);
-            insert.Parameters.AddWithValue("financial_account_id", accountId);
-            insert.Parameters.AddWithValue("source_kind", sourceKind);
-            insert.Parameters.AddWithValue("parser_config", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(config, _storageJson));
-            insert.Parameters.AddWithValue("start_date", startDate);
-            insert.Parameters.AddWithValue("end_date", endDate);
-            insert.Parameters.AddWithValue("expires_at", expiresAt);
-            insert.Parameters.AddWithValue("account_import_version", accountImportVersion);
-            insert.Parameters.AddWithValue("duplicate_policy_version", ImportLimits.DuplicatePolicyVersion);
-            insert.Parameters.AddWithValue("statement_fingerprint", statementFingerprint);
-            insert.Parameters.AddWithValue("summary_hash", summaryHash);
-            insert.Parameters.AddWithValue("total_rows", counts.TotalRows);
-            insert.Parameters.AddWithValue("imported_count", counts.Imported);
-            insert.Parameters.AddWithValue("suppressed_count", counts.Suppressed);
-            insert.Parameters.AddWithValue("skipped_count", counts.Skipped);
-            insert.Parameters.AddWithValue("possible_duplicate_count", counts.PossibleDuplicates);
-            insert.Parameters.AddWithValue("payload_bytes", payloadBytes);
-            insert.Parameters.AddWithValue("now", now);
-            await insert.ExecuteNonQueryAsync(cancellationToken);
-        }
+            Id = reviewId,
+            CustomerId = customerId,
+            FinancialAccountId = accountId,
+            SourceKind = sourceKind,
+            ParserConfig = ToJsonDocument(config),
+            Currency = "ZAR",
+            StartDate = startDate,
+            EndDate = endDate,
+            Version = 1,
+            Status = "Prepared",
+            ExpiresAt = expiresAt,
+            AccountImportVersion = accountImportVersion,
+            DuplicatePolicyVersion = ImportLimits.DuplicatePolicyVersion,
+            StatementFingerprint = statementFingerprint,
+            SummaryHash = summaryHash,
+            TotalRows = counts.TotalRows,
+            ImportedCount = counts.Imported,
+            SuppressedCount = counts.Suppressed,
+            SkippedCount = counts.Skipped,
+            PossibleDuplicateCount = counts.PossibleDuplicates,
+            ExactOverrideCount = 0,
+            StatementOverride = false,
+            StatementOverrideCount = 0,
+            PayloadBytes = payloadBytes,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
 
-        await using var copy = await connection.BeginBinaryImportAsync(
-            "COPY import_review_rows (" +
-            "row_id, review_id, customer_id, source_line, source_page, source_row_number, raw_values, " +
-            "transaction_date, description, normalized_description, amount_cents, source_id_namespace, " +
-            "source_id_value, validation_codes, warnings, duplicate_state, duplicate_reasons, " +
-            "matching_transaction_ids, matching_import_ids, near_candidates, near_candidate_total, " +
-            "within_file_group, within_file_state, skip, override, suggested_tag_ids, selected_tag_ids, " +
-            "suggested_category_id, selected_category_id, category_decided, " +
-            "created_at, updated_at" +
-            ") FROM STDIN (FORMAT BINARY)",
-            cancellationToken);
-        try
+        await context.SaveChangesAsync(cancellationToken);
+
+        // Bounded EF-owned set inserts: each batch is one parameterized
+        // unnest statement, so a ten-thousand-row review never builds one
+        // unbounded command and never needs a driver COPY.
+        foreach (ImportReviewRowRecord[] batch in rows.Chunk(ReviewRowInsertBatchSize))
         {
-            foreach (var row in rows)
-            {
-                await copy.StartRowAsync(cancellationToken);
-                await copy.WriteAsync(row.RowId, NpgsqlDbType.Uuid, cancellationToken);
-                await copy.WriteAsync(reviewId, NpgsqlDbType.Uuid, cancellationToken);
-                await copy.WriteAsync(customerId, NpgsqlDbType.Uuid, cancellationToken);
-                await copy.WriteAsync(row.SourceLine, NpgsqlDbType.Integer, cancellationToken);
-                if (row.SourcePage is null)
-                {
-                    await copy.WriteNullAsync(cancellationToken);
-                }
-                else
-                {
-                    await copy.WriteAsync(row.SourcePage.Value, NpgsqlDbType.Integer, cancellationToken);
-                }
-                await copy.WriteAsync(row.SourceRowNumber, NpgsqlDbType.Integer, cancellationToken);
-                await copy.WriteAsync(JsonSerializer.Serialize(row.RawValues, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
-                if (row.TransactionDate is null)
-                {
-                    await copy.WriteNullAsync(cancellationToken);
-                }
-                else
-                {
-                    await copy.WriteAsync(row.TransactionDate.Value, NpgsqlDbType.Date, cancellationToken);
-                }
-                await copy.WriteAsync(row.Description, NpgsqlDbType.Text, cancellationToken);
-                await copy.WriteAsync(row.NormalizedDescription, NpgsqlDbType.Text, cancellationToken);
-                if (row.AmountCents is null)
-                {
-                    await copy.WriteNullAsync(cancellationToken);
-                }
-                else
-                {
-                    await copy.WriteAsync(row.AmountCents.Value, NpgsqlDbType.Bigint, cancellationToken);
-                }
-                if (row.SourceIdNamespace is null)
-                {
-                    await copy.WriteNullAsync(cancellationToken);
-                }
-                else
-                {
-                    await copy.WriteAsync(row.SourceIdNamespace, NpgsqlDbType.Text, cancellationToken);
-                }
-                if (row.SourceIdValue is null)
-                {
-                    await copy.WriteNullAsync(cancellationToken);
-                }
-                else
-                {
-                    await copy.WriteAsync(row.SourceIdValue, NpgsqlDbType.Text, cancellationToken);
-                }
-                await copy.WriteAsync(JsonSerializer.Serialize(row.ValidationCodes, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
-                await copy.WriteAsync(JsonSerializer.Serialize(row.Warnings, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
-                await copy.WriteAsync(row.DuplicateState, NpgsqlDbType.Text, cancellationToken);
-                await copy.WriteAsync(JsonSerializer.Serialize(row.DuplicateReasons, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
-                await copy.WriteAsync(JsonSerializer.Serialize(row.MatchingTransactionIds, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
-                await copy.WriteAsync(JsonSerializer.Serialize(row.MatchingImportIds, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
-                await copy.WriteAsync(JsonSerializer.Serialize(row.NearCandidates, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
-                await copy.WriteAsync(row.NearCandidateTotal, NpgsqlDbType.Integer, cancellationToken);
-                if (row.WithinFileGroup is null)
-                {
-                    await copy.WriteNullAsync(cancellationToken);
-                }
-                else
-                {
-                    await copy.WriteAsync(row.WithinFileGroup, NpgsqlDbType.Text, cancellationToken);
-                }
-                await copy.WriteAsync(row.WithinFileState, NpgsqlDbType.Text, cancellationToken);
-                await copy.WriteAsync(row.Skip, NpgsqlDbType.Boolean, cancellationToken);
-                await copy.WriteAsync(row.Override, NpgsqlDbType.Boolean, cancellationToken);
-                await copy.WriteAsync(JsonSerializer.Serialize(row.SuggestedTagIds, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
-                await copy.WriteAsync(JsonSerializer.Serialize(row.SelectedTagIds, _storageJson), NpgsqlDbType.Jsonb, cancellationToken);
-                if (row.SuggestedCategoryId is null)
-                {
-                    await copy.WriteNullAsync(cancellationToken);
-                }
-                else
-                {
-                    await copy.WriteAsync(row.SuggestedCategoryId.Value, NpgsqlDbType.Uuid, cancellationToken);
-                }
-                if (row.SelectedCategoryId is null)
-                {
-                    await copy.WriteNullAsync(cancellationToken);
-                }
-                else
-                {
-                    await copy.WriteAsync(row.SelectedCategoryId.Value, NpgsqlDbType.Uuid, cancellationToken);
-                }
-                await copy.WriteAsync(row.CategoryDecided, NpgsqlDbType.Boolean, cancellationToken);
-                await copy.WriteAsync(now, NpgsqlDbType.TimestampTz, cancellationToken);
-                await copy.WriteAsync(now, NpgsqlDbType.TimestampTz, cancellationToken);
-            }
-            await copy.CompleteAsync(cancellationToken);
-        }
-        catch
-        {
-            await copy.DisposeAsync();
-            throw;
+            await InsertReviewRowBatchAsync(context, batch, reviewId, customerId, now, cancellationToken);
         }
     }
 
-    private static async Task SetWithinFileGroupAsync(NpgsqlConnection connection,
-                                                      NpgsqlTransaction transaction,
+    private static async Task InsertReviewRowBatchAsync(ArgusDbContext context,
+                                                        IReadOnlyList<ImportReviewRowRecord> batch,
+                                                        Guid reviewId,
+                                                        Guid customerId,
+                                                        DateTime now,
+                                                        CancellationToken cancellationToken)
+    {
+        int count = batch.Count;
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO import_review_rows (
+                row_id, review_id, customer_id, source_line, source_page, source_row_number, raw_values,
+                transaction_date, description, normalized_description, amount_cents, source_id_namespace,
+                source_id_value, validation_codes, warnings, duplicate_state, duplicate_reasons,
+                matching_transaction_ids, matching_import_ids, near_candidates, near_candidate_total,
+                within_file_group, within_file_state, skip, override, suggested_tag_ids, selected_tag_ids,
+                suggested_category_id, selected_category_id, category_decided, created_at, updated_at)
+            SELECT t.row_id, t.review_id, t.customer_id, t.source_line, t.source_page, t.source_row_number,
+                   CAST(t.raw_values AS jsonb), t.transaction_date, t.description, t.normalized_description,
+                   t.amount_cents, t.source_id_namespace, t.source_id_value,
+                   CAST(t.validation_codes AS jsonb), CAST(t.warnings AS jsonb), t.duplicate_state,
+                   CAST(t.duplicate_reasons AS jsonb), CAST(t.matching_transaction_ids AS jsonb),
+                   CAST(t.matching_import_ids AS jsonb), CAST(t.near_candidates AS jsonb),
+                   t.near_candidate_total, t.within_file_group, t.within_file_state, t.skip, t.override,
+                   CAST(t.suggested_tag_ids AS jsonb), CAST(t.selected_tag_ids AS jsonb),
+                   t.suggested_category_id, t.selected_category_id, t.category_decided, t.created_at, t.updated_at
+            FROM unnest(
+                CAST({batch.Select(row => row.RowId).ToArray()} AS uuid[]),
+                CAST({Enumerable.Repeat(reviewId, count).ToArray()} AS uuid[]),
+                CAST({Enumerable.Repeat(customerId, count).ToArray()} AS uuid[]),
+                CAST({batch.Select(row => row.SourceLine).ToArray()} AS integer[]),
+                CAST({batch.Select(row => row.SourcePage).ToArray()} AS integer[]),
+                CAST({batch.Select(row => row.SourceRowNumber).ToArray()} AS integer[]),
+                CAST({batch.Select(row => JsonSerializer.Serialize(row.RawValues, _storageJson)).ToArray()} AS text[]),
+                CAST({batch.Select(row => row.TransactionDate).ToArray()} AS date[]),
+                CAST({batch.Select(row => row.Description).ToArray()} AS text[]),
+                CAST({batch.Select(row => row.NormalizedDescription).ToArray()} AS text[]),
+                CAST({batch.Select(row => row.AmountCents).ToArray()} AS bigint[]),
+                CAST({batch.Select(row => row.SourceIdNamespace).ToArray()} AS text[]),
+                CAST({batch.Select(row => row.SourceIdValue).ToArray()} AS text[]),
+                CAST({batch.Select(row => JsonSerializer.Serialize(row.ValidationCodes, _storageJson)).ToArray()} AS text[]),
+                CAST({batch.Select(row => JsonSerializer.Serialize(row.Warnings, _storageJson)).ToArray()} AS text[]),
+                CAST({batch.Select(row => row.DuplicateState).ToArray()} AS text[]),
+                CAST({batch.Select(row => JsonSerializer.Serialize(row.DuplicateReasons, _storageJson)).ToArray()} AS text[]),
+                CAST({batch.Select(row => JsonSerializer.Serialize(row.MatchingTransactionIds, _storageJson)).ToArray()} AS text[]),
+                CAST({batch.Select(row => JsonSerializer.Serialize(row.MatchingImportIds, _storageJson)).ToArray()} AS text[]),
+                CAST({batch.Select(row => JsonSerializer.Serialize(row.NearCandidates, _storageJson)).ToArray()} AS text[]),
+                CAST({batch.Select(row => row.NearCandidateTotal).ToArray()} AS integer[]),
+                CAST({batch.Select(row => row.WithinFileGroup).ToArray()} AS text[]),
+                CAST({batch.Select(row => row.WithinFileState).ToArray()} AS text[]),
+                CAST({batch.Select(row => row.Skip).ToArray()} AS boolean[]),
+                CAST({batch.Select(row => row.Override).ToArray()} AS boolean[]),
+                CAST({batch.Select(row => JsonSerializer.Serialize(row.SuggestedTagIds, _storageJson)).ToArray()} AS text[]),
+                CAST({batch.Select(row => JsonSerializer.Serialize(row.SelectedTagIds, _storageJson)).ToArray()} AS text[]),
+                CAST({batch.Select(row => row.SuggestedCategoryId).ToArray()} AS uuid[]),
+                CAST({batch.Select(row => row.SelectedCategoryId).ToArray()} AS uuid[]),
+                CAST({batch.Select(row => row.CategoryDecided).ToArray()} AS boolean[]),
+                CAST({Enumerable.Repeat(now, count).ToArray()} AS timestamptz[]),
+                CAST({Enumerable.Repeat(now, count).ToArray()} AS timestamptz[])
+            ) AS t(
+                row_id, review_id, customer_id, source_line, source_page, source_row_number, raw_values,
+                transaction_date, description, normalized_description, amount_cents, source_id_namespace,
+                source_id_value, validation_codes, warnings, duplicate_state, duplicate_reasons,
+                matching_transaction_ids, matching_import_ids, near_candidates, near_candidate_total,
+                within_file_group, within_file_state, skip, override, suggested_tag_ids, selected_tag_ids,
+                suggested_category_id, selected_category_id, category_decided, created_at, updated_at)
+            """, cancellationToken);
+    }
+
+    private static ImportReviewRow MapReviewRowEntity(ImportReviewRowRecord row, Guid reviewId, Guid customerId, DateTime now) => new()
+    {
+        RowId = row.RowId,
+        ReviewId = reviewId,
+        CustomerId = customerId,
+        SourceLine = row.SourceLine,
+        SourcePage = row.SourcePage,
+        SourceRowNumber = row.SourceRowNumber,
+        RawValues = ToJsonDocument(row.RawValues),
+        TransactionDate = row.TransactionDate,
+        Description = row.Description,
+        NormalizedDescription = row.NormalizedDescription,
+        AmountCents = row.AmountCents,
+        SourceIdNamespace = row.SourceIdNamespace,
+        SourceIdValue = row.SourceIdValue,
+        ValidationCodes = ToJsonDocument(row.ValidationCodes),
+        Warnings = ToJsonDocument(row.Warnings),
+        DuplicateState = row.DuplicateState,
+        DuplicateReasons = ToJsonDocument(row.DuplicateReasons),
+        MatchingTransactionIds = ToJsonDocument(row.MatchingTransactionIds),
+        MatchingImportIds = ToJsonDocument(row.MatchingImportIds),
+        NearCandidates = ToJsonDocument(row.NearCandidates),
+        NearCandidateTotal = row.NearCandidateTotal,
+        WithinFileGroup = row.WithinFileGroup,
+        WithinFileState = row.WithinFileState,
+        Skip = row.Skip,
+        Override = row.Override,
+        SuggestedTagIds = ToJsonDocument(row.SuggestedTagIds),
+        SelectedTagIds = ToJsonDocument(row.SelectedTagIds),
+        SuggestedCategoryId = row.SuggestedCategoryId,
+        SelectedCategoryId = row.SelectedCategoryId,
+        CategoryDecided = row.CategoryDecided,
+        CreatedAt = now,
+        UpdatedAt = now,
+    };
+
+    private static async Task InsertTransactionBatchAsync(ArgusDbContext context,
+                                                           IReadOnlyList<ImportReviewRowRecord> batch,
+                                                           Dictionary<string, int> nextOccurrence,
+                                                           List<(Guid TransactionId, Guid[] TagIds)> transactionTags,
+                                                           Guid customerId,
+                                                           Guid accountId,
+                                                           Guid statementId,
+                                                           string sourceKind,
+                                                           Guid categoryId,
+                                                           DateTime createdAt,
+                                                           CancellationToken cancellationToken)
+    {
+        int count = batch.Count;
+        var ids = new Guid[count];
+        var dates = new DateOnly[count];
+        var descriptions = new string[count];
+        var normalizedDescriptions = new string[count];
+        var amounts = new decimal[count];
+        var categoryIds = new Guid[count];
+        var categoryConfirmed = new bool[count];
+        var sourcePages = new int?[count];
+        var sourceRowNumbers = new int[count];
+        var identityKeys = new string[count];
+        var occurrences = new int[count];
+        var identityVersions = new int[count];
+        var sourceIdNamespaces = new string?[count];
+        var sourceIdValues = new string?[count];
+        for (int index = 0; index < count; index++)
+        {
+            ImportReviewRowRecord row = batch[index];
+            string identityKey = ComputeIdentityKey(row);
+            int occurrence = nextOccurrence.GetValueOrDefault(identityKey, 1);
+            nextOccurrence[identityKey] = occurrence + 1;
+            Guid transactionId = Guid.NewGuid();
+            transactionTags.Add((transactionId, row.SelectedTagIds));
+            ids[index] = transactionId;
+            dates[index] = row.TransactionDate!.Value;
+            descriptions[index] = row.Description;
+            normalizedDescriptions[index] = row.NormalizedDescription;
+            amounts[index] = row.AmountCents!.Value / 100m;
+            categoryIds[index] = row.SelectedCategoryId ?? categoryId;
+            categoryConfirmed[index] = row.CategoryDecided;
+            sourcePages[index] = row.SourcePage;
+            sourceRowNumbers[index] = row.SourceRowNumber;
+            identityKeys[index] = identityKey;
+            occurrences[index] = occurrence;
+            identityVersions[index] = ImportLimits.IdentityVersion;
+            sourceIdNamespaces[index] = row.SourceIdNamespace;
+            sourceIdValues[index] = row.SourceIdValue;
+        }
+
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO transactions (
+                id, customer_id, financial_account_id, statement_import_id, transaction_date,
+                description, normalized_description, amount, category_id, category_confirmed, source_type,
+                source_page, source_row_number, identity_key, occurrence_index, identity_version,
+                source_id_namespace, source_id_value, is_hidden_by_user, version, created_at, updated_at)
+            SELECT t.id, t.customer_id, t.financial_account_id, t.statement_import_id, t.transaction_date,
+                   t.description, t.normalized_description, t.amount, t.category_id, t.category_confirmed, t.source_type,
+                   t.source_page, t.source_row_number, t.identity_key, t.occurrence_index, t.identity_version,
+                   t.source_id_namespace, t.source_id_value, t.is_hidden_by_user, t.version, t.created_at, t.updated_at
+            FROM unnest(
+                CAST({ids} AS uuid[]),
+                CAST({Enumerable.Repeat(customerId, count).ToArray()} AS uuid[]),
+                CAST({Enumerable.Repeat(accountId, count).ToArray()} AS uuid[]),
+                CAST({Enumerable.Repeat(statementId, count).ToArray()} AS uuid[]),
+                CAST({dates} AS date[]),
+                CAST({descriptions} AS text[]),
+                CAST({normalizedDescriptions} AS text[]),
+                CAST({amounts} AS numeric[]),
+                CAST({categoryIds} AS uuid[]),
+                CAST({categoryConfirmed} AS boolean[]),
+                CAST({Enumerable.Repeat(sourceKind, count).ToArray()} AS text[]),
+                CAST({sourcePages} AS integer[]),
+                CAST({sourceRowNumbers} AS integer[]),
+                CAST({identityKeys} AS text[]),
+                CAST({occurrences} AS integer[]),
+                CAST({identityVersions} AS integer[]),
+                CAST({sourceIdNamespaces} AS text[]),
+                CAST({sourceIdValues} AS text[]),
+                CAST({Enumerable.Repeat(false, count).ToArray()} AS boolean[]),
+                CAST({Enumerable.Repeat(1, count).ToArray()} AS integer[]),
+                CAST({Enumerable.Repeat(createdAt, count).ToArray()} AS timestamptz[]),
+                CAST({Enumerable.Repeat(createdAt, count).ToArray()} AS timestamptz[])
+            ) AS t(
+                id, customer_id, financial_account_id, statement_import_id, transaction_date,
+                description, normalized_description, amount, category_id, category_confirmed, source_type,
+                source_page, source_row_number, identity_key, occurrence_index, identity_version,
+                source_id_namespace, source_id_value, is_hidden_by_user, version, created_at, updated_at)
+            """, cancellationToken);
+    }
+
+    private static async Task InsertTagLinkBatchAsync(ArgusDbContext context,
+                                                      IReadOnlyList<(Guid TransactionId, Guid TagId)> batch,
+                                                      Guid customerId,
+                                                      DateTime assignedAt,
+                                                      CancellationToken cancellationToken)
+    {
+        int count = batch.Count;
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO transaction_merchant_tags (customer_id, transaction_id, merchant_tag_id, assigned_at)
+            SELECT t.customer_id, t.transaction_id, t.merchant_tag_id, t.assigned_at
+            FROM unnest(
+                CAST({Enumerable.Repeat(customerId, count).ToArray()} AS uuid[]),
+                CAST({batch.Select(link => link.TransactionId).ToArray()} AS uuid[]),
+                CAST({batch.Select(link => link.TagId).ToArray()} AS uuid[]),
+                CAST({Enumerable.Repeat(assignedAt, count).ToArray()} AS timestamptz[])
+            ) AS t(customer_id, transaction_id, merchant_tag_id, assigned_at)
+            """, cancellationToken);
+    }
+
+    private static JsonDocument ToJsonDocument<T>(T value) =>
+        JsonDocument.Parse(JsonSerializer.Serialize(value, _storageJson));
+
+    private static async Task SetWithinFileGroupAsync(ArgusDbContext context,
                                                       Guid reviewId,
                                                       string group,
                                                       string state,
                                                       bool skip,
                                                       CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE import_review_rows
-            SET within_file_state = @state, skip = @skip, override = CASE WHEN @skip THEN FALSE ELSE override END,
+            SET within_file_state = {state}, skip = {skip}, override = CASE WHEN {skip} THEN FALSE ELSE override END,
                 updated_at = NOW()
-            WHERE review_id = @review_id AND within_file_group = @group
-            """;
-        command.Parameters.AddWithValue("state", state);
-        command.Parameters.AddWithValue("skip", skip);
-        command.Parameters.AddWithValue("review_id", reviewId);
-        command.Parameters.AddWithValue("group", group);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+            WHERE review_id = {reviewId} AND within_file_group = {group}
+            """, cancellationToken);
     }
 
-    private static async Task UpdateRowDecisionsAsync(NpgsqlConnection connection,
-                                                      NpgsqlTransaction transaction,
+    private static async Task UpdateRowDecisionsAsync(ArgusDbContext context,
                                                       Guid rowId,
                                                       bool skip,
                                                       bool overrideValue,
@@ -1791,97 +1930,68 @@ public sealed class StatementImportStore
                                                       bool categoryDecided,
                                                       CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
+        string selectedTagsJson = JsonSerializer.Serialize(selectedTagIds, _storageJson);
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE import_review_rows
-            SET skip = @skip,
-                override = @override,
-                within_file_state = @within_file_state,
-                selected_tag_ids = @selected_tag_ids,
-                selected_category_id = @selected_category_id,
-                category_decided = @category_decided,
+            SET skip = {skip},
+                override = {overrideValue},
+                within_file_state = {withinFileState},
+                selected_tag_ids = CAST({selectedTagsJson} AS jsonb),
+                selected_category_id = {selectedCategoryId},
+                category_decided = {categoryDecided},
                 updated_at = NOW()
-            WHERE row_id = @row_id
-            """;
-        command.Parameters.AddWithValue("skip", skip);
-        command.Parameters.AddWithValue("override", overrideValue);
-        command.Parameters.AddWithValue("within_file_state", withinFileState);
-        command.Parameters.AddWithValue("selected_tag_ids", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(selectedTagIds, _storageJson));
-        command.Parameters.AddWithValue("selected_category_id", NpgsqlDbType.Uuid, (object?)selectedCategoryId ?? DBNull.Value);
-        command.Parameters.AddWithValue("category_decided", categoryDecided);
-        command.Parameters.AddWithValue("row_id", rowId);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+            WHERE row_id = {rowId}
+            """, cancellationToken);
     }
 
-    private static async Task UpdateDuplicateSnapshotAsync(NpgsqlConnection connection,
-                                                           NpgsqlTransaction transaction,
+    private static async Task UpdateDuplicateSnapshotAsync(ArgusDbContext context,
                                                            ImportReviewRowRecord row,
                                                            CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
+        string duplicateReasons = JsonSerializer.Serialize(row.DuplicateReasons, _storageJson);
+        string matchingTransactionIds = JsonSerializer.Serialize(row.MatchingTransactionIds, _storageJson);
+        string matchingImportIds = JsonSerializer.Serialize(row.MatchingImportIds, _storageJson);
+        string nearCandidates = JsonSerializer.Serialize(row.NearCandidates, _storageJson);
+        string suggestedTagIds = JsonSerializer.Serialize(row.SuggestedTagIds, _storageJson);
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE import_review_rows
-            SET duplicate_state = @duplicate_state,
-                duplicate_reasons = @duplicate_reasons,
-                matching_transaction_ids = @matching_transaction_ids,
-                matching_import_ids = @matching_import_ids,
-                near_candidates = @near_candidates,
-                near_candidate_total = @near_candidate_total,
-                within_file_group = @within_file_group,
-                within_file_state = @within_file_state,
-                override = @override,
-                suggested_tag_ids = @suggested_tag_ids,
-                suggested_category_id = @suggested_category_id,
-                selected_category_id = @selected_category_id,
-                category_decided = @category_decided,
+            SET duplicate_state = {row.DuplicateState},
+                duplicate_reasons = CAST({duplicateReasons} AS jsonb),
+                matching_transaction_ids = CAST({matchingTransactionIds} AS jsonb),
+                matching_import_ids = CAST({matchingImportIds} AS jsonb),
+                near_candidates = CAST({nearCandidates} AS jsonb),
+                near_candidate_total = {row.NearCandidateTotal},
+                within_file_group = {row.WithinFileGroup},
+                within_file_state = {row.WithinFileState},
+                override = {row.Override},
+                suggested_tag_ids = CAST({suggestedTagIds} AS jsonb),
+                suggested_category_id = {row.SuggestedCategoryId},
+                selected_category_id = {row.SelectedCategoryId},
+                category_decided = {row.CategoryDecided},
                 updated_at = NOW()
-            WHERE row_id = @row_id
-            """;
-        command.Parameters.AddWithValue("duplicate_state", row.DuplicateState);
-        command.Parameters.AddWithValue("duplicate_reasons", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(row.DuplicateReasons, _storageJson));
-        command.Parameters.AddWithValue("matching_transaction_ids", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(row.MatchingTransactionIds, _storageJson));
-        command.Parameters.AddWithValue("matching_import_ids", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(row.MatchingImportIds, _storageJson));
-        command.Parameters.AddWithValue("near_candidates", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(row.NearCandidates, _storageJson));
-        command.Parameters.AddWithValue("near_candidate_total", row.NearCandidateTotal);
-        command.Parameters.AddWithValue("within_file_group", NpgsqlDbType.Text, (object?)row.WithinFileGroup ?? DBNull.Value);
-        command.Parameters.AddWithValue("within_file_state", row.WithinFileState);
-        command.Parameters.AddWithValue("override", row.Override);
-        command.Parameters.AddWithValue("suggested_tag_ids", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(row.SuggestedTagIds, _storageJson));
-        command.Parameters.AddWithValue("suggested_category_id", NpgsqlDbType.Uuid, (object?)row.SuggestedCategoryId ?? DBNull.Value);
-        command.Parameters.AddWithValue("selected_category_id", NpgsqlDbType.Uuid, (object?)row.SelectedCategoryId ?? DBNull.Value);
-        command.Parameters.AddWithValue("category_decided", row.CategoryDecided);
-        command.Parameters.AddWithValue("row_id", row.RowId);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+            WHERE row_id = {row.RowId}
+            """, cancellationToken);
     }
 
-    private static async Task<(long OpenReviews, long UsedPayload)> QuotaUsageExcludingAsync(NpgsqlConnection connection,
-                                                                                             NpgsqlTransaction transaction,
+    private static async Task<(long OpenReviews, long UsedPayload)> QuotaUsageExcludingAsync(ArgusDbContext context,
                                                                                              Guid customerId,
                                                                                              Guid reviewId,
                                                                                              CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT COUNT(*), COALESCE(SUM(payload_bytes), 0)
+        List<QuotaUsageRow> usage = await context.Database.SqlQuery<QuotaUsageRow>($"""
+            SELECT COUNT(*) AS "OpenReviews", COALESCE(SUM(payload_bytes), 0) AS "UsedPayload"
             FROM import_reviews
-            WHERE customer_id = @customer_id
+            WHERE customer_id = {customerId}
               AND status = 'Prepared'
               AND expires_at > NOW()
-              AND id <> @review_id
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("review_id", reviewId);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        await reader.ReadAsync(cancellationToken);
+              AND id <> {reviewId}
+            """).ToListAsync(cancellationToken);
+        QuotaUsageRow row = usage.Single();
 
-        return (reader.GetInt64(0), reader.GetInt64(1));
+        return (row.OpenReviews, row.UsedPayload);
     }
 
-    private static async Task UpdateReviewSummaryAsync(NpgsqlConnection connection,
-                                                       NpgsqlTransaction transaction,
+    private static async Task UpdateReviewSummaryAsync(ArgusDbContext context,
                                                        Guid reviewId,
                                                        int version,
                                                        RowCounts counts,
@@ -1890,91 +2000,59 @@ public sealed class StatementImportStore
                                                        long payloadBytes,
                                                        CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE import_reviews
-            SET version = @version,
-                summary_hash = @summary_hash,
-                total_rows = @total_rows,
-                imported_count = @imported_count,
-                suppressed_count = @suppressed_count,
-                skipped_count = @skipped_count,
-                possible_duplicate_count = @possible_duplicate_count,
-                exact_override_count = @exact_override_count,
-                statement_override = @statement_override,
-                statement_override_count = @statement_override_count,
-                payload_bytes = @payload_bytes,
+            SET version = {version},
+                summary_hash = {summaryHash},
+                total_rows = {counts.TotalRows},
+                imported_count = {counts.Imported},
+                suppressed_count = {counts.Suppressed},
+                skipped_count = {counts.Skipped},
+                possible_duplicate_count = {counts.PossibleDuplicates},
+                exact_override_count = {counts.ExactOverrides},
+                statement_override = {statementOverride},
+                statement_override_count = {(statementOverride ? 1 : 0)},
+                payload_bytes = {payloadBytes},
                 updated_at = NOW()
-            WHERE id = @id
-            """;
-        command.Parameters.AddWithValue("version", version);
-        command.Parameters.AddWithValue("summary_hash", summaryHash);
-        command.Parameters.AddWithValue("total_rows", counts.TotalRows);
-        command.Parameters.AddWithValue("imported_count", counts.Imported);
-        command.Parameters.AddWithValue("suppressed_count", counts.Suppressed);
-        command.Parameters.AddWithValue("skipped_count", counts.Skipped);
-        command.Parameters.AddWithValue("possible_duplicate_count", counts.PossibleDuplicates);
-        command.Parameters.AddWithValue("exact_override_count", counts.ExactOverrides);
-        command.Parameters.AddWithValue("statement_override", statementOverride);
-        command.Parameters.AddWithValue("statement_override_count", statementOverride ? 1 : 0);
-        command.Parameters.AddWithValue("payload_bytes", payloadBytes);
-        command.Parameters.AddWithValue("id", reviewId);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+            WHERE id = {reviewId}
+            """, cancellationToken);
     }
 
-    private static async Task UpdateReviewAccountVersionAsync(NpgsqlConnection connection,
-                                                              NpgsqlTransaction transaction,
+    private static async Task UpdateReviewAccountVersionAsync(ArgusDbContext context,
                                                               Guid reviewId,
                                                               long accountImportVersion,
                                                               CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "UPDATE import_reviews SET account_import_version = @version WHERE id = @id";
-        command.Parameters.AddWithValue("version", accountImportVersion);
-        command.Parameters.AddWithValue("id", reviewId);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await context.ImportReviews
+            .Where(review => review.Id == reviewId)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(review => review.AccountImportVersion, accountImportVersion),
+                cancellationToken);
     }
 
-    private static async Task<IReadOnlyList<ExistingRow>> QueryExistingAsync(NpgsqlConnection connection,
-                                                                             NpgsqlTransaction transaction,
+    private static async Task<IReadOnlyList<ExistingRow>> QueryExistingAsync(ArgusDbContext context,
                                                                              Guid customerId,
                                                                              Guid accountId,
-                                                                             string predicate,
-                                                                             Action<NpgsqlCommand> configure,
+                                                                             Func<IQueryable<Transaction>, IQueryable<Transaction>> filter,
                                                                              CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            SELECT t.id, t.identity_key, t.occurrence_index, t.transaction_date,
-                   (t.amount * 100)::bigint AS amount_cents, t.normalized_description,
-                   t.description, t.source_id_namespace, t.source_id_value, t.statement_import_id
-            FROM transactions t
-            WHERE t.customer_id = @customer_id AND t.financial_account_id = @account_id
-              AND {predicate}
-            LIMIT 20001
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("account_id", accountId);
-        configure(command);
-        var rows = new List<ExistingRow>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            rows.Add(new ExistingRow(
-                reader.GetGuid(0),
-                reader.GetString(1),
-                reader.GetInt32(2),
-                reader.GetFieldValue<DateOnly>(3),
-                reader.GetInt64(4),
-                reader.GetString(5),
-                reader.GetString(6),
-                reader.IsDBNull(7) ? null : reader.GetString(7),
-                reader.IsDBNull(8) ? null : reader.GetString(8),
-                reader.GetGuid(9)));
-        }
+        IQueryable<Transaction> query = context.Transactions
+            .AsNoTracking()
+            .Where(transaction => transaction.CustomerId == customerId && transaction.FinancialAccountId == accountId);
+        List<ExistingRow> rows = await filter(query)
+            .Take(20_001)
+            .Select(transaction => new ExistingRow(
+                transaction.Id,
+                transaction.IdentityKey,
+                transaction.OccurrenceIndex,
+                transaction.TransactionDate,
+                (long)(transaction.Amount * 100m),
+                transaction.NormalizedDescription,
+                transaction.Description,
+                transaction.SourceIdNamespace,
+                transaction.SourceIdValue,
+                transaction.StatementImportId))
+            .ToListAsync(cancellationToken);
         if (rows.Count > 20_000)
         {
             throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
@@ -2124,49 +2202,48 @@ public sealed class StatementImportStore
         await _financeStore.EnsureCategoriesSeededAsync(customerId, cancellationToken);
         string requestDigest = Digest($"commit-v1|{expectedVersion}|{confirmedSummaryHash}");
 
-        await using var connection = await _db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
 
         // A receipt is the truth after a lost response, including after the
         // review payload has been purged. Resolve the account from the receipt
         // before looking for the review.
-        var receiptAccountId = await ReceiptAccountIdAsync(
-            connection, transaction, customerId, reviewId, cancellationToken);
+        var receiptAccountId = await ReceiptAccountIdAsync(context, customerId, reviewId, cancellationToken);
         if (receiptAccountId is not null)
         {
-            _ = await LockAccountAsync(connection, transaction, customerId, receiptAccountId.Value, cancellationToken);
-            var replay = await ReplayReceiptAsync(connection, transaction, customerId, reviewId, requestDigest, cancellationToken);
+            _ = await LockAccountAsync(context, customerId, receiptAccountId.Value, cancellationToken);
+            var replay = await ReplayReceiptAsync(context, customerId, reviewId, requestDigest, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return replay;
         }
 
-        var accountId = await ReviewAccountIdAsync(connection, transaction, customerId, reviewId, cancellationToken);
+        var accountId = await ReviewAccountIdAsync(context, customerId, reviewId, cancellationToken);
         if (accountId is null)
         {
-            var lateReceiptAccount = await ReceiptAccountIdAsync(connection, transaction, customerId, reviewId, cancellationToken);
+            var lateReceiptAccount = await ReceiptAccountIdAsync(context, customerId, reviewId, cancellationToken);
             if (lateReceiptAccount is not null)
             {
-                _ = await LockAccountAsync(connection, transaction, customerId, lateReceiptAccount.Value, cancellationToken);
-                var replay = await ReplayReceiptAsync(connection, transaction, customerId, reviewId, requestDigest, cancellationToken);
+                _ = await LockAccountAsync(context, customerId, lateReceiptAccount.Value, cancellationToken);
+                var replay = await ReplayReceiptAsync(context, customerId, reviewId, requestDigest, cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
                 return replay;
             }
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
-        var account = await LockAccountAsync(connection, transaction, customerId, accountId.Value, cancellationToken);
+        var account = await LockAccountAsync(context, customerId, accountId.Value, cancellationToken);
 
         // Re-check under the account lock in case a receipt appeared while this
         // request waited for the account.
         var racedReceipt = await ReadReceiptAsync(
-            connection, transaction, customerId, reviewId, false, cancellationToken);
+            context, customerId, reviewId, false, cancellationToken);
         if (racedReceipt is not null)
         {
-            var replay = await ReplayReceiptAsync(connection, transaction, customerId, reviewId, requestDigest, cancellationToken);
+            var replay = await ReplayReceiptAsync(context, customerId, reviewId, requestDigest, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return replay;
         }
 
-        var review = await ReadReviewHeaderAsync(connection, transaction, customerId, reviewId, true, cancellationToken);
+        var review = await ReadReviewHeaderAsync(context, customerId, reviewId, true, cancellationToken);
         if (review is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
@@ -2175,7 +2252,7 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.ReviewExpired);
         }
-        await ThrowIfCommitExpiredAsync(connection, transaction, review.ExpiresAt, cancellationToken);
+        await ThrowIfCommitExpiredAsync(context, review.ExpiresAt, cancellationToken);
         if (review.Status != "Prepared")
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
@@ -2197,7 +2274,7 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
 
-        var rows = await ReadReviewRowsAsync(connection, transaction, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, cancellationToken);
+        var rows = await ReadReviewRowsAsync(context, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, cancellationToken);
         if (rows.Any(row => row.ValidationCodes.Length > 0 && !row.Skip))
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRows);
@@ -2232,14 +2309,14 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.VersionConflict);
         }
 
-        var categoryId = await FindSystemCategoryAsync(connection, transaction, customerId, cancellationToken);
+        var categoryId = await FindSystemCategoryAsync(context, customerId, cancellationToken);
         if (categoryId is null)
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
 
         var tagIds = included.SelectMany(row => row.SelectedTagIds).Distinct().OrderBy(id => id).ToArray();
-        if (tagIds.Length > 0 && !await TagsAvailableAsync(connection, transaction, customerId, tagIds, cancellationToken))
+        if (tagIds.Length > 0 && !await TagsAvailableAsync(context, customerId, tagIds, cancellationToken))
         {
             throw new ImportStoreException(ImportErrorCodes.TagUnavailable);
         }
@@ -2252,19 +2329,19 @@ public sealed class StatementImportStore
             .Order()
             .ToArray();
         if (selectedCategoryIds.Length > 0 &&
-            !await CategoriesSelectableAsync(connection, transaction, customerId, selectedCategoryIds, cancellationToken))
+            !await CategoriesSelectableAsync(context, customerId, selectedCategoryIds, cancellationToken))
         {
             throw new ImportStoreException(ImportErrorCodes.CategoryUnavailable);
         }
 
-        await ThrowIfCommitExpiredAsync(connection, transaction, review.ExpiresAt, cancellationToken);
+        await ThrowIfCommitExpiredAsync(context, review.ExpiresAt, cancellationToken);
 
-        var fingerprintMatches = await FingerprintMatchesAsync(connection, transaction, customerId, accountId.Value, review.StatementFingerprint, cancellationToken);
+        var fingerprintMatches = await FingerprintMatchesAsync(context, customerId, accountId.Value, review.StatementFingerprint, cancellationToken);
         if (fingerprintMatches.Count > 0 && !review.StatementOverride)
         {
             throw new StatementRepeatException(fingerprintMatches);
         }
-        int fingerprintOccurrence = await NextFingerprintOccurrenceAsync(connection, transaction, customerId, accountId.Value, review.StatementFingerprint, cancellationToken);
+        int fingerprintOccurrence = await NextFingerprintOccurrenceAsync(context, customerId, accountId.Value, review.StatementFingerprint, cancellationToken);
 
         var statementId = Guid.NewGuid();
         string label = BuildStatementLabel(review);
@@ -2280,131 +2357,50 @@ public sealed class StatementImportStore
         }, _storageJson);
         var createdAt = DateTime.UtcNow;
 
-        await using (var insertStatement = connection.CreateCommand())
+        context.StatementImports.Add(new StatementImport
         {
-            insertStatement.Transaction = transaction;
-            insertStatement.CommandText = """
-                INSERT INTO statement_imports (
-                    id, customer_id, financial_account_id, source_type, statement_label,
-                    statement_fingerprint, start_date, end_date, total_rows, imported_count,
-                    suppressed_count, skipped_count, version, fingerprint_occurrence,
-                    duplicate_policy_version, possible_duplicate_count, exact_override_count,
-                    statement_override_count, override_summary, is_hidden, hidden_at,
-                    created_at, updated_at
-                )
-                VALUES (
-                    @id, @customer_id, @financial_account_id, @source_type, @statement_label,
-                    @statement_fingerprint, @start_date, @end_date, @total_rows, @imported_count,
-                    @suppressed_count, @skipped_count, 1, @fingerprint_occurrence,
-                    @duplicate_policy_version, @possible_duplicate_count, @exact_override_count,
-                    @statement_override_count, @override_summary, FALSE, NULL,
-                    @created_at, @created_at
-                )
-                """;
-            insertStatement.Parameters.AddWithValue("id", statementId);
-            insertStatement.Parameters.AddWithValue("customer_id", customerId);
-            insertStatement.Parameters.AddWithValue("financial_account_id", accountId.Value);
-            insertStatement.Parameters.AddWithValue("source_type", review.SourceKind);
-            insertStatement.Parameters.AddWithValue("statement_label", label);
-            insertStatement.Parameters.AddWithValue("statement_fingerprint", review.StatementFingerprint);
-            insertStatement.Parameters.AddWithValue("start_date", review.StartDate!.Value);
-            insertStatement.Parameters.AddWithValue("end_date", review.EndDate!.Value);
-            insertStatement.Parameters.AddWithValue("total_rows", counts.TotalRows);
-            insertStatement.Parameters.AddWithValue("imported_count", counts.Imported);
-            insertStatement.Parameters.AddWithValue("suppressed_count", counts.Suppressed);
-            insertStatement.Parameters.AddWithValue("skipped_count", counts.Skipped);
-            insertStatement.Parameters.AddWithValue("fingerprint_occurrence", fingerprintOccurrence);
-            insertStatement.Parameters.AddWithValue("duplicate_policy_version", ImportLimits.DuplicatePolicyVersion);
-            insertStatement.Parameters.AddWithValue("possible_duplicate_count", counts.PossibleDuplicates);
-            insertStatement.Parameters.AddWithValue("exact_override_count", counts.ExactOverrides);
-            insertStatement.Parameters.AddWithValue("statement_override_count", review.StatementOverride ? 1 : 0);
-            insertStatement.Parameters.AddWithValue("override_summary", NpgsqlDbType.Jsonb, overrideSummary);
-            insertStatement.Parameters.AddWithValue("created_at", createdAt);
-            await insertStatement.ExecuteNonQueryAsync(cancellationToken);
-        }
+            Id = statementId,
+            CustomerId = customerId,
+            FinancialAccountId = accountId.Value,
+            SourceType = review.SourceKind,
+            StatementLabel = label,
+            StatementFingerprint = review.StatementFingerprint,
+            StartDate = review.StartDate!.Value,
+            EndDate = review.EndDate!.Value,
+            TotalRows = counts.TotalRows,
+            ImportedCount = counts.Imported,
+            SuppressedCount = counts.Suppressed,
+            SkippedCount = counts.Skipped,
+            Version = 1,
+            FingerprintOccurrence = fingerprintOccurrence,
+            DuplicatePolicyVersion = ImportLimits.DuplicatePolicyVersion,
+            PossibleDuplicateCount = counts.PossibleDuplicates,
+            ExactOverrideCount = counts.ExactOverrides,
+            StatementOverrideCount = review.StatementOverride ? 1 : 0,
+            OverrideSummary = JsonDocument.Parse(overrideSummary),
+            IsHidden = false,
+            HiddenAt = null,
+            CreatedAt = createdAt,
+            UpdatedAt = createdAt,
+        });
+        await context.SaveChangesAsync(cancellationToken);
         _faults.OnStep("statement_inserted");
 
         string[] identityKeys = included.Select(ComputeIdentityKey).Distinct(StringComparer.Ordinal).ToArray();
-        var maxOccurrences = await MaxOccurrencesAsync(connection, transaction, customerId, accountId.Value, identityKeys, cancellationToken);
+        var maxOccurrences = await MaxOccurrencesAsync(context, customerId, accountId.Value, identityKeys, cancellationToken);
         var nextOccurrence = maxOccurrences.ToDictionary(pair => pair.Key, pair => pair.Value + 1, StringComparer.Ordinal);
         var transactionTags = new List<(Guid TransactionId, Guid[] TagIds)>(included.Count);
-        await using (var copy = await connection.BeginBinaryImportAsync(
-            "COPY transactions (" +
-            "id, customer_id, financial_account_id, statement_import_id, transaction_date, " +
-            "description, normalized_description, amount, category_id, category_confirmed, source_type, source_page, " +
-            "source_row_number, identity_key, occurrence_index, identity_version, source_id_namespace, " +
-            "source_id_value, is_hidden_by_user, version, created_at, updated_at" +
-            ") FROM STDIN (FORMAT BINARY)", cancellationToken))
+        foreach (ImportReviewRowRecord[] batch in included.Chunk(TransactionInsertBatchSize))
         {
-            foreach (var row in included)
-            {
-                string identityKey = ComputeIdentityKey(row);
-                int occurrence = nextOccurrence.GetValueOrDefault(identityKey, 1);
-                nextOccurrence[identityKey] = occurrence + 1;
-                var transactionId = Guid.NewGuid();
-                transactionTags.Add((transactionId, row.SelectedTagIds));
-                await copy.StartRowAsync(cancellationToken);
-                copy.Write(transactionId, NpgsqlDbType.Uuid);
-                copy.Write(customerId, NpgsqlDbType.Uuid);
-                copy.Write(accountId.Value, NpgsqlDbType.Uuid);
-                copy.Write(statementId, NpgsqlDbType.Uuid);
-                copy.Write(row.TransactionDate!.Value, NpgsqlDbType.Date);
-                copy.Write(row.Description, NpgsqlDbType.Text);
-                copy.Write(row.NormalizedDescription, NpgsqlDbType.Text);
-                copy.Write(row.AmountCents!.Value / 100m, NpgsqlDbType.Numeric);
-                copy.Write(row.SelectedCategoryId ?? categoryId.Value, NpgsqlDbType.Uuid);
-                copy.Write(row.CategoryDecided, NpgsqlDbType.Boolean);
-                copy.Write(review.SourceKind, NpgsqlDbType.Text);
-                if (row.SourcePage is null)
-                {
-                    copy.WriteNull();
-                }
-                else
-                {
-                    copy.Write(row.SourcePage.Value, NpgsqlDbType.Integer);
-                }
-                copy.Write(row.SourceRowNumber, NpgsqlDbType.Integer);
-                copy.Write(identityKey, NpgsqlDbType.Text);
-                copy.Write(occurrence, NpgsqlDbType.Integer);
-                copy.Write(ImportLimits.IdentityVersion, NpgsqlDbType.Integer);
-                if (row.SourceIdNamespace is null)
-                {
-                    copy.WriteNull();
-                }
-                else
-                {
-                    copy.Write(row.SourceIdNamespace, NpgsqlDbType.Text);
-                }
-                if (row.SourceIdValue is null)
-                {
-                    copy.WriteNull();
-                }
-                else
-                {
-                    copy.Write(row.SourceIdValue, NpgsqlDbType.Text);
-                }
-                copy.Write(false, NpgsqlDbType.Boolean);
-                copy.Write(1, NpgsqlDbType.Integer);
-                copy.Write(createdAt, NpgsqlDbType.TimestampTz);
-                copy.Write(createdAt, NpgsqlDbType.TimestampTz);
-            }
-            await copy.CompleteAsync(cancellationToken);
+            await InsertTransactionBatchAsync(
+                context, batch, nextOccurrence, transactionTags, customerId, accountId.Value, statementId, review.SourceKind, categoryId.Value, createdAt, cancellationToken);
         }
         _faults.OnStep("transactions_inserted");
 
         var links = transactionTags.SelectMany(pair => pair.TagIds.Select(tagId => (pair.TransactionId, TagId: tagId))).ToArray();
-        if (links.Length > 0)
+        foreach (var batch in links.Chunk(TagLinkInsertBatchSize))
         {
-            await using var copy = await connection.BeginBinaryImportAsync("COPY transaction_merchant_tags (customer_id, transaction_id, merchant_tag_id, assigned_at) " + "FROM STDIN (FORMAT BINARY)", cancellationToken);
-            foreach (var (transactionId, tagId) in links)
-            {
-                await copy.StartRowAsync(cancellationToken);
-                copy.Write(customerId, NpgsqlDbType.Uuid);
-                copy.Write(transactionId, NpgsqlDbType.Uuid);
-                copy.Write(tagId, NpgsqlDbType.Uuid);
-                copy.Write(createdAt, NpgsqlDbType.TimestampTz);
-            }
-            await copy.CompleteAsync(cancellationToken);
+            await InsertTagLinkBatchAsync(context, batch, customerId, createdAt, cancellationToken);
         }
         _faults.OnStep("tag_links_inserted");
 
@@ -2419,82 +2415,66 @@ public sealed class StatementImportStore
             exact_override_count = counts.ExactOverrides,
             statement_override_count = review.StatementOverride ? 1 : 0,
         }, _storageJson);
-        await using (var receipt = connection.CreateCommand())
+        context.ImportCommitReceipts.Add(new ImportCommitReceipt
         {
-            receipt.Transaction = transaction;
-            receipt.CommandText = """
-                INSERT INTO import_commit_receipts (
-                    id, customer_id, operation_id, financial_account_id, request_digest,
-                    state, statement_import_id, result, created_at, updated_at
-                )
-                VALUES (
-                    @id, @customer_id, @operation_id, @financial_account_id, @request_digest,
-                    'Committed', @statement_import_id, @result, @created_at, @created_at
-                )
-                """;
-            receipt.Parameters.AddWithValue("id", Guid.NewGuid());
-            receipt.Parameters.AddWithValue("customer_id", customerId);
-            receipt.Parameters.AddWithValue("operation_id", reviewId);
-            receipt.Parameters.AddWithValue("financial_account_id", accountId.Value);
-            receipt.Parameters.AddWithValue("request_digest", requestDigest);
-            receipt.Parameters.AddWithValue("statement_import_id", statementId);
-            receipt.Parameters.AddWithValue("result", NpgsqlDbType.Jsonb, resultJson);
-            receipt.Parameters.AddWithValue("created_at", createdAt);
-            await receipt.ExecuteNonQueryAsync(cancellationToken);
-        }
+            Id = Guid.NewGuid(),
+            CustomerId = customerId,
+            OperationId = reviewId,
+            FinancialAccountId = accountId.Value,
+            RequestDigest = requestDigest,
+            State = "Committed",
+            StatementImportId = statementId,
+            Result = JsonDocument.Parse(resultJson),
+            CreatedAt = createdAt,
+            UpdatedAt = createdAt,
+        });
+        await context.SaveChangesAsync(cancellationToken);
         _faults.OnStep("receipt_inserted");
 
-        await using (var bump = connection.CreateCommand())
-        {
-            bump.Transaction = transaction;
-            bump.CommandText = "UPDATE financial_accounts SET import_version = import_version + 1, updated_at = NOW() WHERE customer_id = @customer_id AND id = @id";
-            bump.Parameters.AddWithValue("customer_id", customerId);
-            bump.Parameters.AddWithValue("id", accountId.Value);
-            await bump.ExecuteNonQueryAsync(cancellationToken);
-        }
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE financial_accounts
+            SET import_version = import_version + 1, updated_at = NOW()
+            WHERE customer_id = {customerId} AND id = {accountId.Value}
+            """, cancellationToken);
 
-        await using (var purge = connection.CreateCommand())
-        {
-            purge.Transaction = transaction;
-            purge.CommandText = "DELETE FROM import_review_rows WHERE review_id = @review_id; DELETE FROM import_reviews WHERE customer_id = @customer_id AND id = @id";
-            purge.Parameters.AddWithValue("review_id", reviewId);
-            purge.Parameters.AddWithValue("customer_id", customerId);
-            purge.Parameters.AddWithValue("id", reviewId);
-            await purge.ExecuteNonQueryAsync(cancellationToken);
-        }
+        await context.ImportReviewRows
+            .Where(row => row.ReviewId == reviewId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.ImportReviews
+            .Where(review => review.CustomerId == customerId && review.Id == reviewId)
+            .ExecuteDeleteAsync(cancellationToken);
 
-        var summary = await ReadStatementSummaryAsync(connection, transaction, customerId, statementId, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
+        var summary = await ReadStatementSummaryAsync(context, customerId, statementId, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
         _faults.OnStep("before_commit");
-        await ThrowIfCommitExpiredAsync(connection, transaction, review.ExpiresAt, cancellationToken);
+        await ThrowIfCommitExpiredAsync(context, review.ExpiresAt, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         _faults.OnStep("after_commit_before_response");
 
         return new ImportCommitResult(summary, false);
     }
 
-    private static async Task ThrowIfCommitExpiredAsync(NpgsqlConnection connection,
-                                                        NpgsqlTransaction transaction,
+    private static async Task ThrowIfCommitExpiredAsync(ArgusDbContext context,
                                                         DateTime expiresAt,
                                                         CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT clock_timestamp() >= @expires_at";
-        command.Parameters.AddWithValue("expires_at", expiresAt);
-        if ((bool)(await command.ExecuteScalarAsync(cancellationToken))!)
+        bool expired = await context.Database
+            .SqlQuery<bool>($$"""
+                SELECT clock_timestamp() >= {{expiresAt}} AS "Value"
+                """)
+            .SingleAsync(cancellationToken);
+        if (expired)
         {
             throw new ImportStoreException(ImportErrorCodes.ReviewExpired);
         }
     }
 
-    private static async Task<ImportCommitResult> ReplayReceiptAsync(NpgsqlConnection connection,
-                                                                     NpgsqlTransaction transaction,
+    private static async Task<ImportCommitResult> ReplayReceiptAsync(ArgusDbContext context,
                                                                      Guid customerId,
                                                                      Guid reviewId,
                                                                      string requestDigest,
                                                                      CancellationToken cancellationToken)
     {
-        var receipt = await ReadReceiptAsync(connection, transaction, customerId, reviewId, true, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
+        var receipt = await ReadReceiptAsync(context, customerId, reviewId, true, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
         if (receipt.State == "Deleted")
         {
             throw new ImportStoreException(ImportErrorCodes.ImportDeleted);
@@ -2503,7 +2483,7 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.IdempotencyConflict);
         }
-        var summary = await ReadStatementSummaryAsync(connection, transaction, customerId, receipt.StatementImportId!.Value, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
+        var summary = await ReadStatementSummaryAsync(context, customerId, receipt.StatementImportId!.Value, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
 
         return new ImportCommitResult(summary, true);
     }
@@ -2524,42 +2504,18 @@ public sealed class StatementImportStore
             (cursorCreated, cursorId) = DecodeCursor(cursor);
         }
 
-        await using var connection = await _db.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT s.id, s.financial_account_id, s.source_type, s.statement_label,
-                   s.start_date, s.end_date, s.total_rows, s.imported_count, s.suppressed_count,
-                   s.skipped_count, s.possible_duplicate_count, s.exact_override_count,
-                   s.statement_override_count, s.is_hidden, s.version,
-                   COALESCE(h.live_hidden_count, 0) AS live_hidden_count,
-                   s.created_at, s.updated_at
-            FROM statement_imports s
-            LEFT JOIN LATERAL (
-                SELECT COUNT(*) FILTER (WHERE s.is_hidden OR t.is_hidden_by_user) AS live_hidden_count
-                FROM transactions t
-                WHERE t.customer_id = s.customer_id AND t.statement_import_id = s.id
-            ) h ON TRUE
-            WHERE s.customer_id = @customer_id
-              AND (@account_id IS NULL OR s.financial_account_id = @account_id)
-              AND (@state = 'all'
-                   OR (@state = 'hidden' AND COALESCE(h.live_hidden_count, 0) > 0)
-                   OR (@state = 'visible' AND COALESCE(h.live_hidden_count, 0) = 0))
-              AND (@cursor_created IS NULL OR (s.created_at, s.id) < (@cursor_created, @cursor_id))
-            ORDER BY s.created_at DESC, s.id DESC
-            LIMIT @limit_plus
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("account_id", NpgsqlDbType.Uuid, (object?)accountId ?? DBNull.Value);
-        command.Parameters.AddWithValue("state", state);
-        command.Parameters.AddWithValue("cursor_created", NpgsqlDbType.TimestampTz, (object?)cursorCreated ?? DBNull.Value);
-        command.Parameters.AddWithValue("cursor_id", NpgsqlDbType.Uuid, (object?)cursorId ?? DBNull.Value);
-        command.Parameters.AddWithValue("limit_plus", limit + 1);
-        var items = new List<ImportStatementSummary>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            items.Add(MapStatementSummary(reader));
-        }
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        List<StatementSummaryRow> rows = await context.Database
+            .SqlQueryRaw<StatementSummaryRow>(
+                HistorySql,
+                customerId,
+                (object)(accountId ?? (object)DBNull.Value),
+                state,
+                (object)(cursorCreated ?? (object)DBNull.Value),
+                (object)(cursorId ?? (object)DBNull.Value),
+                limit + 1)
+            .ToListAsync(cancellationToken);
+        var items = rows.Select(ToStatementSummary).ToList();
         if (items.Count <= limit)
         {
             return new ImportHistoryPage(items, null);
@@ -2578,22 +2534,20 @@ public sealed class StatementImportStore
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, ImportLimits.MaxPageSize);
-        await using var connection = await _db.OpenAsync(cancellationToken);
-        var summary = await ReadStatementSummaryAsync(connection, null, customerId, statementId, cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var summary = await ReadStatementSummaryAsync(context, customerId, statementId, cancellationToken);
         if (summary is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
 
-        await using (var count = connection.CreateCommand())
-        {
-            count.CommandText = "SELECT COUNT(*) FROM transactions WHERE customer_id = @customer_id AND statement_import_id = @id";
-            count.Parameters.AddWithValue("customer_id", customerId);
-            count.Parameters.AddWithValue("id", statementId);
-            long expectedTransactionCount = (long)(await count.ExecuteScalarAsync(cancellationToken))!;
-            var rows = await ReadStatementRowsAsync(connection, null, customerId, statementId, page, pageSize, cancellationToken);
-            return new ImportStatementDetail(summary, rows, page, pageSize, expectedTransactionCount);
-        }
+        long expectedTransactionCount = await context.Transactions
+            .LongCountAsync(
+                transaction => transaction.CustomerId == customerId && transaction.StatementImportId == statementId,
+                cancellationToken);
+        var rows = await ReadStatementRowsAsync(context, customerId, statementId, page, pageSize, cancellationToken);
+
+        return new ImportStatementDetail(summary, rows, page, pageSize, expectedTransactionCount);
     }
 
     public async Task<ImportStatementSummary> SetStatementVisibilityAsync(Guid customerId,
@@ -2608,15 +2562,15 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
-        await using var connection = await _db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        var accountId = await StatementAccountIdAsync(connection, transaction, customerId, statementId, cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        var accountId = await StatementAccountIdAsync(context, customerId, statementId, cancellationToken);
         if (accountId is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
-        await LockAccountAsync(connection, transaction, customerId, accountId.Value, cancellationToken);
-        var summary = await LockStatementAsync(connection, transaction, customerId, statementId, cancellationToken);
+        await LockAccountAsync(context, customerId, accountId.Value, cancellationToken);
+        var summary = await LockStatementAsync(context, customerId, statementId, cancellationToken);
         if (summary is null)
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
@@ -2625,7 +2579,7 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.VersionConflict);
         }
-        long count = await StatementTransactionCountAsync(connection, transaction, customerId, statementId, cancellationToken);
+        long count = await StatementTransactionCountAsync(context, customerId, statementId, cancellationToken);
         if (count != expectedTransactionCount)
         {
             throw new ImportStoreException(ImportErrorCodes.VersionConflict);
@@ -2635,35 +2589,20 @@ public sealed class StatementImportStore
             await transaction.CommitAsync(cancellationToken);
             return summary;
         }
-        await using (var update = connection.CreateCommand())
-        {
-            update.Transaction = transaction;
-            update.CommandText = """
-                UPDATE statement_imports
-                SET is_hidden = @hidden,
-                    hidden_at = CASE WHEN @hidden THEN NOW() ELSE NULL END,
-                    version = version + 1,
-                    updated_at = NOW()
-                WHERE customer_id = @customer_id AND id = @id
-                """;
-            update.Parameters.AddWithValue("hidden", hidden);
-            update.Parameters.AddWithValue("customer_id", customerId);
-            update.Parameters.AddWithValue("id", statementId);
-            await update.ExecuteNonQueryAsync(cancellationToken);
-        }
-        await using (var touch = connection.CreateCommand())
-        {
-            touch.Transaction = transaction;
-            touch.CommandText = """
-                UPDATE transactions
-                SET version = version + 1, updated_at = NOW()
-                WHERE customer_id = @customer_id AND statement_import_id = @id
-                """;
-            touch.Parameters.AddWithValue("customer_id", customerId);
-            touch.Parameters.AddWithValue("id", statementId);
-            await touch.ExecuteNonQueryAsync(cancellationToken);
-        }
-        var updated = await ReadStatementSummaryAsync(connection, transaction, customerId, statementId, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE statement_imports
+            SET is_hidden = {hidden},
+                hidden_at = CASE WHEN {hidden} THEN NOW() ELSE NULL END,
+                version = version + 1,
+                updated_at = NOW()
+            WHERE customer_id = {customerId} AND id = {statementId}
+            """, cancellationToken);
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE transactions
+            SET version = version + 1, updated_at = NOW()
+            WHERE customer_id = {customerId} AND statement_import_id = {statementId}
+            """, cancellationToken);
+        var updated = await ReadStatementSummaryAsync(context, customerId, statementId, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
         await transaction.CommitAsync(cancellationToken);
 
         return updated;
@@ -2682,19 +2621,19 @@ public sealed class StatementImportStore
         }
         string deletionDigest = Digest($"delete-v1|{expectedVersion}|{expectedTransactionCount}|true");
 
-        await using var connection = await _db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
 
-        var accountId = await StatementAccountIdAsync(connection, transaction, customerId, statementId, cancellationToken);
+        var accountId = await StatementAccountIdAsync(context, customerId, statementId, cancellationToken);
         if (accountId is not null)
         {
-            await LockAccountAsync(connection, transaction, customerId, accountId.Value, cancellationToken);
+            await LockAccountAsync(context, customerId, accountId.Value, cancellationToken);
         }
 
-        var statement = await LockStatementAsync(connection, transaction, customerId, statementId, cancellationToken);
+        var statement = await LockStatementAsync(context, customerId, statementId, cancellationToken);
         if (statement is null)
         {
-            var tombstone = await ReadDeletionReceiptAsync(connection, transaction, customerId, statementId, cancellationToken);
+            var tombstone = await ReadDeletionReceiptAsync(context, customerId, statementId, cancellationToken);
             if (tombstone is not null && tombstone.DeletionDigest == deletionDigest && tombstone.DeletionExpectedCount == expectedTransactionCount)
             {
                 await transaction.CommitAsync(cancellationToken);
@@ -2706,85 +2645,53 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.VersionConflict);
         }
-        long count = await StatementTransactionCountAsync(connection, transaction, customerId, statementId, cancellationToken);
+        long count = await StatementTransactionCountAsync(context, customerId, statementId, cancellationToken);
         if (count != expectedTransactionCount)
         {
             throw new ImportStoreException(ImportErrorCodes.VersionConflict);
         }
 
-        await using (var deleteTransactions = connection.CreateCommand())
-        {
-            deleteTransactions.Transaction = transaction;
-            deleteTransactions.CommandText = "DELETE FROM transactions WHERE customer_id = @customer_id AND statement_import_id = @id";
-            deleteTransactions.Parameters.AddWithValue("customer_id", customerId);
-            deleteTransactions.Parameters.AddWithValue("id", statementId);
-            await deleteTransactions.ExecuteNonQueryAsync(cancellationToken);
-        }
-        await using (var deleteStatement = connection.CreateCommand())
-        {
-            deleteStatement.Transaction = transaction;
-            deleteStatement.CommandText = "DELETE FROM statement_imports WHERE customer_id = @customer_id AND id = @id";
-            deleteStatement.Parameters.AddWithValue("customer_id", customerId);
-            deleteStatement.Parameters.AddWithValue("id", statementId);
-            await deleteStatement.ExecuteNonQueryAsync(cancellationToken);
-        }
+        await context.Transactions
+            .Where(transaction => transaction.CustomerId == customerId && transaction.StatementImportId == statementId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.StatementImports
+            .Where(statement => statement.CustomerId == customerId && statement.Id == statementId)
+            .ExecuteDeleteAsync(cancellationToken);
 
-        var receipt = await ReadReceiptByStatementAsync(connection, transaction, customerId, statementId, cancellationToken);
+        var receipt = await ReadReceiptByStatementAsync(context, customerId, statementId, cancellationToken);
         string resultJson = JsonSerializer.Serialize(new { statement_import_id = statementId, deleted = true, deleted_transaction_count = count, }, _storageJson);
         if (receipt is null)
         {
-            await using var insert = connection.CreateCommand();
-            insert.Transaction = transaction;
-            insert.CommandText = """
+            // The legacy fallback predates commit receipts and must keep the
+            // database clock, exactly as the pre-conversion INSERT did.
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO import_commit_receipts (
                     id, customer_id, operation_id, financial_account_id, request_digest,
                     state, statement_import_id, result, deletion_digest, deletion_expected_count,
-                    created_at, updated_at
-                )
+                    created_at, updated_at)
                 VALUES (
-                    @id, @customer_id, @operation_id, @financial_account_id, @request_digest,
-                    'Deleted', @statement_import_id, @result, @deletion_digest, @deletion_expected_count,
-                    NOW(), NOW()
-                )
-                """;
-            insert.Parameters.AddWithValue("id", Guid.NewGuid());
-            insert.Parameters.AddWithValue("customer_id", customerId);
-            insert.Parameters.AddWithValue("operation_id", statementId);
-            insert.Parameters.AddWithValue("financial_account_id", statement.FinancialAccountId);
-            insert.Parameters.AddWithValue("request_digest", deletionDigest);
-            insert.Parameters.AddWithValue("statement_import_id", statementId);
-            insert.Parameters.AddWithValue("result", NpgsqlDbType.Jsonb, resultJson);
-            insert.Parameters.AddWithValue("deletion_digest", deletionDigest);
-            insert.Parameters.AddWithValue("deletion_expected_count", count);
-            await insert.ExecuteNonQueryAsync(cancellationToken);
+                    {Guid.NewGuid()}, {customerId}, {statementId}, {statement.FinancialAccountId}, {deletionDigest},
+                    'Deleted', {statementId}, CAST({resultJson} AS jsonb), {deletionDigest}, {count},
+                    NOW(), NOW())
+                """, cancellationToken);
         }
         else
         {
-            await using var update = connection.CreateCommand();
-            update.Transaction = transaction;
-            update.CommandText = """
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
                 UPDATE import_commit_receipts
                 SET state = 'Deleted',
-                    result = @result,
-                    deletion_digest = @deletion_digest,
-                    deletion_expected_count = @deletion_expected_count,
+                    result = CAST({resultJson} AS jsonb),
+                    deletion_digest = {deletionDigest},
+                    deletion_expected_count = {count},
                     updated_at = NOW()
-                WHERE id = @id
-                """;
-            update.Parameters.AddWithValue("result", NpgsqlDbType.Jsonb, resultJson);
-            update.Parameters.AddWithValue("deletion_digest", deletionDigest);
-            update.Parameters.AddWithValue("deletion_expected_count", count);
-            update.Parameters.AddWithValue("id", receipt.Id);
-            await update.ExecuteNonQueryAsync(cancellationToken);
+                WHERE id = {receipt.Id}
+                """, cancellationToken);
         }
-        await using (var bump = connection.CreateCommand())
-        {
-            bump.Transaction = transaction;
-            bump.CommandText = "UPDATE financial_accounts SET import_version = import_version + 1, updated_at = NOW() WHERE customer_id = @customer_id AND id = @id";
-            bump.Parameters.AddWithValue("customer_id", customerId);
-            bump.Parameters.AddWithValue("id", statement.FinancialAccountId);
-            await bump.ExecuteNonQueryAsync(cancellationToken);
-        }
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE financial_accounts
+            SET import_version = import_version + 1, updated_at = NOW()
+            WHERE customer_id = {customerId} AND id = {statement.FinancialAccountId}
+            """, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
 
@@ -2793,80 +2700,55 @@ public sealed class StatementImportStore
 
     public async Task CleanupExpiredAsync(CancellationToken cancellationToken = default)
     {
-        await using var connection = await _db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
 
-        var expired = new List<Guid>();
-        await using (var select = connection.CreateCommand())
-        {
-            select.Transaction = transaction;
-            // Lock the headers before touching their child rows. Commit and
-            // review edits acquire the review header first; cleanup must not
-            // invert that order. The lock wait also re-evaluates the expiry
-            // predicate, so a concurrent commit that purges the review removes
-            // it from this set.
-            select.CommandText = """
-                SELECT id FROM import_reviews
-                WHERE status = 'Prepared' AND expires_at <= NOW()
-                ORDER BY expires_at
-                LIMIT 1000
-                FOR UPDATE
-                """;
-            await using var reader = await select.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                expired.Add(reader.GetGuid(0));
-            }
-        }
+        // Lock the headers before touching their child rows. Commit and
+        // review edits acquire the review header first; cleanup must not
+        // invert that order. The lock wait also re-evaluates the expiry
+        // predicate, so a concurrent commit that purges the review removes
+        // it from this set.
+        List<Guid> expired = await context.Database.SqlQuery<Guid>($"""
+            SELECT id FROM import_reviews
+            WHERE status = 'Prepared' AND expires_at <= NOW()
+            ORDER BY expires_at
+            LIMIT 1000
+            FOR UPDATE
+            """).ToListAsync(cancellationToken);
 
         if (expired.Count > 0)
         {
-            await using (var rows = connection.CreateCommand())
-            {
-                rows.Transaction = transaction;
-                rows.CommandText = "DELETE FROM import_review_rows WHERE review_id = ANY(@ids)";
-                rows.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, expired.ToArray());
-                await rows.ExecuteNonQueryAsync(cancellationToken);
-            }
-            await using (var headers = connection.CreateCommand())
-            {
-                headers.Transaction = transaction;
-                headers.CommandText = """
-                    UPDATE import_reviews
-                    SET status = 'Expired',
-                        parser_config = '{}'::jsonb,
-                        start_date = NULL,
-                        end_date = NULL,
-                        statement_fingerprint = '',
-                        summary_hash = '',
-                        total_rows = 0,
-                        imported_count = 0,
-                        suppressed_count = 0,
-                        skipped_count = 0,
-                        possible_duplicate_count = 0,
-                        exact_override_count = 0,
-                        statement_override = FALSE,
-                        statement_override_count = 0,
-                        payload_bytes = 0,
-                        version = version + 1,
-                        updated_at = NOW()
-                    WHERE id = ANY(@ids)
-                    """;
-                headers.Parameters.AddWithValue("ids", expired.ToArray());
-                await headers.ExecuteNonQueryAsync(cancellationToken);
-            }
+            await context.ImportReviewRows
+                .Where(row => expired.Contains(row.ReviewId))
+                .ExecuteDeleteAsync(cancellationToken);
+            await context.Database.ExecuteSqlInterpolatedAsync($$"""
+                UPDATE import_reviews
+                SET status = 'Expired',
+                    parser_config = '{}'::jsonb,
+                    start_date = NULL,
+                    end_date = NULL,
+                    statement_fingerprint = '',
+                    summary_hash = '',
+                    total_rows = 0,
+                    imported_count = 0,
+                    suppressed_count = 0,
+                    skipped_count = 0,
+                    possible_duplicate_count = 0,
+                    exact_override_count = 0,
+                    statement_override = FALSE,
+                    statement_override_count = 0,
+                    payload_bytes = 0,
+                    version = version + 1,
+                    updated_at = NOW()
+                WHERE id = ANY({{expired.ToArray()}})
+                """, cancellationToken);
         }
 
-        await using (var prune = connection.CreateCommand())
-        {
-            prune.Transaction = transaction;
-            prune.CommandText = """
-                DELETE FROM import_reviews
-                WHERE status IN ('Abandoned', 'Expired')
-                  AND updated_at < NOW() - INTERVAL '30 days'
-                """;
-            await prune.ExecuteNonQueryAsync(cancellationToken);
-        }
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            DELETE FROM import_reviews
+            WHERE status IN ('Abandoned', 'Expired')
+              AND updated_at < NOW() - INTERVAL '30 days'
+            """, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
     }
@@ -2881,477 +2763,337 @@ public sealed class StatementImportStore
     /// </summary>
     private async Task<bool> OwnedOperationExistsAsync(Guid customerId, Guid operationId, CancellationToken cancellationToken)
     {
-        await using var connection = await _db.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT EXISTS (
-                SELECT 1 FROM import_reviews
-                WHERE customer_id = @customer_id AND id = @operation_id
-                UNION ALL
-                SELECT 1 FROM import_commit_receipts
-                WHERE customer_id = @customer_id AND operation_id = @operation_id
-            )
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("operation_id", operationId);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        bool reviewExists = await context.ImportReviews
+            .AnyAsync(review => review.CustomerId == customerId && review.Id == operationId, cancellationToken);
+        if (reviewExists)
+        {
+            return true;
+        }
 
-        return (bool)(await command.ExecuteScalarAsync(cancellationToken))!;
+        return await context.ImportCommitReceipts
+            .AnyAsync(receipt => receipt.CustomerId == customerId && receipt.OperationId == operationId, cancellationToken);
     }
 
-    private static async Task<Guid?> ReceiptAccountIdAsync(NpgsqlConnection connection,
-                                                           NpgsqlTransaction transaction,
+    private static async Task<Guid?> ReceiptAccountIdAsync(ArgusDbContext context,
                                                            Guid customerId,
                                                            Guid operationId,
                                                            CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT financial_account_id FROM import_commit_receipts
-            WHERE customer_id = @customer_id AND operation_id = @operation_id
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("operation_id", operationId);
-
-        return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
+        return await context.ImportCommitReceipts
+            .Where(receipt => receipt.CustomerId == customerId && receipt.OperationId == operationId)
+            .Select(receipt => (Guid?)receipt.FinancialAccountId)
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
-    private static async Task<ReceiptRecord?> ReadReceiptAsync(NpgsqlConnection connection,
-                                                               NpgsqlTransaction transaction,
+    private static async Task<ReceiptRecord?> ReadReceiptAsync(ArgusDbContext context,
                                                                Guid customerId,
                                                                Guid operationId,
                                                                bool forUpdate,
                                                                CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            SELECT id, customer_id, operation_id, financial_account_id, request_digest, state,
-                   statement_import_id, result::text, deletion_digest, deletion_expected_count
+        const string receiptSql = """
+            SELECT id AS "Id", customer_id AS "CustomerId", operation_id AS "OperationId",
+                   financial_account_id AS "FinancialAccountId", request_digest AS "RequestDigest",
+                   state AS "State", statement_import_id AS "StatementImportId", result::text AS "ResultJson",
+                   deletion_digest AS "DeletionDigest", deletion_expected_count AS "DeletionExpectedCount"
             FROM import_commit_receipts
-            WHERE customer_id = @customer_id AND operation_id = @operation_id
-            {(forUpdate ? "FOR UPDATE" : string.Empty)}
+            WHERE customer_id = {0} AND operation_id = {1}
             """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("operation_id", operationId);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        string sql = forUpdate ? string.Concat(receiptSql, "\nFOR UPDATE") : receiptSql;
+        List<ReceiptRow> rows = await context.Database
+            .SqlQueryRaw<ReceiptRow>(sql, customerId, operationId)
+            .ToListAsync(cancellationToken);
 
-        return await reader.ReadAsync(cancellationToken)
-            ? new ReceiptRecord(
-                reader.GetGuid(0),
-                reader.GetGuid(1),
-                reader.GetGuid(2),
-                reader.GetGuid(3),
-                reader.GetString(4),
-                reader.GetString(5),
-                reader.IsDBNull(6) ? null : reader.GetGuid(6),
-                reader.GetString(7),
-                reader.IsDBNull(8) ? null : reader.GetString(8),
-                reader.IsDBNull(9) ? null : reader.GetInt64(9))
-            : null;
+        return rows.SingleOrDefault() is { } row ? ToReceiptRecord(row) : null;
     }
 
-    private static async Task<ReceiptRecord?> ReadDeletionReceiptAsync(NpgsqlConnection connection,
-                                                                       NpgsqlTransaction transaction,
+    private static async Task<ReceiptRecord?> ReadDeletionReceiptAsync(ArgusDbContext context,
                                                                        Guid customerId,
                                                                        Guid statementId,
                                                                        CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT id, customer_id, operation_id, financial_account_id, request_digest, state,
-                   statement_import_id, result::text, deletion_digest, deletion_expected_count
+        List<ReceiptRow> rows = await context.Database.SqlQueryRaw<ReceiptRow>("""
+            SELECT id AS "Id", customer_id AS "CustomerId", operation_id AS "OperationId",
+                   financial_account_id AS "FinancialAccountId", request_digest AS "RequestDigest",
+                   state AS "State", statement_import_id AS "StatementImportId", result::text AS "ResultJson",
+                   deletion_digest AS "DeletionDigest", deletion_expected_count AS "DeletionExpectedCount"
             FROM import_commit_receipts
-            WHERE customer_id = @customer_id AND statement_import_id = @statement_import_id
+            WHERE customer_id = {0} AND statement_import_id = {1}
               AND state = 'Deleted'
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("statement_import_id", statementId);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            """, customerId, statementId).ToListAsync(cancellationToken);
 
-        if (!await reader.ReadAsync(cancellationToken))
-        {
-            return null;
-        }
-
-        Guid? statementImportId = reader.IsDBNull(6) ? (Guid?)null : reader.GetGuid(6);
-        string? deletionDigest = reader.IsDBNull(8) ? null : reader.GetString(8);
-        long? deletionExpectedCount = reader.IsDBNull(9) ? null : reader.GetInt64(9);
-
-        return new ReceiptRecord(
-            reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2), reader.GetGuid(3),
-            reader.GetString(4), reader.GetString(5),
-            statementImportId, reader.GetString(7),
-            deletionDigest, deletionExpectedCount);
+        return rows.SingleOrDefault() is { } row ? ToReceiptRecord(row) : null;
     }
 
-    private static async Task<ReceiptRecord?> ReadReceiptByStatementAsync(NpgsqlConnection connection,
-                                                                          NpgsqlTransaction transaction,
+    private static async Task<ReceiptRecord?> ReadReceiptByStatementAsync(ArgusDbContext context,
                                                                           Guid customerId,
                                                                           Guid statementId,
                                                                           CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT id, customer_id, operation_id, financial_account_id, request_digest, state,
-                   statement_import_id, result::text, deletion_digest, deletion_expected_count
+        List<ReceiptRow> rows = await context.Database.SqlQueryRaw<ReceiptRow>("""
+            SELECT id AS "Id", customer_id AS "CustomerId", operation_id AS "OperationId",
+                   financial_account_id AS "FinancialAccountId", request_digest AS "RequestDigest",
+                   state AS "State", statement_import_id AS "StatementImportId", result::text AS "ResultJson",
+                   deletion_digest AS "DeletionDigest", deletion_expected_count AS "DeletionExpectedCount"
             FROM import_commit_receipts
-            WHERE customer_id = @customer_id AND statement_import_id = @statement_import_id
+            WHERE customer_id = {0} AND statement_import_id = {1}
             ORDER BY created_at DESC
             LIMIT 1
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("statement_import_id", statementId);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            """, customerId, statementId).ToListAsync(cancellationToken);
 
-        return await reader.ReadAsync(cancellationToken)
-            ? new ReceiptRecord(
-                reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2), reader.GetGuid(3),
-                reader.GetString(4), reader.GetString(5),
-                reader.IsDBNull(6) ? null : reader.GetGuid(6), reader.GetString(7),
-                reader.IsDBNull(8) ? null : reader.GetString(8),
-                reader.IsDBNull(9) ? null : reader.GetInt64(9))
-            : null;
+        return rows.SingleOrDefault() is { } row ? ToReceiptRecord(row) : null;
     }
 
-    private static async Task<Guid?> StatementAccountIdAsync(NpgsqlConnection connection,
-                                                             NpgsqlTransaction transaction,
+    private static ReceiptRecord ToReceiptRecord(ReceiptRow row) => new(
+        row.Id,
+        row.CustomerId,
+        row.OperationId,
+        row.FinancialAccountId,
+        row.RequestDigest,
+        row.State,
+        row.StatementImportId,
+        row.ResultJson,
+        row.DeletionDigest,
+        row.DeletionExpectedCount);
+
+    private static async Task<Guid?> StatementAccountIdAsync(ArgusDbContext context,
                                                              Guid customerId,
                                                              Guid statementId,
                                                              CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT financial_account_id FROM statement_imports WHERE customer_id = @customer_id AND id = @id";
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("id", statementId);
-
-        return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
+        return await context.StatementImports
+            .Where(statement => statement.CustomerId == customerId && statement.Id == statementId)
+            .Select(statement => (Guid?)statement.FinancialAccountId)
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
-    private static async Task<ImportStatementSummary?> LockStatementAsync(NpgsqlConnection connection,
-                                                                          NpgsqlTransaction transaction,
+    private static async Task<ImportStatementSummary?> LockStatementAsync(ArgusDbContext context,
                                                                           Guid customerId,
                                                                           Guid statementId,
                                                                           CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            SELECT s.id, s.financial_account_id, s.source_type, s.statement_label,
-                   s.start_date, s.end_date, s.total_rows, s.imported_count, s.suppressed_count,
-                   s.skipped_count, s.possible_duplicate_count, s.exact_override_count,
-                   s.statement_override_count, s.is_hidden, s.version,
-                   COALESCE((
-                       SELECT COUNT(*) FROM transactions t
-                       WHERE t.customer_id = s.customer_id AND t.statement_import_id = s.id
-                         AND (s.is_hidden OR t.is_hidden_by_user)
-                   ), 0) AS live_hidden_count,
-                   s.created_at, s.updated_at
-            FROM statement_imports s
-            WHERE s.customer_id = @customer_id AND s.id = @id
-            FOR UPDATE
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("id", statementId);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        List<StatementSummaryRow> rows = await context.Database
+            .SqlQueryRaw<StatementSummaryRow>(StatementSummarySql + "\nFOR UPDATE", customerId, statementId)
+            .ToListAsync(cancellationToken);
 
-        return await reader.ReadAsync(cancellationToken) ? MapStatementSummary(reader) : null;
+        return rows.SingleOrDefault() is { } row ? ToStatementSummary(row) : null;
     }
 
-    private static async Task<long> StatementTransactionCountAsync(NpgsqlConnection connection,
-                                                                   NpgsqlTransaction transaction,
+    private static async Task<long> StatementTransactionCountAsync(ArgusDbContext context,
                                                                    Guid customerId,
                                                                    Guid statementId,
                                                                    CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT COUNT(*) FROM transactions WHERE customer_id = @customer_id AND statement_import_id = @id";
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("id", statementId);
-
-        return (long)(await command.ExecuteScalarAsync(cancellationToken))!;
+        return await context.Transactions
+            .LongCountAsync(
+                transaction => transaction.CustomerId == customerId && transaction.StatementImportId == statementId,
+                cancellationToken);
     }
 
-    private static async Task<ImportStatementSummary?> ReadStatementSummaryAsync(NpgsqlConnection connection,
-                                                                                 NpgsqlTransaction? transaction,
+    private static async Task<ImportStatementSummary?> ReadStatementSummaryAsync(ArgusDbContext context,
                                                                                  Guid customerId,
                                                                                  Guid statementId,
                                                                                  CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT s.id, s.financial_account_id, s.source_type, s.statement_label,
-                   s.start_date, s.end_date, s.total_rows, s.imported_count, s.suppressed_count,
-                   s.skipped_count, s.possible_duplicate_count, s.exact_override_count,
-                   s.statement_override_count, s.is_hidden, s.version,
-                   COALESCE((
-                       SELECT COUNT(*) FROM transactions t
-                       WHERE t.customer_id = s.customer_id AND t.statement_import_id = s.id
-                         AND (s.is_hidden OR t.is_hidden_by_user)
-                   ), 0) AS live_hidden_count,
-                   s.created_at, s.updated_at
-            FROM statement_imports s
-            WHERE s.customer_id = @customer_id AND s.id = @id
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("id", statementId);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        List<StatementSummaryRow> rows = await context.Database
+            .SqlQueryRaw<StatementSummaryRow>(StatementSummarySql, customerId, statementId)
+            .ToListAsync(cancellationToken);
 
-        return await reader.ReadAsync(cancellationToken) ? MapStatementSummary(reader) : null;
+        return rows.SingleOrDefault() is { } row ? ToStatementSummary(row) : null;
     }
 
-    private static ImportStatementSummary MapStatementSummary(NpgsqlDataReader reader) => new(
-        reader.GetGuid(0),
-        reader.GetGuid(1),
-        reader.GetString(2),
-        reader.GetString(3),
-        reader.GetFieldValue<DateOnly>(4),
-        reader.GetFieldValue<DateOnly>(5),
-        reader.GetInt32(6),
-        reader.GetInt32(7),
-        reader.GetInt32(8),
-        reader.GetInt32(9),
-        reader.GetInt32(10),
-        reader.GetInt32(11),
-        reader.GetInt32(12),
-        reader.GetBoolean(13),
-        reader.GetInt32(14),
-        reader.GetInt64(15),
-        reader.GetFieldValue<DateTime>(16),
-        reader.GetFieldValue<DateTime>(17));
+    private static ImportStatementSummary ToStatementSummary(StatementSummaryRow row) => new(
+        row.Id,
+        row.FinancialAccountId,
+        row.SourceType,
+        row.StatementLabel,
+        row.StartDate,
+        row.EndDate,
+        row.TotalRows,
+        row.ImportedCount,
+        row.SuppressedCount,
+        row.SkippedCount,
+        row.PossibleDuplicateCount,
+        row.ExactOverrideCount,
+        row.StatementOverrideCount,
+        row.IsHidden,
+        row.Version,
+        row.LiveHiddenCount,
+        row.CreatedAt,
+        row.UpdatedAt);
 
-    private static async Task<IReadOnlyList<ImportStatementRowRecord>> ReadStatementRowsAsync(NpgsqlConnection connection,
-                                                                                              NpgsqlTransaction? transaction,
+    private static async Task<IReadOnlyList<ImportStatementRowRecord>> ReadStatementRowsAsync(ArgusDbContext context,
                                                                                               Guid customerId,
                                                                                               Guid statementId,
                                                                                               int page,
                                                                                               int pageSize,
                                                                                               CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT t.id, t.source_row_number, t.source_page, t.transaction_date,
-                   t.description, (t.amount * 100)::bigint,
-                   t.is_hidden_by_user, (s.is_hidden OR t.is_hidden_by_user) AS effective_hidden
-            FROM transactions t
-            JOIN statement_imports s
-              ON s.customer_id = t.customer_id AND s.id = t.statement_import_id
-            WHERE t.customer_id = @customer_id AND t.statement_import_id = @statement_id
-            ORDER BY t.source_row_number, t.id
-            LIMIT @limit OFFSET @offset
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("statement_id", statementId);
-        command.Parameters.AddWithValue("limit", pageSize);
-        command.Parameters.AddWithValue("offset", (page - 1) * pageSize);
-        var rows = new List<(Guid Id, int SourceRowNumber, int? SourcePage, DateOnly Date, string Description, long Cents, bool Hidden, bool EffectiveHidden)>();
-        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
-        {
-            while (await reader.ReadAsync(cancellationToken))
+        var rows = await (
+            from transaction in context.Transactions.AsNoTracking()
+            join statement in context.StatementImports
+                on new { transaction.CustomerId, Id = transaction.StatementImportId } equals new { statement.CustomerId, Id = statement.Id }
+            where transaction.CustomerId == customerId && transaction.StatementImportId == statementId
+            orderby transaction.SourceRowNumber, transaction.Id
+            select new
             {
-                rows.Add((reader.GetGuid(0), reader.GetInt32(1), reader.IsDBNull(2) ? null : reader.GetInt32(2), reader.GetFieldValue<DateOnly>(3), reader.GetString(4), reader.GetInt64(5), reader.GetBoolean(6), reader.GetBoolean(7)));
-            }
-        }
+                transaction.Id,
+                transaction.SourceRowNumber,
+                transaction.SourcePage,
+                transaction.TransactionDate,
+                transaction.Description,
+                transaction.Amount,
+                transaction.IsHiddenByUser,
+                StatementHidden = statement.IsHidden,
+            })
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
         if (rows.Count == 0)
         {
             return [];
         }
 
+        Guid[] ids = rows.Select(row => row.Id).ToArray();
+        var tagRows = await (
+            from link in context.TransactionMerchantTags.AsNoTracking()
+            join tag in context.MerchantTags
+                on new { link.CustomerId, Id = link.MerchantTagId } equals new { tag.CustomerId, Id = tag.Id }
+            where link.CustomerId == customerId && ids.Contains(link.TransactionId)
+            orderby tag.DisplayName, tag.Id
+            select new { link.TransactionId, tag.Id, tag.DisplayName })
+            .ToListAsync(cancellationToken);
         var tags = new Dictionary<Guid, List<ImportTagRecord>>();
-        await using (var tagCommand = connection.CreateCommand())
+        foreach (var tagRow in tagRows)
         {
-            tagCommand.Transaction = transaction;
-            tagCommand.CommandText = """
-                SELECT j.transaction_id, m.id, m.display_name
-                FROM transaction_merchant_tags j
-                JOIN merchant_tags m ON m.customer_id = j.customer_id AND m.id = j.merchant_tag_id
-                WHERE j.customer_id = @customer_id AND j.transaction_id = ANY(@ids)
-                ORDER BY m.display_name, m.id
-                """;
-            tagCommand.Parameters.AddWithValue("customer_id", customerId);
-            tagCommand.Parameters.AddWithValue("ids", rows.Select(row => row.Id).ToArray());
-            await using var reader = await tagCommand.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
+            if (!tags.TryGetValue(tagRow.TransactionId, out List<ImportTagRecord>? list))
             {
-                if (!tags.TryGetValue(reader.GetGuid(0), out var list))
-                {
-                    list = [];
-                    tags[reader.GetGuid(0)] = list;
-                }
-                list.Add(new ImportTagRecord(reader.GetGuid(1), reader.GetString(2)));
+                list = [];
+                tags[tagRow.TransactionId] = list;
             }
+            list.Add(new ImportTagRecord(tagRow.Id, tagRow.DisplayName));
         }
 
-        return rows.Select(row => new ImportStatementRowRecord(row.Id, row.SourceRowNumber, row.SourcePage, row.Date, row.Description, row.Cents, row.Hidden, row.EffectiveHidden, tags.GetValueOrDefault(row.Id) ?? [])).ToArray();
+        return rows
+            .Select(row => new ImportStatementRowRecord(
+                row.Id,
+                row.SourceRowNumber,
+                row.SourcePage,
+                row.TransactionDate,
+                row.Description,
+                (long)(row.Amount * 100m),
+                row.IsHiddenByUser,
+                row.StatementHidden || row.IsHiddenByUser,
+                tags.GetValueOrDefault(row.Id) ?? []))
+            .ToArray();
     }
 
-    private static async Task<IReadOnlyList<(Guid Id, string[] Tokens)>> LoadActiveTagsAsync(NpgsqlConnection connection,
-                                                                                             NpgsqlTransaction transaction,
+    private static async Task<IReadOnlyList<(Guid Id, string[] Tokens)>> LoadActiveTagsAsync(ArgusDbContext context,
                                                                                              Guid customerId,
                                                                                              CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT id, normalized_name
-            FROM merchant_tags
-            WHERE customer_id = @customer_id AND is_archived = FALSE
-            ORDER BY normalized_name, id
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        var tags = new List<(Guid Id, string[] Tokens)>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            tags.Add((reader.GetGuid(0), reader.GetString(1).Split(' ', StringSplitOptions.RemoveEmptyEntries)));
-        }
+        var rows = await context.MerchantTags
+            .AsNoTracking()
+            .Where(tag => tag.CustomerId == customerId && !tag.IsArchived)
+            .OrderBy(tag => tag.NormalizedName)
+            .ThenBy(tag => tag.Id)
+            .Select(tag => new { tag.Id, tag.NormalizedName })
+            .ToListAsync(cancellationToken);
 
-        return tags;
+        return rows
+            .Select(tag => (tag.Id, tag.NormalizedName.Split(' ', StringSplitOptions.RemoveEmptyEntries)))
+            .ToList();
     }
 
-    private static async Task<Guid?> FindSystemCategoryAsync(NpgsqlConnection connection,
-                                                             NpgsqlTransaction transaction,
+    private static async Task<Guid?> FindSystemCategoryAsync(ArgusDbContext context,
                                                              Guid customerId,
                                                              CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT id FROM categories WHERE customer_id = @customer_id AND is_system = TRUE";
-        command.Parameters.AddWithValue("customer_id", customerId);
-
-        return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
+        return await context.Categories
+            .Where(category => category.CustomerId == customerId && category.IsSystem)
+            .Select(category => (Guid?)category.Id)
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
-    private static async Task<bool> TagsAvailableAsync(NpgsqlConnection connection,
-                                                       NpgsqlTransaction transaction,
+    private static async Task<bool> TagsAvailableAsync(ArgusDbContext context,
                                                        Guid customerId,
                                                        Guid[] tagIds,
                                                        CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
+        List<Guid> available = await context.Database.SqlQuery<Guid>($"""
             SELECT id FROM merchant_tags
-            WHERE customer_id = @customer_id AND id = ANY(@ids) AND is_archived = FALSE
+            WHERE customer_id = {customerId} AND id = ANY({tagIds}) AND is_archived = FALSE
             ORDER BY id
             FOR UPDATE
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("ids", tagIds);
-        int available = 0;
-        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            available++;
-        }
+            """).ToListAsync(cancellationToken);
 
-        return available == tagIds.Length;
+        return available.Count == tagIds.Length;
     }
 
-    private static async Task<bool> CategorySelectableAsync(NpgsqlConnection connection,
-                                                            NpgsqlTransaction? transaction,
+    private static async Task<bool> CategorySelectableAsync(ArgusDbContext context,
                                                             Guid customerId,
                                                             Guid categoryId,
                                                             CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT 1 FROM categories
-            WHERE customer_id = @customer_id AND id = @id
-              AND is_archived = FALSE AND is_system = FALSE
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("id", categoryId);
-
-        return await command.ExecuteScalarAsync(cancellationToken) is not null;
+        return await context.Categories
+            .AnyAsync(
+                category => category.CustomerId == customerId &&
+                            category.Id == categoryId &&
+                            !category.IsArchived &&
+                            !category.IsSystem,
+                cancellationToken);
     }
 
-    private static async Task<bool> CategoriesSelectableAsync(NpgsqlConnection connection,
-                                                              NpgsqlTransaction transaction,
+    private static async Task<bool> CategoriesSelectableAsync(ArgusDbContext context,
                                                               Guid customerId,
                                                               Guid[] categoryIds,
                                                               CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
+        List<Guid> available = await context.Database.SqlQuery<Guid>($"""
             SELECT id FROM categories
-            WHERE customer_id = @customer_id AND id = ANY(@ids)
+            WHERE customer_id = {customerId} AND id = ANY({categoryIds})
               AND is_archived = FALSE AND is_system = FALSE
             ORDER BY id
             FOR SHARE
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("ids", categoryIds);
-        int available = 0;
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            available++;
-        }
+            """).ToListAsync(cancellationToken);
 
-        return available == categoryIds.Length;
+        return available.Count == categoryIds.Length;
     }
 
-    private static async Task<IReadOnlyList<Guid>> FingerprintMatchesAsync(NpgsqlConnection connection,
-                                                                           NpgsqlTransaction transaction,
+    private static async Task<IReadOnlyList<Guid>> FingerprintMatchesAsync(ArgusDbContext context,
                                                                            Guid customerId,
                                                                            Guid accountId,
                                                                            string fingerprint,
                                                                            CancellationToken cancellationToken)
     {
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT id FROM statement_imports
-            WHERE customer_id = @customer_id AND financial_account_id = @account_id
-              AND statement_fingerprint = @fingerprint
-            ORDER BY created_at, id
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("account_id", accountId);
-        command.Parameters.AddWithValue("fingerprint", fingerprint);
-        var ids = new List<Guid>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            ids.Add(reader.GetGuid(0));
-        }
-
-        return ids;
+        return await context.StatementImports
+            .AsNoTracking()
+            .Where(statement => statement.CustomerId == customerId &&
+                                statement.FinancialAccountId == accountId &&
+                                statement.StatementFingerprint == fingerprint)
+            .OrderBy(statement => statement.CreatedAt)
+            .ThenBy(statement => statement.Id)
+            .Select(statement => statement.Id)
+            .ToListAsync(cancellationToken);
     }
 
-    private static async Task<int> NextFingerprintOccurrenceAsync(NpgsqlConnection connection,
-                                                                  NpgsqlTransaction transaction,
+    private static async Task<int> NextFingerprintOccurrenceAsync(ArgusDbContext context,
                                                                   Guid customerId,
                                                                   Guid accountId,
                                                                   string fingerprint,
                                                                   CancellationToken cancellationToken)
     {
-        await using NpgsqlCommand command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT COALESCE(MAX(fingerprint_occurrence), 0) + 1
-            FROM statement_imports
-            WHERE customer_id = @customer_id AND financial_account_id = @account_id
-              AND statement_fingerprint = @fingerprint
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("account_id", accountId);
-        command.Parameters.AddWithValue("fingerprint", fingerprint);
+        int? max = await context.StatementImports
+            .Where(statement => statement.CustomerId == customerId &&
+                                statement.FinancialAccountId == accountId &&
+                                statement.StatementFingerprint == fingerprint)
+            .MaxAsync(statement => (int?)statement.FingerprintOccurrence, cancellationToken);
 
-        return (int)(await command.ExecuteScalarAsync(cancellationToken))!;
+        return (max ?? 0) + 1;
     }
 
-    private static async Task<Dictionary<string, int>> MaxOccurrencesAsync(NpgsqlConnection connection,
-                                                                           NpgsqlTransaction transaction,
+    private static async Task<Dictionary<string, int>> MaxOccurrencesAsync(ArgusDbContext context,
                                                                            Guid customerId,
                                                                            Guid accountId,
                                                                            string[] identityKeys,
@@ -3363,22 +3105,17 @@ public sealed class StatementImportStore
             return result;
         }
 
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT identity_key, MAX(occurrence_index)
-            FROM transactions
-            WHERE customer_id = @customer_id AND financial_account_id = @account_id
-              AND identity_key = ANY(@keys)
-            GROUP BY identity_key
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("account_id", accountId);
-        command.Parameters.AddWithValue("keys", identityKeys);
-        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        var rows = await context.Transactions
+            .AsNoTracking()
+            .Where(transaction => transaction.CustomerId == customerId &&
+                                  transaction.FinancialAccountId == accountId &&
+                                  identityKeys.Contains(transaction.IdentityKey))
+            .GroupBy(transaction => transaction.IdentityKey)
+            .Select(group => new { IdentityKey = group.Key, MaxIndex = group.Max(transaction => transaction.OccurrenceIndex) })
+            .ToListAsync(cancellationToken);
+        foreach (var row in rows)
         {
-            result[reader.GetString(0)] = reader.GetInt32(1);
+            result[row.IdentityKey] = row.MaxIndex;
         }
 
         return result;
@@ -3479,4 +3216,116 @@ public sealed class StatementImportStore
                                         string ResultJson,
                                         string? DeletionDigest,
                                         long? DeletionExpectedCount);
+
+    private sealed class AccountLockRow
+    {
+        public Guid Id { get; set; }
+        public string DisplayName { get; set; } = string.Empty;
+        public string Currency { get; set; } = string.Empty;
+        public bool IsArchived { get; set; }
+        public long ImportVersion { get; set; }
+    }
+
+    private sealed class QuotaUsageRow
+    {
+        public long OpenReviews { get; set; }
+        public long UsedPayload { get; set; }
+    }
+
+    private sealed class ReviewHeaderRow
+    {
+        public Guid Id { get; set; }
+        public Guid FinancialAccountId { get; set; }
+        public string SourceKind { get; set; } = string.Empty;
+        public DateOnly? StartDate { get; set; }
+        public DateOnly? EndDate { get; set; }
+        public int Version { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public DateTime ExpiresAt { get; set; }
+        public long AccountImportVersion { get; set; }
+        public string StatementFingerprint { get; set; } = string.Empty;
+        public string SummaryHash { get; set; } = string.Empty;
+        public int TotalRows { get; set; }
+        public int ImportedCount { get; set; }
+        public int SuppressedCount { get; set; }
+        public int SkippedCount { get; set; }
+        public int InvalidUnskippedCount { get; set; }
+        public int WithinFilePendingCount { get; set; }
+        public int PossibleDuplicateCount { get; set; }
+        public int ExactOverrideCount { get; set; }
+        public int CategorisedCount { get; set; }
+        public bool StatementOverride { get; set; }
+        public int StatementOverrideCount { get; set; }
+        public long PayloadBytes { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
+    }
+
+    private sealed class ReviewRowText
+    {
+        public Guid RowId { get; set; }
+        public int SourceLine { get; set; }
+        public int? SourcePage { get; set; }
+        public int SourceRowNumber { get; set; }
+        public string RawValues { get; set; } = "{}";
+        public DateOnly? TransactionDate { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public string NormalizedDescription { get; set; } = string.Empty;
+        public long? AmountCents { get; set; }
+        public string ValidationCodes { get; set; } = "[]";
+        public string Warnings { get; set; } = "[]";
+        public string? SourceIdNamespace { get; set; }
+        public string? SourceIdValue { get; set; }
+        public string DuplicateState { get; set; } = string.Empty;
+        public string DuplicateReasons { get; set; } = "[]";
+        public string MatchingTransactionIds { get; set; } = "[]";
+        public string MatchingImportIds { get; set; } = "[]";
+        public string NearCandidates { get; set; } = "[]";
+        public int NearCandidateTotal { get; set; }
+        public string? WithinFileGroup { get; set; }
+        public string WithinFileState { get; set; } = string.Empty;
+        public bool Skip { get; set; }
+        public bool Override { get; set; }
+        public string SuggestedTagIds { get; set; } = "[]";
+        public string SelectedTagIds { get; set; } = "[]";
+        public Guid? SuggestedCategoryId { get; set; }
+        public Guid? SelectedCategoryId { get; set; }
+        public bool CategoryDecided { get; set; }
+    }
+
+    private sealed class ReceiptRow
+    {
+        public Guid Id { get; set; }
+        public Guid CustomerId { get; set; }
+        public Guid OperationId { get; set; }
+        public Guid FinancialAccountId { get; set; }
+        public string RequestDigest { get; set; } = string.Empty;
+        public string State { get; set; } = string.Empty;
+        public Guid? StatementImportId { get; set; }
+        public string ResultJson { get; set; } = "{}";
+        public string? DeletionDigest { get; set; }
+        public long? DeletionExpectedCount { get; set; }
+    }
+
+    private sealed class StatementSummaryRow
+    {
+        public Guid Id { get; set; }
+        public Guid FinancialAccountId { get; set; }
+        public string SourceType { get; set; } = string.Empty;
+        public string StatementLabel { get; set; } = string.Empty;
+        public DateOnly StartDate { get; set; }
+        public DateOnly EndDate { get; set; }
+        public int TotalRows { get; set; }
+        public int ImportedCount { get; set; }
+        public int SuppressedCount { get; set; }
+        public int SkippedCount { get; set; }
+        public int PossibleDuplicateCount { get; set; }
+        public int ExactOverrideCount { get; set; }
+        public int StatementOverrideCount { get; set; }
+        public bool IsHidden { get; set; }
+        public int Version { get; set; }
+        public long LiveHiddenCount { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
+    }
 }

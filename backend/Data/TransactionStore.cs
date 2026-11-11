@@ -3,10 +3,12 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using argus.Server.Data.Entities;
 using argus.Server.Finance;
 using argus.Server.Transactions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
-using NpgsqlTypes;
 
 namespace argus.Server.Data;
 
@@ -15,58 +17,32 @@ namespace argus.Server.Data;
 /// scoped by the authenticated customer id; foreign and unknown identifiers
 /// are indistinguishable.
 /// </summary>
-public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
+public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFactory, ITransactionFaultInjector faults)
 {
     private static readonly JsonSerializerOptions _storedJson = new(JsonSerializerDefaults.Web)
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     };
+
+    private const int ManifestInsertBatchSize = 5_000;
+
+    private readonly IDbContextFactory<ArgusDbContext> _contextFactory = contextFactory;
+    private readonly ITransactionFaultInjector _faults = faults;
+
     // --- Queries -----------------------------------------------------------
 
     public async Task<TransactionPageResult> QueryAsync(Guid customerId, TransactionQueryPlan plan, CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
-        await SetReadOnlyAsync(connection, transaction, cancellationToken);
-        await ValidateFilterOwnershipAsync(connection, transaction, customerId, plan.Filter, cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
+        await SetReadOnlyAsync(context, cancellationToken);
+        await ValidateFilterOwnershipAsync(context, customerId, plan.Filter, cancellationToken);
 
-        long visible = 0L;
-        long hidden = 0L;
-        await using (var counts = connection.CreateCommand())
-        {
-            counts.Transaction = transaction;
-            string where = TransactionSql.BuildWhere(plan.Filter, counts, includeVisibility: false);
-            counts.CommandText = $"""
-                SELECT
-                    COUNT(*) FILTER (WHERE NOT (s.is_hidden OR t.is_hidden_by_user)),
-                    COUNT(*) FILTER (WHERE (s.is_hidden OR t.is_hidden_by_user))
-                FROM transactions t
-                {TransactionSql.Joins}
-                WHERE {where}
-                """;
-            counts.Parameters.AddWithValue("customer_id", customerId);
-            await using var reader = await counts.ExecuteReaderAsync(cancellationToken);
-            if (await reader.ReadAsync(cancellationToken))
-            {
-                visible = reader.GetInt64(0);
-                hidden = reader.GetInt64(1);
-            }
-        }
-
-        long inventory;
-        await using (var inventoryCommand = connection.CreateCommand())
-        {
-            inventoryCommand.Transaction = transaction;
-            inventoryCommand.CommandText = "SELECT COUNT(*) FROM transactions WHERE customer_id = @customer_id";
-            inventoryCommand.Parameters.AddWithValue("customer_id", customerId);
-            inventory = (long)(await inventoryCommand.ExecuteScalarAsync(cancellationToken))!;
-        }
+        (long visible, long hidden) = await TransactionQuery.CountsAsync(context, customerId, plan.Filter, cancellationToken);
+        long inventory = await context.Transactions
+            .LongCountAsync(item => item.CustomerId == customerId, cancellationToken);
 
         long offset = (long)(plan.Page - 1) * plan.PageSize;
-        var rows = await ReadRowsAsync(connection, transaction, customerId, plan.Filter, TransactionSql.OrderClause(plan.SortBy, plan.SortDirection), plan.PageSize, offset, includeVisibility: true, cancellationToken);
-
-        await transaction.CommitAsync(cancellationToken);
-
         long matchingTotal = visible + hidden;
         long filteredTotal = plan.Filter.Visibility switch
         {
@@ -75,27 +51,35 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             _ => matchingTotal,
         };
 
+        // Compare the 64-bit offset with the filtered total before EF's
+        // 32-bit Skip. A page beyond the customer's inventory is empty; it
+        // must never wrap to another page or fail on a negative value.
+        List<RowData> rows = offset >= filteredTotal
+            ? []
+            : await ReadRowsAsync(context, customerId, plan.Filter, plan.SortBy, plan.SortDirection, plan.PageSize, offset, includeVisibility: true, cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
+
         return new TransactionPageResult(rows.Select(row => row.Response).ToArray(), inventory, visible, hidden, matchingTotal, filteredTotal, plan.Page, plan.PageSize, plan.SortBy, plan.SortDirection);
     }
 
     public async Task<TransactionDetailResult> GetAsync(Guid customerId, Guid transactionId, CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
-        await SetReadOnlyAsync(connection, transaction, cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
+        await SetReadOnlyAsync(context, cancellationToken);
 
-        var rows = await ReadRowsByIdsAsync(connection, transaction, customerId, [transactionId], cancellationToken);
+        var rows = await ReadRowsByIdsAsync(context, customerId, [transactionId], cancellationToken);
         if (rows.Count == 0)
         {
             throw new TransactionStoreException(TransactionErrorCodes.NotFound);
         }
 
         var row = rows[0];
-        var activeTags = await LoadActiveTagsAsync(connection, transaction, customerId, cancellationToken);
+        var activeTags = await LoadActiveTagsAsync(context, customerId, cancellationToken);
         string? merchantKey = MerchantKey.FromDescription(row.NormalizedDescription);
         SuggestionData suggestionData = await SuggestionLoader.LoadAsync(
-            connection,
-            transaction,
+            context,
             customerId,
             merchantKey is null ? [] : [merchantKey],
             cancellationToken);
@@ -108,7 +92,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         bool hasMore = matches.Length > TransactionLimits.MaxSuggestions;
         var suggested = matches.Take(TransactionLimits.MaxSuggestions).Select(id => activeTags.First(tag => tag.Id == id)).Select(tag => new TransactionTagRef(tag.Id, tag.DisplayName, false)).ToArray();
         TransactionCategoryRef? suggestedCategory = suggestion.CategoryId is Guid categoryId
-            ? await ReadCategoryRefAsync(connection, transaction, customerId, categoryId, cancellationToken)
+            ? await ReadCategoryRefAsync(context, customerId, categoryId, cancellationToken)
             : null;
 
         await transaction.CommitAsync(cancellationToken);
@@ -124,49 +108,49 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                                                             TransactionAction action,
                                                             CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var transaction = await BeginWorkspaceTransactionAsync(connection, cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await BeginWorkspaceAsync(context, IsolationLevel.ReadCommitted, cancellationToken);
 
-        var accountId = await TransactionAccountIdAsync(connection, transaction, customerId, transactionId, cancellationToken);
+        var accountId = await TransactionAccountIdAsync(context, customerId, transactionId, cancellationToken);
         if (accountId is null)
         {
             throw new TransactionStoreException(TransactionErrorCodes.NotFound);
         }
 
-        if (!await LockAccountRowAsync(connection, transaction, customerId, accountId.Value, cancellationToken))
+        if (!await LockAccountRowAsync(context, customerId, accountId.Value, cancellationToken))
         {
             throw new TransactionStoreException(TransactionErrorCodes.NotFound);
         }
 
-        await ValidateActionTargetsAsync(connection, transaction, customerId, action, lockForShare: true, cancellationToken);
+        await ValidateActionTargetsAsync(context, customerId, action, lockForShare: true, cancellationToken);
 
-        if (!await LockTransactionRowAsync(connection, transaction, customerId, transactionId, cancellationToken))
+        if (!await LockTransactionRowAsync(context, customerId, transactionId, cancellationToken))
         {
             throw new TransactionStoreException(TransactionErrorCodes.NotFound);
         }
 
-        var member = await ReadMemberByIdAsync(connection, transaction, customerId, transactionId, cancellationToken) ?? throw new TransactionStoreException(TransactionErrorCodes.NotFound);
+        var member = await ReadMemberByIdAsync(context, customerId, transactionId, cancellationToken) ?? throw new TransactionStoreException(TransactionErrorCodes.NotFound);
         if (member.Version != expectedVersion)
         {
             throw new TransactionStoreException(TransactionErrorCodes.VersionConflict);
         }
 
-        await EnsureRestoreAllowedAsync(connection, transaction, customerId, [member], action, cancellationToken);
+        await EnsureRestoreAllowedAsync(context, customerId, [member], action, cancellationToken);
         ValidateTagLimit(member, action);
         bool changed = IsChanged(member, action);
 
         if (changed)
         {
-            await UpdateMembersAsync(connection, transaction, customerId, [member.Id], action, cancellationToken);
-            faults.OnStep(TransactionFaultPoints.AfterTransactionUpdate);
+            await UpdateMembersAsync(context, customerId, [member.Id], action, cancellationToken);
+            _faults.OnStep(TransactionFaultPoints.AfterTransactionUpdate);
             if (action.AddTagIds.Length > 0 || action.RemoveTagIds.Length > 0)
             {
-                await MutateTagLinksAsync(connection, transaction, customerId, [member.Id], action, cancellationToken);
-                faults.OnStep(TransactionFaultPoints.AfterTagLinkMutation);
+                await MutateTagLinksAsync(context, customerId, [member.Id], action, cancellationToken);
+                _faults.OnStep(TransactionFaultPoints.AfterTagLinkMutation);
             }
         }
 
-        var rows = await ReadRowsByIdsAsync(connection, transaction, customerId, [transactionId], cancellationToken);
+        var rows = await ReadRowsByIdsAsync(context, customerId, [transactionId], cancellationToken);
         if (rows.Count == 0)
         {
             throw new TransactionStoreException(TransactionErrorCodes.NotFound);
@@ -192,18 +176,19 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             {
                 return await PrepareOnceAsync(customerId, operationId, selection, action, requestDigest, cancellationToken);
             }
-            catch (PostgresException exception) when (
-                exception.SqlState is PostgresErrorCodes.SerializationFailure or
-                    PostgresErrorCodes.DeadlockDetected)
+            catch (Exception exception) when (
+                PersistenceErrors.FindPostgresException(exception) is { } postgres &&
+                postgres.SqlState is PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected)
             {
                 if (attempt == 2)
                 {
                     throw new TransactionStoreException(TransactionErrorCodes.OperationBusy);
                 }
             }
-            catch (PostgresException exception) when (
-                exception.SqlState == PostgresErrorCodes.UniqueViolation &&
-                string.Equals(exception.ConstraintName, "transaction_operations_pkey", StringComparison.Ordinal))
+            catch (Exception exception) when (
+                PersistenceErrors.FindPostgresException(exception) is { } postgres &&
+                postgres.SqlState == PostgresErrorCodes.UniqueViolation &&
+                string.Equals(postgres.ConstraintName, "transaction_operations_pkey", StringComparison.Ordinal))
             {
                 var raced = await ReadExistingOperationAsync(customerId, operationId, requestDigest, cancellationToken);
                 if (raced is not null)
@@ -225,12 +210,12 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                                                                              string requestDigest,
                                                                              CancellationToken cancellationToken)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var transaction = await BeginWorkspaceTransactionAsync(connection, cancellationToken, IsolationLevel.Serializable);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await BeginWorkspaceAsync(context, IsolationLevel.Serializable, cancellationToken);
 
-        await LockCustomerAsync(connection, transaction, customerId, cancellationToken);
+        await LockCustomerAsync(context, customerId, cancellationToken);
 
-        var existing = await ReadHeaderAsync(connection, transaction, customerId, operationId, forUpdate: false, cancellationToken);
+        var existing = await ReadHeaderAsync(context, customerId, operationId, forUpdate: false, cancellationToken);
         if (existing is not null)
         {
             if (!string.Equals(existing.RequestDigest, requestDigest, StringComparison.Ordinal))
@@ -240,15 +225,15 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
 
             if (existing.Status == "Prepared")
             {
-                if (await IsExpiredAsync(connection, transaction, existing.ExpiresAt, cancellationToken))
+                if (await IsExpiredAsync(context, existing.ExpiresAt, cancellationToken))
                 {
-                    await ExpireHeaderAsync(connection, transaction, customerId, operationId, cancellationToken);
-                    var expired = await ReadHeaderAsync(connection, transaction, customerId, operationId, forUpdate: false, cancellationToken) ?? throw new TransactionStoreException(TransactionErrorCodes.NotFound);
+                    await ExpireHeaderAsync(context, customerId, operationId, cancellationToken);
+                    var expired = await ReadHeaderAsync(context, customerId, operationId, forUpdate: false, cancellationToken) ?? throw new TransactionStoreException(TransactionErrorCodes.NotFound);
                     await transaction.CommitAsync(cancellationToken);
                     return new TransactionOperationPrepareResponse(TerminalSummary(expired), false);
                 }
 
-                var replay = await BuildPreparedSummaryAsync(connection, transaction, existing, cancellationToken);
+                var replay = await BuildPreparedSummaryAsync(context, existing, cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
                 return new TransactionOperationPrepareResponse(replay, false);
             }
@@ -257,14 +242,14 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             return new TransactionOperationPrepareResponse(TerminalSummary(existing), false);
         }
 
-        var targets = await ValidateActionTargetsAsync(connection, transaction, customerId, action, lockForShare: false, cancellationToken);
+        var targets = await ValidateActionTargetsAsync(context, customerId, action, lockForShare: false, cancellationToken);
 
         List<MemberRow> members;
         string? filterDigest = null;
         if (selection.Mode == "explicit")
         {
             var ids = selection.ExplicitMembers.Select(member => member.Id).ToArray();
-            members = await ReadMembersAsync(connection, transaction, customerId, ids, cancellationToken);
+            members = await ReadMembersAsync(context, customerId, ids, cancellationToken);
             if (members.Count != ids.Length)
             {
                 throw new TransactionStoreException(TransactionErrorCodes.NotFound);
@@ -280,9 +265,9 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         }
         else
         {
-            await ValidateFilterOwnershipAsync(connection, transaction, customerId, selection.Filters!, cancellationToken);
+            await ValidateFilterOwnershipAsync(context, customerId, selection.Filters!, cancellationToken);
             filterDigest = Sha256(selection.Filters!.Canonical());
-            members = await CaptureMatchingMembersAsync(connection, transaction, customerId, selection.Filters!, TransactionLimits.MaxAllMatching + 1, cancellationToken);
+            members = await CaptureMatchingMembersAsync(context, customerId, selection.Filters!, TransactionLimits.MaxAllMatching + 1, cancellationToken);
             if (members.Count > TransactionLimits.MaxAllMatching)
             {
                 throw new TransactionStoreException(TransactionErrorCodes.SelectionTooLarge);
@@ -294,7 +279,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             throw new TransactionStoreException(TransactionErrorCodes.EmptySelection);
         }
 
-        await EnsureRestoreAllowedAsync(connection, transaction, customerId, members, action, cancellationToken);
+        await EnsureRestoreAllowedAsync(context, customerId, members, action, cancellationToken);
         foreach (var member in members)
         {
             ValidateTagLimit(member, action);
@@ -303,15 +288,15 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         int changed = members.Count(member => IsChanged(member, action));
         int unchanged = members.Count - changed;
 
-        await CheckQuotaAsync(connection, transaction, customerId, members.Count, cancellationToken);
+        await CheckQuotaAsync(context, customerId, members.Count, cancellationToken);
 
-        var (capturedAt, expiresAt) = await ReadOperationClockAsync(connection, transaction, cancellationToken);
+        var (capturedAt, expiresAt) = await ReadOperationClockAsync(context, cancellationToken);
         string membersDigest = MembersDigest(members.Select(member => (member.Id, member.Version)));
         string targetCanonical = TargetsCanonical(targets.Stored);
         string confirmationHash = ConfirmationHash(customerId, operationId, selection.Mode, membersDigest, action, targetCanonical, capturedAt, expiresAt, members.Count, changed, unchanged);
 
-        await InsertHeaderAsync(connection, transaction, customerId, operationId, selection.Mode, requestDigest, filterDigest, confirmationHash, action, targets.Stored, members.Count, changed, unchanged, capturedAt, expiresAt, cancellationToken);
-        await InsertManifestAsync(connection, transaction, customerId, operationId, members, cancellationToken);
+        await InsertHeaderAsync(context, customerId, operationId, selection.Mode, requestDigest, filterDigest, confirmationHash, action, targets.Stored, members.Count, changed, unchanged, capturedAt, expiresAt, cancellationToken);
+        await InsertManifestAsync(context, customerId, operationId, members, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         var summary = new TransactionOperationSummaryResponse(
@@ -338,13 +323,13 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
     }
 
     private async Task<TransactionOperationPrepareResponse?> ReadExistingOperationAsync(Guid customerId,
-                                                                                        Guid operationId,
-                                                                                        string requestDigest,
-                                                                                        CancellationToken cancellationToken)
+                                                                                         Guid operationId,
+                                                                                         string requestDigest,
+                                                                                         CancellationToken cancellationToken)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var transaction = await BeginWorkspaceTransactionAsync(connection, cancellationToken);
-        var header = await ReadHeaderAsync(connection, transaction, customerId, operationId, forUpdate: true, cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await BeginWorkspaceAsync(context, IsolationLevel.ReadCommitted, cancellationToken);
+        var header = await ReadHeaderAsync(context, customerId, operationId, forUpdate: true, cancellationToken);
         if (header is null)
         {
             await transaction.CommitAsync(cancellationToken);
@@ -356,16 +341,16 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             return null;
         }
 
-        if (header.Status == "Prepared" && await IsExpiredAsync(connection, transaction, header.ExpiresAt, cancellationToken))
+        if (header.Status == "Prepared" && await IsExpiredAsync(context, header.ExpiresAt, cancellationToken))
         {
-            await ExpireHeaderAsync(connection, transaction, customerId, operationId, cancellationToken);
-            header = await ReadHeaderAsync(connection, transaction, customerId, operationId, forUpdate: false, cancellationToken) ?? throw new TransactionStoreException(TransactionErrorCodes.NotFound);
+            await ExpireHeaderAsync(context, customerId, operationId, cancellationToken);
+            header = await ReadHeaderAsync(context, customerId, operationId, forUpdate: false, cancellationToken) ?? throw new TransactionStoreException(TransactionErrorCodes.NotFound);
         }
 
         TransactionOperationSummaryResponse summary;
         if (header.Status == "Prepared")
         {
-            summary = await BuildPreparedSummaryAsync(connection, transaction, header, cancellationToken);
+            summary = await BuildPreparedSummaryAsync(context, header, cancellationToken);
         }
         else
         {
@@ -380,22 +365,22 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
 
     public async Task<TransactionOperationSummaryResponse> StatusAsync(Guid customerId, Guid operationId, CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var transaction = await BeginWorkspaceTransactionAsync(connection, cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await BeginWorkspaceAsync(context, IsolationLevel.ReadCommitted, cancellationToken);
 
-        var header = await ReadHeaderAsync(connection, transaction, customerId, operationId, forUpdate: true, cancellationToken);
+        var header = await ReadHeaderAsync(context, customerId, operationId, forUpdate: true, cancellationToken);
         if (header is null)
         {
             throw new TransactionStoreException(TransactionErrorCodes.NotFound);
         }
 
-        if (header.Status == "Prepared" && await IsExpiredAsync(connection, transaction, header.ExpiresAt, cancellationToken))
+        if (header.Status == "Prepared" && await IsExpiredAsync(context, header.ExpiresAt, cancellationToken))
         {
-            await ExpireHeaderAsync(connection, transaction, customerId, operationId, cancellationToken);
-            header = await ReadHeaderAsync(connection, transaction, customerId, operationId, forUpdate: true, cancellationToken) ?? throw new TransactionStoreException(TransactionErrorCodes.NotFound);
+            await ExpireHeaderAsync(context, customerId, operationId, cancellationToken);
+            header = await ReadHeaderAsync(context, customerId, operationId, forUpdate: true, cancellationToken) ?? throw new TransactionStoreException(TransactionErrorCodes.NotFound);
         }
 
-        var summary = header.Status == "Prepared" ? await BuildPreparedSummaryAsync(connection, transaction, header, cancellationToken) : TerminalSummary(header);
+        var summary = header.Status == "Prepared" ? await BuildPreparedSummaryAsync(context, header, cancellationToken) : TerminalSummary(header);
         await transaction.CommitAsync(cancellationToken);
 
         return summary;
@@ -407,10 +392,10 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                                                                     int expectedSelectedCount,
                                                                     CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var transaction = await BeginWorkspaceTransactionAsync(connection, cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await BeginWorkspaceAsync(context, IsolationLevel.ReadCommitted, cancellationToken);
 
-        var header = await ReadHeaderAsync(connection, transaction, customerId, operationId, forUpdate: false, cancellationToken);
+        var header = await ReadHeaderAsync(context, customerId, operationId, forUpdate: false, cancellationToken);
         if (header is null)
         {
             throw new TransactionStoreException(TransactionErrorCodes.NotFound);
@@ -425,17 +410,17 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         {
             throw TerminalState(header.Status);
         }
-        var manifest = await ReadManifestAsync(connection, transaction, customerId, operationId, cancellationToken);
+        var manifest = await ReadManifestAsync(context, customerId, operationId, cancellationToken);
         var accounts = manifest.Select(item => item.AccountId).Distinct().Order().ToArray();
         foreach (var accountId in accounts)
         {
-            if (!await LockAccountRowAsync(connection, transaction, customerId, accountId, cancellationToken))
+            if (!await LockAccountRowAsync(context, customerId, accountId, cancellationToken))
             {
                 throw new TransactionStoreException(TransactionErrorCodes.SelectionStale, new Dictionary<string, object?> { ["stale_count"] = 0, ["missing_count"] = manifest.Count, });
             }
         }
 
-        header = await ReadHeaderAsync(connection, transaction, customerId, operationId, forUpdate: true, cancellationToken);
+        header = await ReadHeaderAsync(context, customerId, operationId, forUpdate: true, cancellationToken);
         if (header is null)
         {
             throw new TransactionStoreException(TransactionErrorCodes.NotFound);
@@ -449,9 +434,9 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         {
             throw TerminalState(header.Status);
         }
-        if (await IsExpiredAsync(connection, transaction, header.ExpiresAt, cancellationToken))
+        if (await IsExpiredAsync(context, header.ExpiresAt, cancellationToken))
         {
-            await ExpireHeaderAsync(connection, transaction, customerId, operationId, cancellationToken);
+            await ExpireHeaderAsync(context, customerId, operationId, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             throw new TransactionStoreException(TransactionErrorCodes.OperationExpired);
         }
@@ -480,11 +465,11 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             throw new TransactionStoreException(TransactionErrorCodes.IdempotencyConflict);
         }
 
-        await LockAndValidateTargetsAsync(connection, transaction, customerId, action, storedTargets, cancellationToken);
+        await LockAndValidateTargetsAsync(context, customerId, action, storedTargets, cancellationToken);
 
         var memberIds = manifest.Select(item => item.TransactionId).Order().ToArray();
-        await LockTransactionRowsAsync(connection, transaction, customerId, memberIds, cancellationToken);
-        var members = await ReadMembersAsync(connection, transaction, customerId, memberIds, cancellationToken);
+        await LockTransactionRowsAsync(context, customerId, memberIds, cancellationToken);
+        var members = await ReadMembersAsync(context, customerId, memberIds, cancellationToken);
         var byId = members.ToDictionary(member => member.Id);
         int missing = manifest.Count(item => !byId.ContainsKey(item.TransactionId));
         int stale = manifest.Count(item => byId.TryGetValue(item.TransactionId, out var member) && member.Version != item.Version);
@@ -493,7 +478,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             throw new TransactionStoreException(TransactionErrorCodes.SelectionStale, new Dictionary<string, object?> { ["stale_count"] = stale, ["missing_count"] = missing, });
         }
 
-        await EnsureRestoreAllowedAsync(connection, transaction, customerId, members, action, cancellationToken);
+        await EnsureRestoreAllowedAsync(context, customerId, members, action, cancellationToken);
         foreach (var member in members)
         {
             ValidateTagLimit(member, action);
@@ -508,40 +493,40 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         // Account and header checks above precede the classification and
         // transaction locks. A confirmation can expire during either later
         // wait, so use the database wall clock once more before any effects.
-        if (await IsExpiredAsync(connection, transaction, header.ExpiresAt, cancellationToken))
+        if (await IsExpiredAsync(context, header.ExpiresAt, cancellationToken))
         {
-            await ExpireHeaderAsync(connection, transaction, customerId, operationId, cancellationToken);
+            await ExpireHeaderAsync(context, customerId, operationId, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             throw new TransactionStoreException(TransactionErrorCodes.OperationExpired);
         }
 
         if (changedMembers.Length > 0)
         {
-            await UpdateMembersAsync(connection, transaction, customerId, changedMembers.Select(member => member.Id).ToArray(), action, cancellationToken);
-            faults.OnStep(TransactionFaultPoints.AfterTransactionUpdate);
+            await UpdateMembersAsync(context, customerId, changedMembers.Select(member => member.Id).ToArray(), action, cancellationToken);
+            _faults.OnStep(TransactionFaultPoints.AfterTransactionUpdate);
         }
 
         if (action.AddTagIds.Length > 0 || action.RemoveTagIds.Length > 0)
         {
-            await MutateTagLinksAsync(connection, transaction, customerId, memberIds, action, cancellationToken);
-            faults.OnStep(TransactionFaultPoints.AfterTagLinkMutation);
+            await MutateTagLinksAsync(context, customerId, memberIds, action, cancellationToken);
+            _faults.OnStep(TransactionFaultPoints.AfterTagLinkMutation);
         }
 
-        faults.OnStep(TransactionFaultPoints.BeforeReceiptWrite);
-        var appliedAt = await MarkAppliedAsync(connection, transaction, customerId, operationId, cancellationToken);
-        faults.OnStep(TransactionFaultPoints.AfterReceiptWrite);
+        _faults.OnStep(TransactionFaultPoints.BeforeReceiptWrite);
+        var appliedAt = await MarkAppliedAsync(context, customerId, operationId, cancellationToken);
+        _faults.OnStep(TransactionFaultPoints.AfterReceiptWrite);
         await transaction.CommitAsync(cancellationToken);
-        faults.OnStep(TransactionFaultPoints.AfterCommit);
+        _faults.OnStep(TransactionFaultPoints.AfterCommit);
 
         return new TransactionOperationApplyResponse(operationId, "Applied", header.SelectedCount, header.ChangedCount, header.UnchangedCount, FormatTimestamp(appliedAt), false);
     }
 
     public async Task<TransactionOperationApplyResponse> AbandonAsync(Guid customerId, Guid operationId, CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var transaction = await BeginWorkspaceTransactionAsync(connection, cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await BeginWorkspaceAsync(context, IsolationLevel.ReadCommitted, cancellationToken);
 
-        var header = await ReadHeaderAsync(connection, transaction, customerId, operationId, forUpdate: true, cancellationToken);
+        var header = await ReadHeaderAsync(context, customerId, operationId, forUpdate: true, cancellationToken);
         if (header is null)
         {
             throw new TransactionStoreException(TransactionErrorCodes.NotFound);
@@ -558,35 +543,19 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             return new TransactionOperationApplyResponse(operationId, header.Status, header.SelectedCount, header.ChangedCount, header.UnchangedCount, null, false);
         }
 
-        var abandonedAt = await ClockAsync(connection, transaction, cancellationToken);
-        await using (var purgeItems = connection.CreateCommand())
-        {
-            purgeItems.Transaction = transaction;
-            purgeItems.CommandText = """
-                DELETE FROM transaction_operation_items
-                WHERE customer_id = @customer_id AND operation_id = @operation_id
-                """;
-            purgeItems.Parameters.AddWithValue("customer_id", customerId);
-            purgeItems.Parameters.AddWithValue("operation_id", operationId);
-            await purgeItems.ExecuteNonQueryAsync(cancellationToken);
-        }
-        await using (var update = connection.CreateCommand())
-        {
-            update.Transaction = transaction;
-            update.CommandText = """
-                UPDATE transaction_operations
-                SET status = 'Abandoned',
-                    terminal_at = @terminal_at,
-                    action = '{}'::jsonb,
-                    target_stamps = '{}'::jsonb,
-                    updated_at = @terminal_at
-                WHERE customer_id = @customer_id AND operation_id = @operation_id
-                """;
-            update.Parameters.AddWithValue("terminal_at", abandonedAt);
-            update.Parameters.AddWithValue("customer_id", customerId);
-            update.Parameters.AddWithValue("operation_id", operationId);
-            await update.ExecuteNonQueryAsync(cancellationToken);
-        }
+        var abandonedAt = await ClockAsync(context, cancellationToken);
+        await context.TransactionOperationItems
+            .Where(item => item.CustomerId == customerId && item.OperationId == operationId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.Database.ExecuteSqlInterpolatedAsync($$"""
+            UPDATE transaction_operations
+            SET status = 'Abandoned',
+                terminal_at = {{abandonedAt}},
+                action = '{}'::jsonb,
+                target_stamps = '{}'::jsonb,
+                updated_at = {{abandonedAt}}
+            WHERE customer_id = {{customerId}} AND operation_id = {{operationId}}
+            """, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return new TransactionOperationApplyResponse(operationId, "Abandoned", header.SelectedCount, header.ChangedCount, header.UnchangedCount, null, false);
@@ -596,29 +565,19 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
 
     public async Task CleanupExpiredAsync(CancellationToken cancellationToken = default)
     {
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
 
-        var expired = new List<(Guid CustomerId, Guid OperationId)>();
-        await using (var select = connection.CreateCommand())
-        {
-            select.Transaction = transaction;
-            select.CommandText = """
-                SELECT customer_id, operation_id
-                FROM transaction_operations
-                WHERE status = 'Prepared' AND expires_at <= clock_timestamp()
-                ORDER BY expires_at
-                LIMIT 1000
-                FOR UPDATE
-                """;
-            await using var reader = await select.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                expired.Add((reader.GetGuid(0), reader.GetGuid(1)));
-            }
-        }
+        List<ExpiredOperationRow> expiredRows = await context.Database.SqlQueryRaw<ExpiredOperationRow>("""
+            SELECT customer_id AS "CustomerId", operation_id AS "OperationId"
+            FROM transaction_operations
+            WHERE status = 'Prepared' AND expires_at <= clock_timestamp()
+            ORDER BY expires_at
+            LIMIT 1000
+            FOR UPDATE
+            """).ToListAsync(cancellationToken);
 
-        if (expired.Count == 0)
+        if (expiredRows.Count == 0)
         {
             await transaction.CommitAsync(cancellationToken);
             return;
@@ -627,41 +586,27 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         // These arrays are parallel: an operation UUID is only unique within
         // its customer namespace. Never turn the selected pairs into a
         // Cartesian product of independently matched IDs.
-        var customerIds = expired.Select(item => item.CustomerId).ToArray();
-        var operationIds = expired.Select(item => item.OperationId).ToArray();
-        await using (var items = connection.CreateCommand())
-        {
-            items.Transaction = transaction;
-            items.CommandText = """
-                DELETE FROM transaction_operation_items i
-                USING unnest(@customer_ids, @operation_ids) AS expired(customer_id, operation_id)
-                WHERE i.customer_id = expired.customer_id
-                  AND i.operation_id = expired.operation_id
-                """;
-            items.Parameters.AddWithValue("customer_ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, customerIds);
-            items.Parameters.AddWithValue("operation_ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, operationIds);
-            await items.ExecuteNonQueryAsync(cancellationToken);
-        }
-        await using (var headers = connection.CreateCommand())
-        {
-            headers.Transaction = transaction;
-            headers.CommandText = """
-                UPDATE transaction_operations o
-                SET status = 'Expired',
-                    terminal_at = clock_timestamp(),
-                    action = '{}'::jsonb,
-                    target_stamps = '{}'::jsonb,
-                    updated_at = clock_timestamp()
-                FROM unnest(@customer_ids, @operation_ids) AS expired(customer_id, operation_id)
-                WHERE o.customer_id = expired.customer_id
-                  AND o.operation_id = expired.operation_id
-                  AND o.status = 'Prepared'
-                  AND o.expires_at <= clock_timestamp()
-                """;
-            headers.Parameters.AddWithValue("customer_ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, customerIds);
-            headers.Parameters.AddWithValue("operation_ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, operationIds);
-            await headers.ExecuteNonQueryAsync(cancellationToken);
-        }
+        var customerIds = expiredRows.Select(item => item.CustomerId).ToArray();
+        var operationIds = expiredRows.Select(item => item.OperationId).ToArray();
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            DELETE FROM transaction_operation_items i
+            USING unnest({customerIds}, {operationIds}) AS expired(customer_id, operation_id)
+            WHERE i.customer_id = expired.customer_id
+              AND i.operation_id = expired.operation_id
+            """, cancellationToken);
+        await context.Database.ExecuteSqlInterpolatedAsync($$"""
+            UPDATE transaction_operations o
+            SET status = 'Expired',
+                terminal_at = clock_timestamp(),
+                action = '{}'::jsonb,
+                target_stamps = '{}'::jsonb,
+                updated_at = clock_timestamp()
+            FROM unnest({{customerIds}}, {{operationIds}}) AS expired(customer_id, operation_id)
+            WHERE o.customer_id = expired.customer_id
+              AND o.operation_id = expired.operation_id
+              AND o.status = 'Prepared'
+              AND o.expires_at <= clock_timestamp()
+            """, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
     }
@@ -724,238 +669,246 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                                           DateTime? AppliedAt,
                                           DateTime? TerminalAt);
 
-    private static async Task<NpgsqlTransaction> BeginWorkspaceTransactionAsync(NpgsqlConnection connection, CancellationToken cancellationToken, IsolationLevel isolation = IsolationLevel.ReadCommitted)
+    private sealed class ExpiredOperationRow
     {
-        var transaction = await connection.BeginTransactionAsync(isolation, cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            SET LOCAL lock_timeout = '{TransactionLimits.LockTimeoutSeconds}s';
-            SET LOCAL statement_timeout = '{TransactionLimits.StatementTimeoutSeconds}s';
-            """;
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        public Guid CustomerId { get; set; }
+        public Guid OperationId { get; set; }
+    }
+
+    private sealed class OperationClockRow
+    {
+        public DateTime CapturedAt { get; set; }
+        public DateTime ExpiresAt { get; set; }
+    }
+
+    private sealed class OperationHeaderRow
+    {
+        public Guid CustomerId { get; set; }
+        public Guid OperationId { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public string SelectionMode { get; set; } = string.Empty;
+        public string RequestDigest { get; set; } = string.Empty;
+        public string? FilterDigest { get; set; }
+        public string? ConfirmationHash { get; set; }
+        public string ActionJson { get; set; } = "{}";
+        public string TargetJson { get; set; } = "{}";
+        public int SelectedCount { get; set; }
+        public int ChangedCount { get; set; }
+        public int UnchangedCount { get; set; }
+        public DateTime CapturedAt { get; set; }
+        public DateTime ExpiresAt { get; set; }
+        public DateTime? AppliedAt { get; set; }
+        public DateTime? TerminalAt { get; set; }
+    }
+
+    private sealed class CategoryStampRow
+    {
+        public Guid Id { get; set; }
+        public string DisplayName { get; set; } = string.Empty;
+        public string Kind { get; set; } = string.Empty;
+        public bool IsSystem { get; set; }
+        public bool IsArchived { get; set; }
+        public DateTime UpdatedAt { get; set; }
+    }
+
+    private sealed class TagStampRow
+    {
+        public Guid Id { get; set; }
+        public string DisplayName { get; set; } = string.Empty;
+        public bool IsArchived { get; set; }
+        public DateTime UpdatedAt { get; set; }
+    }
+
+    private static async Task<IDbContextTransaction> BeginWorkspaceAsync(ArgusDbContext context, IsolationLevel isolation, CancellationToken cancellationToken)
+    {
+        var transaction = await context.Database.BeginTransactionAsync(isolation, cancellationToken);
+        string settings = $"SET LOCAL lock_timeout = '{TransactionLimits.LockTimeoutSeconds}s'; SET LOCAL statement_timeout = '{TransactionLimits.StatementTimeoutSeconds}s';";
+        await context.Database.ExecuteSqlRawAsync(settings, cancellationToken);
 
         return transaction;
     }
 
-    private static async Task LockCustomerAsync(NpgsqlConnection connection,
-                                                NpgsqlTransaction transaction,
-                                                Guid customerId,
-                                                CancellationToken cancellationToken)
+    private static async Task LockCustomerAsync(ArgusDbContext context, Guid customerId, CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT 1 FROM customers WHERE id = @customer_id FOR UPDATE";
-        command.Parameters.AddWithValue("customer_id", customerId);
-        if (await command.ExecuteScalarAsync(cancellationToken) is null)
+        List<int> found = await context.Database.SqlQuery<int>($"""
+            SELECT 1 AS "Value" FROM customers WHERE id = {customerId} FOR UPDATE
+            """).ToListAsync(cancellationToken);
+        if (found.Count == 0)
         {
             throw new TransactionStoreException(TransactionErrorCodes.NotFound);
         }
     }
 
-    private static async Task<Guid?> TransactionAccountIdAsync(NpgsqlConnection connection,
-                                                               NpgsqlTransaction transaction,
+    private static async Task<Guid?> TransactionAccountIdAsync(ArgusDbContext context,
                                                                Guid customerId,
                                                                Guid transactionId,
                                                                CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT financial_account_id
-            FROM transactions
-            WHERE customer_id = @customer_id AND id = @id
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("id", transactionId);
-
-        return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
+        return await context.Transactions
+            .Where(item => item.CustomerId == customerId && item.Id == transactionId)
+            .Select(item => (Guid?)item.FinancialAccountId)
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
-    private static async Task<bool> LockAccountRowAsync(NpgsqlConnection connection,
-                                                        NpgsqlTransaction transaction,
+    private static async Task<bool> LockAccountRowAsync(ArgusDbContext context,
                                                         Guid customerId,
                                                         Guid accountId,
                                                         CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT 1 FROM financial_accounts
-            WHERE customer_id = @customer_id AND id = @id
+        List<int> found = await context.Database.SqlQuery<int>($"""
+            SELECT 1 AS "Value" FROM financial_accounts
+            WHERE customer_id = {customerId} AND id = {accountId}
             FOR UPDATE
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("id", accountId);
+            """).ToListAsync(cancellationToken);
 
-        return await command.ExecuteScalarAsync(cancellationToken) is not null;
+        return found.Count > 0;
     }
 
-    private static async Task<bool> LockTransactionRowAsync(NpgsqlConnection connection,
-                                                            NpgsqlTransaction transaction,
+    private static async Task<bool> LockTransactionRowAsync(ArgusDbContext context,
                                                             Guid customerId,
                                                             Guid transactionId,
                                                             CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT 1 FROM transactions
-            WHERE customer_id = @customer_id AND id = @id
+        List<int> found = await context.Database.SqlQuery<int>($"""
+            SELECT 1 AS "Value" FROM transactions
+            WHERE customer_id = {customerId} AND id = {transactionId}
             FOR UPDATE
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("id", transactionId);
+            """).ToListAsync(cancellationToken);
 
-        return await command.ExecuteScalarAsync(cancellationToken) is not null;
+        return found.Count > 0;
     }
 
-    private static async Task LockTransactionRowsAsync(NpgsqlConnection connection,
-                                                       NpgsqlTransaction transaction,
+    private static async Task LockTransactionRowsAsync(ArgusDbContext context,
                                                        Guid customerId,
                                                        Guid[] transactionIds,
                                                        CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
+        List<Guid> found = await context.Database.SqlQuery<Guid>($"""
             SELECT id FROM transactions
-            WHERE customer_id = @customer_id AND id = ANY(@ids)
+            WHERE customer_id = {customerId} AND id = ANY({transactionIds})
             ORDER BY id
             FOR UPDATE
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, transactionIds);
-        int found = 0;
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+            """).ToListAsync(cancellationToken);
+        if (found.Count != transactionIds.Length)
         {
-            found++;
-        }
-        if (found != transactionIds.Length)
-        {
-            throw new TransactionStoreException(TransactionErrorCodes.SelectionStale, new Dictionary<string, object?> { ["stale_count"] = 0, ["missing_count"] = transactionIds.Length - found, });
+            throw new TransactionStoreException(TransactionErrorCodes.SelectionStale, new Dictionary<string, object?> { ["stale_count"] = 0, ["missing_count"] = transactionIds.Length - found.Count, });
         }
     }
 
-    private async Task<MemberRow?> ReadMemberByIdAsync(NpgsqlConnection connection,
-                                                       NpgsqlTransaction transaction,
+    private async Task<MemberRow?> ReadMemberByIdAsync(ArgusDbContext context,
                                                        Guid customerId,
                                                        Guid transactionId,
                                                        CancellationToken cancellationToken)
     {
-        var members = await ReadMembersAsync(connection, transaction, customerId, [transactionId], cancellationToken);
+        var members = await ReadMembersAsync(context, customerId, [transactionId], cancellationToken);
 
         return members.Count == 0 ? null : members[0];
     }
 
-    private async Task<List<MemberRow>> ReadMembersAsync(NpgsqlConnection connection,
-                                                         NpgsqlTransaction transaction,
+    private async Task<List<MemberRow>> ReadMembersAsync(ArgusDbContext context,
                                                          Guid customerId,
                                                          Guid[] transactionIds,
                                                          CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT t.id, t.version, t.financial_account_id, t.statement_import_id,
-                   t.category_id, t.category_confirmed, t.is_hidden_by_user, s.is_hidden
-            FROM transactions t
-            JOIN statement_imports s
-              ON s.customer_id = t.customer_id AND s.id = t.statement_import_id
-            WHERE t.customer_id = @customer_id AND t.id = ANY(@ids)
-            ORDER BY t.id
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, transactionIds);
-
-        var rows = new List<(Guid Id, int Version, Guid AccountId, Guid StatementId, Guid CategoryId, bool CategoryConfirmed, bool HiddenByUser, bool StatementHidden)>();
-        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
-        {
-            while (await reader.ReadAsync(cancellationToken))
+        var rows = await (
+            from transaction in context.Transactions.AsNoTracking()
+            join statement in context.StatementImports
+                on new { transaction.CustomerId, Id = transaction.StatementImportId } equals new { statement.CustomerId, Id = statement.Id }
+            where transaction.CustomerId == customerId && transactionIds.Contains(transaction.Id)
+            orderby transaction.Id
+            select new
             {
-                rows.Add((reader.GetGuid(0), reader.GetInt32(1), reader.GetGuid(2), reader.GetGuid(3), reader.GetGuid(4), reader.GetBoolean(5), reader.GetBoolean(6), reader.GetBoolean(7)));
-            }
-        }
+                transaction.Id,
+                transaction.Version,
+                transaction.FinancialAccountId,
+                transaction.StatementImportId,
+                transaction.CategoryId,
+                transaction.CategoryConfirmed,
+                transaction.IsHiddenByUser,
+                StatementHidden = statement.IsHidden,
+            }).ToListAsync(cancellationToken);
 
-        var tags = await LoadMemberTagIdsAsync(connection, transaction, customerId, transactionIds, cancellationToken);
+        var tags = await LoadMemberTagIdsAsync(context, customerId, transactionIds, cancellationToken);
 
-        return rows.Select(row => new MemberRow(row.Id, row.Version, row.AccountId, row.StatementId, row.CategoryId, row.CategoryConfirmed, row.HiddenByUser, row.StatementHidden, tags.GetValueOrDefault(row.Id) ?? [])).ToList();
+        return rows.Select(row => new MemberRow(
+            row.Id,
+            row.Version,
+            row.FinancialAccountId,
+            row.StatementImportId,
+            row.CategoryId,
+            row.CategoryConfirmed,
+            row.IsHiddenByUser,
+            row.StatementHidden,
+            tags.GetValueOrDefault(row.Id) ?? [])).ToList();
     }
 
-    private async Task<List<MemberRow>> CaptureMatchingMembersAsync(NpgsqlConnection connection,
-                                                                    NpgsqlTransaction transaction,
+    private async Task<List<MemberRow>> CaptureMatchingMembersAsync(ArgusDbContext context,
                                                                     Guid customerId,
                                                                     TransactionFilter filter,
                                                                     int limit,
                                                                     CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        string where = TransactionSql.BuildWhere(filter, command, includeVisibility: true);
-        command.CommandText = $"""
-            SELECT t.id, t.version, t.financial_account_id, t.statement_import_id,
-                   t.category_id, t.category_confirmed, t.is_hidden_by_user, s.is_hidden
-            FROM transactions t
-            {TransactionSql.Joins}
-            WHERE {where}
-            ORDER BY t.id
-            LIMIT @limit
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("limit", limit);
-
-        var rows = new List<(Guid Id, int Version, Guid AccountId, Guid StatementId, Guid CategoryId, bool CategoryConfirmed, bool HiddenByUser, bool StatementHidden)>();
-        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
-        {
-            while (await reader.ReadAsync(cancellationToken))
+        var rows = await (
+            from transaction in TransactionQuery.Apply(context, customerId, filter, includeVisibility: true)
+            join statement in context.StatementImports
+                on new { transaction.CustomerId, Id = transaction.StatementImportId } equals new { statement.CustomerId, Id = statement.Id }
+            orderby transaction.Id
+            select new
             {
-                rows.Add((reader.GetGuid(0), reader.GetInt32(1), reader.GetGuid(2), reader.GetGuid(3), reader.GetGuid(4), reader.GetBoolean(5), reader.GetBoolean(6), reader.GetBoolean(7)));
-            }
-        }
+                transaction.Id,
+                transaction.Version,
+                transaction.FinancialAccountId,
+                transaction.StatementImportId,
+                transaction.CategoryId,
+                transaction.CategoryConfirmed,
+                transaction.IsHiddenByUser,
+                StatementHidden = statement.IsHidden,
+            })
+            .Take(limit)
+            .ToListAsync(cancellationToken);
 
-        var ids = rows.Select(row => row.Id).ToArray();
-        var tags = await LoadMemberTagIdsAsync(connection, transaction, customerId, ids, cancellationToken);
+        Guid[] ids = rows.Select(row => row.Id).ToArray();
+        var tags = await LoadMemberTagIdsAsync(context, customerId, ids, cancellationToken);
 
-        return rows.Select(row => new MemberRow(row.Id, row.Version, row.AccountId, row.StatementId, row.CategoryId, row.CategoryConfirmed, row.HiddenByUser, row.StatementHidden, tags.GetValueOrDefault(row.Id) ?? [])).ToList();
+        return rows.Select(row => new MemberRow(
+            row.Id,
+            row.Version,
+            row.FinancialAccountId,
+            row.StatementImportId,
+            row.CategoryId,
+            row.CategoryConfirmed,
+            row.IsHiddenByUser,
+            row.StatementHidden,
+            tags.GetValueOrDefault(row.Id) ?? [])).ToList();
     }
 
-    private static async Task<Dictionary<Guid, Guid[]>> LoadMemberTagIdsAsync(NpgsqlConnection connection,
-                                                                              NpgsqlTransaction transaction,
+    private static async Task<Dictionary<Guid, Guid[]>> LoadMemberTagIdsAsync(ArgusDbContext context,
                                                                               Guid customerId,
-                                                                              Guid[] transactionIds,
+                                                                              IReadOnlyCollection<Guid> transactionIds,
                                                                               CancellationToken cancellationToken)
     {
         var result = new Dictionary<Guid, Guid[]>();
-        if (transactionIds.Length == 0)
+        if (transactionIds.Count == 0)
         {
             return result;
         }
 
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT transaction_id, merchant_tag_id
-            FROM transaction_merchant_tags
-            WHERE customer_id = @customer_id AND transaction_id = ANY(@ids)
-            ORDER BY transaction_id, merchant_tag_id
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, transactionIds);
-
+        var rows = await context.TransactionMerchantTags
+            .AsNoTracking()
+            .Where(link => link.CustomerId == customerId && transactionIds.Contains(link.TransactionId))
+            .OrderBy(link => link.TransactionId)
+            .ThenBy(link => link.MerchantTagId)
+            .Select(link => new { link.TransactionId, link.MerchantTagId })
+            .ToListAsync(cancellationToken);
         var collected = new Dictionary<Guid, List<Guid>>();
-        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        foreach (var row in rows)
         {
-            while (await reader.ReadAsync(cancellationToken))
+            if (!collected.TryGetValue(row.TransactionId, out List<Guid>? list))
             {
-                var transactionId = reader.GetGuid(0);
-                if (!collected.TryGetValue(transactionId, out var list))
-                {
-                    list = [];
-                    collected[transactionId] = list;
-                }
-                list.Add(reader.GetGuid(1));
+                list = [];
+                collected[row.TransactionId] = list;
             }
+            list.Add(row.MerchantTagId);
         }
 
         foreach (var (id, list) in collected)
@@ -966,8 +919,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return result;
     }
 
-    private static async Task<ActionTargets> ValidateActionTargetsAsync(NpgsqlConnection connection,
-                                                                        NpgsqlTransaction transaction,
+    private static async Task<ActionTargets> ValidateActionTargetsAsync(ArgusDbContext context,
                                                                         Guid customerId,
                                                                         TransactionAction action,
                                                                         bool lockForShare,
@@ -977,27 +929,27 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         TransactionCategoryRef? categoryRef = null;
         if (action.CategoryId is not null)
         {
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = $"""
-                SELECT id, display_name, kind, is_archived, updated_at
+            const string categorySql = """
+                SELECT id AS "Id", display_name AS "DisplayName", kind AS "Kind",
+                       is_system AS "IsSystem", is_archived AS "IsArchived", updated_at AS "UpdatedAt"
                 FROM categories
-                WHERE customer_id = @customer_id AND id = @id
-                {(lockForShare ? "FOR SHARE" : string.Empty)}
+                WHERE customer_id = {0} AND id = {1}
                 """;
-            command.Parameters.AddWithValue("customer_id", customerId);
-            command.Parameters.AddWithValue("id", action.CategoryId.Value);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken))
+            string sql = lockForShare ? string.Concat(categorySql, "\nFOR SHARE") : categorySql;
+            List<CategoryStampRow> rows = await context.Database
+                .SqlQueryRaw<CategoryStampRow>(sql, customerId, action.CategoryId.Value)
+                .ToListAsync(cancellationToken);
+            CategoryStampRow? row = rows.SingleOrDefault();
+            if (row is null)
             {
                 throw new TransactionStoreException(TransactionErrorCodes.NotFound);
             }
-            if (reader.GetBoolean(3))
+            if (row.IsArchived)
             {
                 throw new TransactionStoreException(TransactionErrorCodes.CategoryUnavailable);
             }
-            storedCategory = new StoredCategoryStamp(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetBoolean(3), FormatStamp(reader.GetFieldValue<DateTime>(4)));
-            categoryRef = new TransactionCategoryRef(storedCategory.Id, storedCategory.DisplayName, storedCategory.Kind, IsSystemCategory(storedCategory.Kind), storedCategory.IsArchived);
+            storedCategory = new StoredCategoryStamp(row.Id, row.DisplayName, row.Kind, row.IsArchived, FormatStamp(row.UpdatedAt));
+            categoryRef = new TransactionCategoryRef(storedCategory.Id, storedCategory.DisplayName, storedCategory.Kind, row.IsSystem, storedCategory.IsArchived);
         }
 
         var ids = action.AddTagIds.Concat(action.RemoveTagIds).Distinct().Order().ToArray();
@@ -1005,21 +957,20 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         var tagsById = new Dictionary<Guid, StoredTagStamp>();
         if (ids.Length > 0)
         {
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = $"""
-                SELECT id, display_name, is_archived, updated_at
+            const string tagSql = """
+                SELECT id AS "Id", display_name AS "DisplayName", is_archived AS "IsArchived",
+                       updated_at AS "UpdatedAt"
                 FROM merchant_tags
-                WHERE customer_id = @customer_id AND id = ANY(@ids)
+                WHERE customer_id = {0} AND id = ANY({1})
                 ORDER BY id
-                {(lockForShare ? "FOR SHARE" : string.Empty)}
                 """;
-            command.Parameters.AddWithValue("customer_id", customerId);
-            command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, ids);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
+            string sql = lockForShare ? string.Concat(tagSql, "\nFOR SHARE") : tagSql;
+            List<TagStampRow> rows = await context.Database
+                .SqlQueryRaw<TagStampRow>(sql, customerId, ids)
+                .ToListAsync(cancellationToken);
+            foreach (TagStampRow row in rows)
             {
-                var stamp = new StoredTagStamp(reader.GetGuid(0), reader.GetString(1), reader.GetBoolean(2), FormatStamp(reader.GetFieldValue<DateTime>(3)));
+                var stamp = new StoredTagStamp(row.Id, row.DisplayName, row.IsArchived, FormatStamp(row.UpdatedAt));
                 if (addIds.Contains(stamp.Id) && stamp.IsArchived)
                 {
                     throw new TransactionStoreException(TransactionErrorCodes.TagUnavailable);
@@ -1043,8 +994,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return new ActionTargets(stored, categoryRef, RefsFor(action.AddTagIds), RefsFor(action.RemoveTagIds));
     }
 
-    private static async Task LockAndValidateTargetsAsync(NpgsqlConnection connection,
-                                                          NpgsqlTransaction transaction,
+    private static async Task LockAndValidateTargetsAsync(ArgusDbContext context,
                                                           Guid customerId,
                                                           TransactionAction action,
                                                           StoredTargets stored,
@@ -1052,22 +1002,19 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
     {
         if (action.CategoryId is not null)
         {
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = """
-                SELECT id, display_name, kind, is_archived, updated_at
+            List<CategoryStampRow> rows = await context.Database.SqlQueryRaw<CategoryStampRow>("""
+                SELECT id AS "Id", display_name AS "DisplayName", kind AS "Kind",
+                       is_system AS "IsSystem", is_archived AS "IsArchived", updated_at AS "UpdatedAt"
                 FROM categories
-                WHERE customer_id = @customer_id AND id = @id
+                WHERE customer_id = {0} AND id = {1}
                 FOR SHARE
-                """;
-            command.Parameters.AddWithValue("customer_id", customerId);
-            command.Parameters.AddWithValue("id", action.CategoryId.Value);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken) || stored.Category is null)
+                """, customerId, action.CategoryId.Value).ToListAsync(cancellationToken);
+            CategoryStampRow? row = rows.SingleOrDefault();
+            if (row is null || stored.Category is null)
             {
                 throw new TransactionStoreException(TransactionErrorCodes.ClassificationChanged);
             }
-            var current = new StoredCategoryStamp(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetBoolean(3), FormatStamp(reader.GetFieldValue<DateTime>(4)));
+            var current = new StoredCategoryStamp(row.Id, row.DisplayName, row.Kind, row.IsArchived, FormatStamp(row.UpdatedAt));
             if (current != stored.Category)
             {
                 throw new TransactionStoreException(TransactionErrorCodes.ClassificationChanged);
@@ -1077,25 +1024,19 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         var allTagIds = action.AddTagIds.Concat(action.RemoveTagIds).Distinct().Order().ToArray();
         if (allTagIds.Length > 0)
         {
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = """
-                SELECT id, display_name, is_archived, updated_at
+            List<TagStampRow> rows = await context.Database.SqlQueryRaw<TagStampRow>("""
+                SELECT id AS "Id", display_name AS "DisplayName", is_archived AS "IsArchived",
+                       updated_at AS "UpdatedAt"
                 FROM merchant_tags
-                WHERE customer_id = @customer_id AND id = ANY(@ids)
+                WHERE customer_id = {0} AND id = ANY({1})
                 ORDER BY id
                 FOR SHARE
-                """;
-            command.Parameters.AddWithValue("customer_id", customerId);
-            command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, allTagIds);
+                """, customerId, allTagIds).ToListAsync(cancellationToken);
             var current = new Dictionary<Guid, StoredTagStamp>();
-            await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+            foreach (TagStampRow row in rows)
             {
-                while (await reader.ReadAsync(cancellationToken))
-                {
-                    var stamp = new StoredTagStamp(reader.GetGuid(0), reader.GetString(1), reader.GetBoolean(2), FormatStamp(reader.GetFieldValue<DateTime>(3)));
-                    current[stamp.Id] = stamp;
-                }
+                var stamp = new StoredTagStamp(row.Id, row.DisplayName, row.IsArchived, FormatStamp(row.UpdatedAt));
+                current[stamp.Id] = stamp;
             }
 
             var expected = new Dictionary<Guid, StoredTagStamp>();
@@ -1114,80 +1055,59 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         }
     }
 
-    private static async Task<(DateTime CapturedAt, DateTime ExpiresAt)> ReadOperationClockAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    private static async Task<(DateTime CapturedAt, DateTime ExpiresAt)> ReadOperationClockAsync(ArgusDbContext context, CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            SELECT clock_timestamp(),
-                   clock_timestamp() + make_interval(mins => @minutes)
-            """;
-        command.Parameters.AddWithValue("minutes", TransactionLimits.OperationExpiryMinutes);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        await reader.ReadAsync(cancellationToken);
+        List<OperationClockRow> rows = await context.Database.SqlQueryRaw<OperationClockRow>("""
+            SELECT clock_timestamp() AS "CapturedAt",
+                   clock_timestamp() + make_interval(mins => {0}) AS "ExpiresAt"
+            """, TransactionLimits.OperationExpiryMinutes).ToListAsync(cancellationToken);
+        OperationClockRow row = rows.Single();
 
-        return (reader.GetFieldValue<DateTime>(0), reader.GetFieldValue<DateTime>(1));
+        return (row.CapturedAt, row.ExpiresAt);
     }
 
-    private static async Task<DateTime> ClockAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    private static async Task<DateTime> ClockAsync(ArgusDbContext context, CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT clock_timestamp()";
-
-        return (DateTime)(await command.ExecuteScalarAsync(cancellationToken))!;
+        return await context.Database
+            .SqlQuery<DateTime>($"""
+                SELECT clock_timestamp() AS "Value"
+                """)
+            .SingleAsync(cancellationToken);
     }
 
-    private static async Task<bool> IsExpiredAsync(NpgsqlConnection connection,
-                                                   NpgsqlTransaction transaction,
+    private static async Task<bool> IsExpiredAsync(ArgusDbContext context,
                                                    DateTime expiresAt,
                                                    CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT clock_timestamp() >= @expires_at";
-        command.Parameters.AddWithValue("expires_at", expiresAt);
-
-        return (bool)(await command.ExecuteScalarAsync(cancellationToken))!;
+        return await context.Database
+            .SqlQuery<bool>($"""
+                SELECT clock_timestamp() >= {expiresAt} AS "Value"
+                """)
+            .SingleAsync(cancellationToken);
     }
 
-    private static async Task CheckQuotaAsync(NpgsqlConnection connection,
-                                              NpgsqlTransaction transaction,
+    private static async Task CheckQuotaAsync(ArgusDbContext context,
                                               Guid customerId,
                                               int selectionCount,
                                               CancellationToken cancellationToken)
     {
-        long openOperations;
-        await using (var open = connection.CreateCommand())
-        {
-            open.Transaction = transaction;
-            open.CommandText = """
-                SELECT COUNT(*)
-                FROM transaction_operations
-                WHERE customer_id = @customer_id
-                  AND status = 'Prepared'
-                  AND expires_at > clock_timestamp()
-                """;
-            open.Parameters.AddWithValue("customer_id", customerId);
-            openOperations = (long)(await open.ExecuteScalarAsync(cancellationToken))!;
-        }
+        long openOperations = await context.Database.SqlQuery<long>($"""
+            SELECT COUNT(*) AS "Value"
+            FROM transaction_operations
+            WHERE customer_id = {customerId}
+              AND status = 'Prepared'
+              AND expires_at > clock_timestamp()
+            """).SingleAsync(cancellationToken);
 
-        long liveEntries;
-        await using (var entries = connection.CreateCommand())
-        {
-            entries.Transaction = transaction;
-            entries.CommandText = """
-                SELECT COUNT(*)
-                FROM transaction_operation_items i
-                JOIN transaction_operations o
-                  ON o.customer_id = i.customer_id AND o.operation_id = i.operation_id
-                WHERE o.customer_id = @customer_id
-                  AND o.status = 'Prepared'
-                  AND o.expires_at > clock_timestamp()
-                """;
-            entries.Parameters.AddWithValue("customer_id", customerId);
-            liveEntries = (long)(await entries.ExecuteScalarAsync(cancellationToken))!;
-        }
+        long liveEntries = await context.Database.SqlQuery<long>($"""
+            SELECT COUNT(*) AS "Value"
+            FROM transaction_operation_items i
+            JOIN transaction_operations o
+              ON o.customer_id = i.customer_id AND o.operation_id = i.operation_id
+            WHERE o.customer_id = {customerId}
+              AND o.status = 'Prepared'
+              AND o.expires_at > clock_timestamp()
+            """).SingleAsync(cancellationToken);
 
         if (openOperations >= TransactionLimits.MaxOpenOperations || liveEntries + selectionCount > TransactionLimits.MaxLiveManifestEntries)
         {
@@ -1195,8 +1115,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         }
     }
 
-    private static async Task InsertHeaderAsync(NpgsqlConnection connection,
-                                                NpgsqlTransaction transaction,
+    private static async Task InsertHeaderAsync(ArgusDbContext context,
                                                 Guid customerId,
                                                 Guid operationId,
                                                 string selectionMode,
@@ -1212,106 +1131,86 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                                                 DateTime expiresAt,
                                                 CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
+        string actionJson = JsonSerializer.Serialize(new StoredAction(action.CategoryId, action.AddTagIds, action.RemoveTagIds, action.IsHiddenByUser, action.ConfirmCategory), _storedJson);
+        string targetsJson = JsonSerializer.Serialize(targets, _storedJson);
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO transaction_operations (
                 customer_id, operation_id, status, selection_mode, request_digest,
                 filter_digest, confirmation_hash, action, target_stamps,
                 selected_count, changed_count, unchanged_count,
                 captured_at, expires_at, created_at, updated_at)
             VALUES (
-                @customer_id, @operation_id, 'Prepared', @selection_mode, @request_digest,
-                @filter_digest, @confirmation_hash, @action, @targets,
-                @selected_count, @changed_count, @unchanged_count,
-                @captured_at, @expires_at, NOW(), NOW())
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("operation_id", operationId);
-        command.Parameters.AddWithValue("selection_mode", selectionMode);
-        command.Parameters.AddWithValue("request_digest", requestDigest);
-        command.Parameters.AddWithValue("filter_digest", NpgsqlDbType.Text, (object?)filterDigest ?? DBNull.Value);
-        command.Parameters.AddWithValue("confirmation_hash", confirmationHash);
-        command.Parameters.AddWithValue("action", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(new StoredAction(action.CategoryId, action.AddTagIds, action.RemoveTagIds, action.IsHiddenByUser, action.ConfirmCategory), _storedJson));
-        command.Parameters.AddWithValue("targets", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(targets, _storedJson));
-        command.Parameters.AddWithValue("selected_count", selectedCount);
-        command.Parameters.AddWithValue("changed_count", changedCount);
-        command.Parameters.AddWithValue("unchanged_count", unchangedCount);
-        command.Parameters.AddWithValue("captured_at", capturedAt);
-        command.Parameters.AddWithValue("expires_at", expiresAt);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+                {customerId}, {operationId}, 'Prepared', {selectionMode}, {requestDigest},
+                {filterDigest}, {confirmationHash}, CAST({actionJson} AS jsonb), CAST({targetsJson} AS jsonb),
+                {selectedCount}, {changedCount}, {unchangedCount},
+                {capturedAt}, {expiresAt}, NOW(), NOW())
+            """, cancellationToken);
     }
 
-    private static async Task InsertManifestAsync(NpgsqlConnection connection,
-                                                  NpgsqlTransaction transaction,
+    private static async Task InsertManifestAsync(ArgusDbContext context,
                                                   Guid customerId,
                                                   Guid operationId,
                                                   IReadOnlyList<MemberRow> members,
                                                   CancellationToken cancellationToken)
     {
-        await using var importer = await connection.BeginBinaryImportAsync(
-            """
-            COPY transaction_operation_items (
-                customer_id, operation_id, transaction_id, transaction_version,
-                financial_account_id, statement_import_id, ordinal)
-            FROM STDIN (FORMAT BINARY)
-            """,
-            cancellationToken);
-
         int ordinal = 0;
-        foreach (var member in members)
+        foreach (MemberRow[] batch in members.Chunk(ManifestInsertBatchSize))
         {
-            // Npgsql's synchronous binary writer batches rows; awaited
-            // per-field async writes are an order of magnitude slower at the
-            // 50,000-member bound.
-            importer.StartRow();
-            importer.Write(customerId, NpgsqlDbType.Uuid);
-            importer.Write(operationId, NpgsqlDbType.Uuid);
-            importer.Write(member.Id, NpgsqlDbType.Uuid);
-            importer.Write(member.Version, NpgsqlDbType.Integer);
-            importer.Write(member.AccountId, NpgsqlDbType.Uuid);
-            importer.Write(member.StatementId, NpgsqlDbType.Uuid);
-            importer.Write(ordinal, NpgsqlDbType.Integer);
-            ordinal++;
-        }
+            int count = batch.Length;
+            int[] ordinals = new int[count];
+            for (int index = 0; index < count; index++)
+            {
+                ordinals[index] = ordinal;
+                ordinal++;
+            }
 
-        importer.Complete();
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO transaction_operation_items (
+                    customer_id, operation_id, transaction_id, transaction_version,
+                    financial_account_id, statement_import_id, ordinal)
+                SELECT t.customer_id, t.operation_id, t.transaction_id, t.transaction_version,
+                       t.financial_account_id, t.statement_import_id, t.ordinal
+                FROM unnest(
+                    CAST({Enumerable.Repeat(customerId, count).ToArray()} AS uuid[]),
+                    CAST({Enumerable.Repeat(operationId, count).ToArray()} AS uuid[]),
+                    CAST({batch.Select(member => member.Id).ToArray()} AS uuid[]),
+                    CAST({batch.Select(member => member.Version).ToArray()} AS integer[]),
+                    CAST({batch.Select(member => member.AccountId).ToArray()} AS uuid[]),
+                    CAST({batch.Select(member => member.StatementId).ToArray()} AS uuid[]),
+                    CAST({ordinals} AS integer[])
+                ) AS t(customer_id, operation_id, transaction_id, transaction_version,
+                       financial_account_id, statement_import_id, ordinal)
+                """, cancellationToken);
+        }
     }
 
-    private static async Task UpdateMembersAsync(NpgsqlConnection connection,
-                                                 NpgsqlTransaction transaction,
+    private static async Task UpdateMembersAsync(ArgusDbContext context,
                                                  Guid customerId,
                                                  Guid[] transactionIds,
                                                  TransactionAction action,
                                                  CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
+        bool setCategory = action.CategoryId is not null;
+        bool confirmCategory = action.CategoryId is not null || action.ConfirmCategory is true;
+        bool setHidden = action.IsHiddenByUser is not null;
+        Guid? categoryId = action.CategoryId;
+        bool? hidden = action.IsHiddenByUser;
+        int affected = await context.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE transactions
-            SET category_id = CASE WHEN @set_category THEN @category_id ELSE category_id END,
-                category_confirmed = CASE WHEN @set_category OR @confirm_category THEN TRUE ELSE category_confirmed END,
-                is_hidden_by_user = CASE WHEN @set_hidden THEN @hidden ELSE is_hidden_by_user END,
+            SET category_id = CASE WHEN {setCategory} THEN {categoryId} ELSE category_id END,
+                category_confirmed = CASE WHEN {confirmCategory} THEN TRUE ELSE category_confirmed END,
+                is_hidden_by_user = CASE WHEN {setHidden} THEN {hidden} ELSE is_hidden_by_user END,
                 version = version + 1,
                 updated_at = clock_timestamp()
-            WHERE customer_id = @customer_id AND id = ANY(@ids)
-            """;
-        command.Parameters.AddWithValue("set_category", action.CategoryId is not null);
-        command.Parameters.AddWithValue("category_id", NpgsqlDbType.Uuid, (object?)action.CategoryId ?? DBNull.Value);
-        command.Parameters.AddWithValue("confirm_category", action.ConfirmCategory is true);
-        command.Parameters.AddWithValue("set_hidden", action.IsHiddenByUser is not null);
-        command.Parameters.AddWithValue("hidden", NpgsqlDbType.Boolean, (object?)action.IsHiddenByUser ?? DBNull.Value);
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, transactionIds);
-        int affected = await command.ExecuteNonQueryAsync(cancellationToken);
+            WHERE customer_id = {customerId} AND id = ANY({transactionIds})
+            """, cancellationToken);
         if (affected != transactionIds.Length)
         {
             throw new TransactionStoreException(TransactionErrorCodes.SelectionStale);
         }
     }
 
-    private static async Task MutateTagLinksAsync(NpgsqlConnection connection,
-                                                  NpgsqlTransaction transaction,
+    private static async Task MutateTagLinksAsync(ArgusDbContext context,
                                                   Guid customerId,
                                                   Guid[] transactionIds,
                                                   TransactionAction action,
@@ -1319,36 +1218,24 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
     {
         if (action.AddTagIds.Length > 0)
         {
-            await using var insert = connection.CreateCommand();
-            insert.Transaction = transaction;
-            insert.CommandText = """
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO transaction_merchant_tags (customer_id, transaction_id, merchant_tag_id)
-                SELECT @customer_id, target.id, add.tag_id
-                FROM unnest(@ids) AS target(id)
-                CROSS JOIN unnest(@add_ids) AS add(tag_id)
+                SELECT {customerId}, target.id, add.tag_id
+                FROM unnest({transactionIds}) AS target(id)
+                CROSS JOIN unnest({action.AddTagIds}) AS add(tag_id)
                 ON CONFLICT (transaction_id, merchant_tag_id) DO NOTHING
-                """;
-            insert.Parameters.AddWithValue("customer_id", customerId);
-            insert.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, transactionIds);
-            insert.Parameters.AddWithValue("add_ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, action.AddTagIds);
-            await insert.ExecuteNonQueryAsync(cancellationToken);
+                """, cancellationToken);
         }
 
         if (action.RemoveTagIds.Length > 0)
         {
-            await using var delete = connection.CreateCommand();
-            delete.Transaction = transaction;
-            delete.CommandText = """
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
                 DELETE FROM transaction_merchant_tags j
-                USING unnest(@ids) AS target(id)
-                WHERE j.customer_id = @customer_id
+                USING unnest({transactionIds}) AS target(id)
+                WHERE j.customer_id = {customerId}
                   AND j.transaction_id = target.id
-                  AND j.merchant_tag_id = ANY(@remove_ids)
-                """;
-            delete.Parameters.AddWithValue("customer_id", customerId);
-            delete.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, transactionIds);
-            delete.Parameters.AddWithValue("remove_ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, action.RemoveTagIds);
-            await delete.ExecuteNonQueryAsync(cancellationToken);
+                  AND j.merchant_tag_id = ANY({action.RemoveTagIds})
+                """, cancellationToken);
         }
     }
 
@@ -1404,8 +1291,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         throw new TransactionStoreException(TransactionErrorCodes.TagLimitExceeded);
     }
 
-    private static async Task EnsureRestoreAllowedAsync(NpgsqlConnection connection,
-                                                        NpgsqlTransaction transaction,
+    private static async Task EnsureRestoreAllowedAsync(ArgusDbContext context,
                                                         Guid customerId,
                                                         IReadOnlyCollection<MemberRow> members,
                                                         TransactionAction action,
@@ -1422,105 +1308,84 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             return;
         }
 
-        var links = new List<Dictionary<string, object?>>();
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT id, statement_label
-            FROM statement_imports
-            WHERE customer_id = @customer_id AND id = ANY(@ids)
-            ORDER BY id
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, hiddenStatementIds);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            links.Add(new Dictionary<string, object?> { ["id"] = reader.GetGuid(0), ["statement_label"] = reader.GetString(1), });
-        }
+        var rows = await context.StatementImports
+            .AsNoTracking()
+            .Where(statement => statement.CustomerId == customerId && hiddenStatementIds.Contains(statement.Id))
+            .OrderBy(statement => statement.Id)
+            .Select(statement => new { statement.Id, statement.StatementLabel })
+            .ToListAsync(cancellationToken);
+        var links = rows
+            .Select(row => new Dictionary<string, object?> { ["id"] = row.Id, ["statement_label"] = row.StatementLabel })
+            .ToList();
 
         throw new TransactionStoreException(TransactionErrorCodes.ParentHidden, new Dictionary<string, object?> { ["statements"] = links });
     }
 
-    private static async Task<List<ManifestRow>> ReadManifestAsync(NpgsqlConnection connection,
-                                                                   NpgsqlTransaction transaction,
+    private static async Task<List<ManifestRow>> ReadManifestAsync(ArgusDbContext context,
                                                                    Guid customerId,
                                                                    Guid operationId,
                                                                    CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT transaction_id, transaction_version, financial_account_id, statement_import_id
-            FROM transaction_operation_items
-            WHERE customer_id = @customer_id AND operation_id = @operation_id
-            ORDER BY transaction_id
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("operation_id", operationId);
-        var manifest = new List<ManifestRow>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            manifest.Add(new ManifestRow(reader.GetGuid(0), reader.GetInt32(1), reader.GetGuid(2), reader.GetGuid(3)));
-        }
-
-        return manifest;
+        return await context.TransactionOperationItems
+            .AsNoTracking()
+            .Where(item => item.CustomerId == customerId && item.OperationId == operationId)
+            .OrderBy(item => item.TransactionId)
+            .Select(item => new ManifestRow(item.TransactionId, item.TransactionVersion, item.FinancialAccountId, item.StatementImportId))
+            .ToListAsync(cancellationToken);
     }
 
-    private static async Task<OperationHeader?> ReadHeaderAsync(NpgsqlConnection connection,
-                                                                NpgsqlTransaction transaction,
+    private static async Task<OperationHeader?> ReadHeaderAsync(ArgusDbContext context,
                                                                 Guid customerId,
                                                                 Guid operationId,
                                                                 bool forUpdate,
                                                                 CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            SELECT customer_id, operation_id, status, selection_mode, request_digest,
-                   filter_digest, confirmation_hash, action::text, target_stamps::text,
-                   selected_count, changed_count, unchanged_count,
-                   captured_at, expires_at, applied_at, terminal_at
+        const string headerSql = """
+            SELECT customer_id AS "CustomerId", operation_id AS "OperationId",
+                   status AS "Status", selection_mode AS "SelectionMode",
+                   request_digest AS "RequestDigest", filter_digest AS "FilterDigest",
+                   confirmation_hash AS "ConfirmationHash", action::text AS "ActionJson",
+                   target_stamps::text AS "TargetJson", selected_count AS "SelectedCount",
+                   changed_count AS "ChangedCount", unchanged_count AS "UnchangedCount",
+                   captured_at AS "CapturedAt", expires_at AS "ExpiresAt",
+                   applied_at AS "AppliedAt", terminal_at AS "TerminalAt"
             FROM transaction_operations
-            WHERE customer_id = @customer_id AND operation_id = @operation_id
-            {(forUpdate ? "FOR UPDATE" : string.Empty)}
+            WHERE customer_id = {0} AND operation_id = {1}
             """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("operation_id", operationId);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
-        {
-            return null;
-        }
+        string sql = forUpdate ? string.Concat(headerSql, "\nFOR UPDATE") : headerSql;
+        List<OperationHeaderRow> rows = await context.Database
+            .SqlQueryRaw<OperationHeaderRow>(sql, customerId, operationId)
+            .ToListAsync(cancellationToken);
+        OperationHeaderRow? row = rows.SingleOrDefault();
 
-        return new OperationHeader(
-            reader.GetGuid(0),
-            reader.GetGuid(1),
-            reader.GetString(2),
-            reader.GetString(3),
-            reader.GetString(4),
-            reader.IsDBNull(5) ? null : reader.GetString(5),
-            reader.IsDBNull(6) ? null : reader.GetString(6),
-            reader.GetString(7),
-            reader.GetString(8),
-            reader.GetInt32(9),
-            reader.GetInt32(10),
-            reader.GetInt32(11),
-            reader.GetFieldValue<DateTime>(12),
-            reader.GetFieldValue<DateTime>(13),
-            reader.IsDBNull(14) ? null : reader.GetFieldValue<DateTime>(14),
-            reader.IsDBNull(15) ? null : reader.GetFieldValue<DateTime>(15));
+        return row is null
+            ? null
+            : new OperationHeader(
+                row.CustomerId,
+                row.OperationId,
+                row.Status,
+                row.SelectionMode,
+                row.RequestDigest,
+                row.FilterDigest,
+                row.ConfirmationHash,
+                row.ActionJson,
+                row.TargetJson,
+                row.SelectedCount,
+                row.ChangedCount,
+                row.UnchangedCount,
+                row.CapturedAt,
+                row.ExpiresAt,
+                row.AppliedAt,
+                row.TerminalAt);
     }
 
-    private async Task<TransactionOperationSummaryResponse> BuildPreparedSummaryAsync(NpgsqlConnection connection,
-                                                                                      NpgsqlTransaction transaction,
-                                                                                      OperationHeader header,
-                                                                                      CancellationToken cancellationToken)
+    private async Task<TransactionOperationSummaryResponse> BuildPreparedSummaryAsync(ArgusDbContext context,
+                                                                                     OperationHeader header,
+                                                                                     CancellationToken cancellationToken)
     {
         var action = DeserializeAction(header.ActionJson);
         var stored = DeserializeTargets(header.TargetJson);
-        var resolved = await ResolveActionAsync(connection, transaction, header.CustomerId, action, stored, cancellationToken);
+        var resolved = await ResolveActionAsync(context, header.CustomerId, action, stored, cancellationToken);
 
         return new TransactionOperationSummaryResponse(
             header.OperationId,
@@ -1537,35 +1402,29 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             resolved);
     }
 
-    private async Task<TransactionOperationActionResponse> ResolveActionAsync(NpgsqlConnection connection,
-                                                                              NpgsqlTransaction transaction,
-                                                                              Guid customerId,
-                                                                              TransactionAction action,
-                                                                              StoredTargets stored,
-                                                                              CancellationToken cancellationToken)
+    private async Task<TransactionOperationActionResponse> ResolveActionAsync(ArgusDbContext context,
+                                                                             Guid customerId,
+                                                                             TransactionAction action,
+                                                                             StoredTargets stored,
+                                                                             CancellationToken cancellationToken)
     {
         bool stale = false;
         TransactionCategoryRef? category = null;
         if (action.CategoryId is not null)
         {
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = """
-                SELECT id, display_name, kind, is_system, is_archived, updated_at
-                FROM categories
-                WHERE customer_id = @customer_id AND id = @id
-                """;
-            command.Parameters.AddWithValue("customer_id", customerId);
-            command.Parameters.AddWithValue("id", action.CategoryId.Value);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken))
+            var row = await context.Categories
+                .AsNoTracking()
+                .Where(item => item.CustomerId == customerId && item.Id == action.CategoryId.Value)
+                .Select(item => new { item.Id, item.DisplayName, item.Kind, item.IsSystem, item.IsArchived, item.UpdatedAt })
+                .SingleOrDefaultAsync(cancellationToken);
+            if (row is null)
             {
                 stale = true;
             }
             else
             {
-                var stamp = new StoredCategoryStamp(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetBoolean(4), FormatStamp(reader.GetFieldValue<DateTime>(5)));
-                category = new TransactionCategoryRef(stamp.Id, stamp.DisplayName, stamp.Kind, reader.GetBoolean(3), stamp.IsArchived);
+                var stamp = new StoredCategoryStamp(row.Id, row.DisplayName, row.Kind, row.IsArchived, FormatStamp(row.UpdatedAt));
+                category = new TransactionCategoryRef(stamp.Id, stamp.DisplayName, stamp.Kind, row.IsSystem, stamp.IsArchived);
                 if (stored.Category != stamp)
                 {
                     stale = true;
@@ -1578,19 +1437,14 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         var currentStamps = new Dictionary<Guid, StoredTagStamp>();
         if (tagIds.Length > 0)
         {
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = """
-                SELECT id, display_name, is_archived, updated_at
-                FROM merchant_tags
-                WHERE customer_id = @customer_id AND id = ANY(@ids)
-                """;
-            command.Parameters.AddWithValue("customer_id", customerId);
-            command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, tagIds);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
+            var rows = await context.MerchantTags
+                .AsNoTracking()
+                .Where(tag => tag.CustomerId == customerId && tagIds.Contains(tag.Id))
+                .Select(tag => new { tag.Id, tag.DisplayName, tag.IsArchived, tag.UpdatedAt })
+                .ToListAsync(cancellationToken);
+            foreach (var row in rows)
             {
-                var stamp = new StoredTagStamp(reader.GetGuid(0), reader.GetString(1), reader.GetBoolean(2), FormatStamp(reader.GetFieldValue<DateTime>(3)));
+                var stamp = new StoredTagStamp(row.Id, row.DisplayName, row.IsArchived, FormatStamp(row.UpdatedAt));
                 current[stamp.Id] = new TransactionTagRef(stamp.Id, stamp.DisplayName, stamp.IsArchived);
                 currentStamps[stamp.Id] = stamp;
             }
@@ -1624,75 +1478,54 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         header.TerminalAt is null ? null : FormatTimestamp(header.TerminalAt.Value),
         null);
 
-    private static async Task ExpireHeaderAsync(NpgsqlConnection connection,
-                                                NpgsqlTransaction transaction,
+    private static async Task ExpireHeaderAsync(ArgusDbContext context,
                                                 Guid customerId,
                                                 Guid operationId,
                                                 CancellationToken cancellationToken)
     {
-        await using (var items = connection.CreateCommand())
-        {
-            items.Transaction = transaction;
-            items.CommandText = """
-                DELETE FROM transaction_operation_items
-                WHERE customer_id = @customer_id AND operation_id = @operation_id
-                """;
-            items.Parameters.AddWithValue("customer_id", customerId);
-            items.Parameters.AddWithValue("operation_id", operationId);
-            await items.ExecuteNonQueryAsync(cancellationToken);
-        }
-        await using var update = connection.CreateCommand();
-        update.Transaction = transaction;
-        update.CommandText = """
+        await context.TransactionOperationItems
+            .Where(item => item.CustomerId == customerId && item.OperationId == operationId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.Database.ExecuteSqlInterpolatedAsync($$"""
             UPDATE transaction_operations
             SET status = 'Expired',
                 terminal_at = clock_timestamp(),
                 action = '{}'::jsonb,
                 target_stamps = '{}'::jsonb,
                 updated_at = clock_timestamp()
-            WHERE customer_id = @customer_id AND operation_id = @operation_id
+            WHERE customer_id = {{customerId}} AND operation_id = {{operationId}}
               AND status = 'Prepared'
-            """;
-        update.Parameters.AddWithValue("customer_id", customerId);
-        update.Parameters.AddWithValue("operation_id", operationId);
-        await update.ExecuteNonQueryAsync(cancellationToken);
+            """, cancellationToken);
     }
 
-    private static async Task<DateTime> MarkAppliedAsync(NpgsqlConnection connection,
-                                                         NpgsqlTransaction transaction,
+    private static async Task<DateTime> MarkAppliedAsync(ArgusDbContext context,
                                                          Guid customerId,
                                                          Guid operationId,
                                                          CancellationToken cancellationToken)
     {
-        await using (var items = connection.CreateCommand())
-        {
-            items.Transaction = transaction;
-            items.CommandText = """
-                DELETE FROM transaction_operation_items
-                WHERE customer_id = @customer_id AND operation_id = @operation_id
-                """;
-            items.Parameters.AddWithValue("customer_id", customerId);
-            items.Parameters.AddWithValue("operation_id", operationId);
-            await items.ExecuteNonQueryAsync(cancellationToken);
-        }
+        await context.TransactionOperationItems
+            .Where(item => item.CustomerId == customerId && item.OperationId == operationId)
+            .ExecuteDeleteAsync(cancellationToken);
 
-        await using var update = connection.CreateCommand();
-        update.Transaction = transaction;
-        update.CommandText = """
-            UPDATE transaction_operations
-            SET status = 'Applied',
-                applied_at = clock_timestamp(),
-                terminal_at = clock_timestamp(),
-                action = '{}'::jsonb,
-                target_stamps = '{}'::jsonb,
-                updated_at = clock_timestamp()
-            WHERE customer_id = @customer_id AND operation_id = @operation_id
-            RETURNING applied_at
-            """;
-        update.Parameters.AddWithValue("customer_id", customerId);
-        update.Parameters.AddWithValue("operation_id", operationId);
+        List<TransactionOperation> updated = await context.TransactionOperations
+            .FromSqlInterpolated($$"""
+                WITH updated AS (
+                    UPDATE transaction_operations
+                    SET status = 'Applied',
+                        applied_at = clock_timestamp(),
+                        terminal_at = clock_timestamp(),
+                        action = '{}'::jsonb,
+                        target_stamps = '{}'::jsonb,
+                        updated_at = clock_timestamp()
+                    WHERE customer_id = {{customerId}} AND operation_id = {{operationId}}
+                    RETURNING *
+                )
+                SELECT * FROM updated
+                """)
+            .AsTracking()
+            .ToListAsync(cancellationToken);
 
-        return (DateTime)(await update.ExecuteScalarAsync(cancellationToken))!;
+        return updated.Single().AppliedAt!.Value;
     }
 
     private static TransactionStoreException TerminalState(string status) => status switch
@@ -1817,123 +1650,149 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                                   int? SourcePage,
                                   int SourceRowNumber);
 
-    private static async Task SetReadOnlyAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    private static async Task SetReadOnlyAsync(ArgusDbContext context, CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SET TRANSACTION READ ONLY";
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await context.Database.ExecuteSqlRawAsync("SET TRANSACTION READ ONLY", cancellationToken);
     }
 
-    private static async Task ValidateFilterOwnershipAsync(NpgsqlConnection connection,
-                                                           NpgsqlTransaction transaction,
+    private static async Task ValidateFilterOwnershipAsync(ArgusDbContext context,
                                                            Guid customerId,
                                                            TransactionFilter filter,
                                                            CancellationToken cancellationToken)
     {
         if (filter.FinancialAccountId is not null)
         {
-            await RequireOwnedAsync(connection, transaction, customerId, "financial_accounts", filter.FinancialAccountId.Value, cancellationToken);
+            await RequireOwnedAsync(context, customerId, "financial_accounts", filter.FinancialAccountId.Value, cancellationToken);
         }
         if (filter.StatementImportId is not null)
         {
-            await RequireOwnedAsync(connection, transaction, customerId, "statement_imports", filter.StatementImportId.Value, cancellationToken);
+            await RequireOwnedAsync(context, customerId, "statement_imports", filter.StatementImportId.Value, cancellationToken);
         }
         if (filter.CategoryId is not null)
         {
-            await RequireOwnedAsync(connection, transaction, customerId, "categories", filter.CategoryId.Value, cancellationToken);
+            await RequireOwnedAsync(context, customerId, "categories", filter.CategoryId.Value, cancellationToken);
         }
         if (filter.MerchantTagId is not null)
         {
-            await RequireOwnedAsync(connection, transaction, customerId, "merchant_tags", filter.MerchantTagId.Value, cancellationToken);
+            await RequireOwnedAsync(context, customerId, "merchant_tags", filter.MerchantTagId.Value, cancellationToken);
         }
     }
 
-    internal static async Task RequireOwnedAsync(NpgsqlConnection connection,
-                                                 NpgsqlTransaction? transaction,
+    internal static async Task RequireOwnedAsync(ArgusDbContext context,
                                                  Guid customerId,
                                                  string table,
                                                  Guid id,
                                                  CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"SELECT 1 FROM {table} WHERE customer_id = @customer_id AND id = @id";
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("id", id);
-        if (await command.ExecuteScalarAsync(cancellationToken) is null)
+        bool owned = table switch
+        {
+            "financial_accounts" => await context.FinancialAccounts.AnyAsync(item => item.CustomerId == customerId && item.Id == id, cancellationToken),
+            "statement_imports" => await context.StatementImports.AnyAsync(item => item.CustomerId == customerId && item.Id == id, cancellationToken),
+            "categories" => await context.Categories.AnyAsync(item => item.CustomerId == customerId && item.Id == id, cancellationToken),
+            "merchant_tags" => await context.MerchantTags.AnyAsync(item => item.CustomerId == customerId && item.Id == id, cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(nameof(table), "unsupported owned table"),
+        };
+        if (!owned)
         {
             throw new TransactionStoreException(TransactionErrorCodes.NotFound);
         }
     }
 
-    private async Task<List<RowData>> ReadRowsAsync(NpgsqlConnection connection,
-                                                    NpgsqlTransaction transaction,
+    private async Task<List<RowData>> ReadRowsAsync(ArgusDbContext context,
                                                     Guid customerId,
                                                     TransactionFilter filter,
-                                                    string orderClause,
+                                                    string sortBy,
+                                                    string sortDirection,
                                                     int limit,
                                                     long offset,
                                                     bool includeVisibility,
                                                     CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        string where = TransactionSql.BuildWhere(filter, command, includeVisibility);
-        command.CommandText = $"""
-            SELECT {RowColumns}
-            FROM transactions t
-            {TransactionSql.Joins}
-            WHERE {where}
-            ORDER BY {orderClause}
-            LIMIT @limit OFFSET @offset
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("limit", limit);
-        command.Parameters.AddWithValue("offset", offset);
+        IQueryable<Transaction> ordered = TransactionQuery.Order(
+            TransactionQuery.Apply(context, customerId, filter, includeVisibility),
+            sortBy,
+            sortDirection);
+        List<RawRow> rawRows = await (
+            from transaction in ordered
+            join account in context.FinancialAccounts
+                on new { transaction.CustomerId, Id = transaction.FinancialAccountId } equals new { account.CustomerId, Id = account.Id }
+            join category in context.Categories
+                on new { transaction.CustomerId, Id = transaction.CategoryId } equals new { category.CustomerId, Id = category.Id }
+            join statement in context.StatementImports
+                on new { transaction.CustomerId, Id = transaction.StatementImportId } equals new { statement.CustomerId, Id = statement.Id }
+            select new RawRow(
+                transaction.Id,
+                transaction.Version,
+                transaction.TransactionDate,
+                transaction.Description,
+                transaction.NormalizedDescription,
+                transaction.Amount,
+                account.Id,
+                account.DisplayName,
+                account.IsArchived,
+                category.Id,
+                category.DisplayName,
+                category.Kind,
+                category.IsSystem,
+                category.IsArchived,
+                transaction.CategoryConfirmed,
+                statement.Id,
+                statement.StatementLabel,
+                statement.SourceType,
+                statement.IsHidden,
+                transaction.IsHiddenByUser,
+                transaction.SourcePage,
+                transaction.SourceRowNumber))
+            .Skip((int)offset)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
 
-        var rawRows = new List<RawRow>();
-        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
-        {
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                rawRows.Add(ReadRawRow(reader));
-            }
-        }
-
-        var tags = await LoadAssignedTagsAsync(connection, transaction, customerId, rawRows.Select(row => row.Id).ToArray(), cancellationToken);
+        var tags = await LoadAssignedTagsAsync(context, customerId, rawRows.Select(row => row.Id).ToArray(), cancellationToken);
 
         return rawRows.Select(raw => MapRow(raw, tags)).ToList();
     }
 
-    private async Task<List<RowData>> ReadRowsByIdsAsync(NpgsqlConnection connection,
-                                                         NpgsqlTransaction transaction,
+    private async Task<List<RowData>> ReadRowsByIdsAsync(ArgusDbContext context,
                                                          Guid customerId,
                                                          Guid[] ids,
                                                          CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            SELECT {RowColumns}
-            FROM transactions t
-            {TransactionSql.Joins}
-            WHERE t.customer_id = @customer_id AND t.id = ANY(@ids)
-            ORDER BY t.id
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, ids);
+        List<RawRow> rawRows = await (
+            from transaction in context.Transactions.AsNoTracking()
+            join account in context.FinancialAccounts
+                on new { transaction.CustomerId, Id = transaction.FinancialAccountId } equals new { account.CustomerId, Id = account.Id }
+            join category in context.Categories
+                on new { transaction.CustomerId, Id = transaction.CategoryId } equals new { category.CustomerId, Id = category.Id }
+            join statement in context.StatementImports
+                on new { transaction.CustomerId, Id = transaction.StatementImportId } equals new { statement.CustomerId, Id = statement.Id }
+            where transaction.CustomerId == customerId && ids.Contains(transaction.Id)
+            orderby transaction.Id
+            select new RawRow(
+                transaction.Id,
+                transaction.Version,
+                transaction.TransactionDate,
+                transaction.Description,
+                transaction.NormalizedDescription,
+                transaction.Amount,
+                account.Id,
+                account.DisplayName,
+                account.IsArchived,
+                category.Id,
+                category.DisplayName,
+                category.Kind,
+                category.IsSystem,
+                category.IsArchived,
+                transaction.CategoryConfirmed,
+                statement.Id,
+                statement.StatementLabel,
+                statement.SourceType,
+                statement.IsHidden,
+                transaction.IsHiddenByUser,
+                transaction.SourcePage,
+                transaction.SourceRowNumber))
+            .ToListAsync(cancellationToken);
 
-        var rawRows = new List<RawRow>();
-        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
-        {
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                rawRows.Add(ReadRawRow(reader));
-            }
-        }
-
-        var tags = await LoadAssignedTagsAsync(connection, transaction, customerId, rawRows.Select(row => row.Id).ToArray(), cancellationToken);
+        var tags = await LoadAssignedTagsAsync(context, customerId, rawRows.Select(row => row.Id).ToArray(), cancellationToken);
 
         return rawRows.Select(raw => MapRow(raw, tags)).ToList();
     }
@@ -1960,39 +1819,6 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
                                  bool HiddenByUser,
                                  int? SourcePage,
                                  int SourceRowNumber);
-
-    private const string RowColumns = """
-        t.id, t.version, t.transaction_date, t.description, t.normalized_description, t.amount,
-        a.id, a.display_name, a.is_archived,
-        c.id, c.display_name, c.kind, c.is_system, c.is_archived,
-        t.category_confirmed,
-        s.id, s.statement_label, s.source_type, s.is_hidden,
-        t.is_hidden_by_user, t.source_page, t.source_row_number
-        """;
-
-    private static RawRow ReadRawRow(NpgsqlDataReader reader) => new(
-        reader.GetGuid(0),
-        reader.GetInt32(1),
-        reader.GetFieldValue<DateOnly>(2),
-        reader.GetString(3),
-        reader.GetString(4),
-        reader.GetDecimal(5),
-        reader.GetGuid(6),
-        reader.GetString(7),
-        reader.GetBoolean(8),
-        reader.GetGuid(9),
-        reader.GetString(10),
-        reader.GetString(11),
-        reader.GetBoolean(12),
-        reader.GetBoolean(13),
-        reader.GetBoolean(14),
-        reader.GetGuid(15),
-        reader.GetString(16),
-        reader.GetString(17),
-        reader.GetBoolean(18),
-        reader.GetBoolean(19),
-        reader.IsDBNull(20) ? null : reader.GetInt32(20),
-        reader.GetInt32(21));
 
     private static RowData MapRow(RawRow raw, IReadOnlyDictionary<Guid, TransactionTagRef[]> tags)
     {
@@ -2032,8 +1858,7 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return new RowData(response, raw.NormalizedDescription, tagIds, raw.SourcePage, raw.SourceRowNumber);
     }
 
-    private static async Task<Dictionary<Guid, TransactionTagRef[]>> LoadAssignedTagsAsync(NpgsqlConnection connection,
-                                                                                           NpgsqlTransaction transaction,
+    private static async Task<Dictionary<Guid, TransactionTagRef[]>> LoadAssignedTagsAsync(ArgusDbContext context,
                                                                                            Guid customerId,
                                                                                            IReadOnlyCollection<Guid> transactionIds,
                                                                                            CancellationToken cancellationToken)
@@ -2044,30 +1869,23 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
             return result;
         }
 
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT j.transaction_id, m.id, m.display_name, m.is_archived
-            FROM transaction_merchant_tags j
-            JOIN merchant_tags m
-              ON m.customer_id = j.customer_id AND m.id = j.merchant_tag_id
-            WHERE j.customer_id = @customer_id AND j.transaction_id = ANY(@ids)
-            ORDER BY m.display_name, m.id
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid, transactionIds.ToArray());
-
+        var rows = await (
+            from link in context.TransactionMerchantTags.AsNoTracking()
+            join tag in context.MerchantTags
+                on new { link.CustomerId, Id = link.MerchantTagId } equals new { tag.CustomerId, Id = tag.Id }
+            where link.CustomerId == customerId && transactionIds.Contains(link.TransactionId)
+            orderby tag.DisplayName, tag.Id
+            select new { link.TransactionId, tag.Id, tag.DisplayName, tag.IsArchived })
+            .ToListAsync(cancellationToken);
         var collected = new Dictionary<Guid, List<TransactionTagRef>>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        foreach (var row in rows)
         {
-            var transactionId = reader.GetGuid(0);
-            if (!collected.TryGetValue(transactionId, out var list))
+            if (!collected.TryGetValue(row.TransactionId, out List<TransactionTagRef>? list))
             {
                 list = [];
-                collected[transactionId] = list;
+                collected[row.TransactionId] = list;
             }
-            list.Add(new TransactionTagRef(reader.GetGuid(1), reader.GetString(2), reader.GetBoolean(3)));
+            list.Add(new TransactionTagRef(row.Id, row.DisplayName, row.IsArchived));
         }
 
         foreach (var (id, list) in collected)
@@ -2078,58 +1896,37 @@ public sealed class TransactionStore(Db db, ITransactionFaultInjector faults)
         return result;
     }
 
-    private static async Task<TransactionCategoryRef?> ReadCategoryRefAsync(NpgsqlConnection connection,
-                                                                           NpgsqlTransaction? transaction,
-                                                                           Guid customerId,
-                                                                           Guid categoryId,
-                                                                           CancellationToken cancellationToken)
+    private static async Task<TransactionCategoryRef?> ReadCategoryRefAsync(ArgusDbContext context,
+                                                                            Guid customerId,
+                                                                            Guid categoryId,
+                                                                            CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT id, display_name, kind, is_system, is_archived
-            FROM categories
-            WHERE customer_id = @customer_id AND id = @id
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        command.Parameters.AddWithValue("id", categoryId);
-
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
-        {
-            return null;
-        }
-
-        return new TransactionCategoryRef(
-            reader.GetGuid(0),
-            reader.GetString(1),
-            reader.GetString(2),
-            reader.GetBoolean(3),
-            reader.GetBoolean(4));
+        return await context.Categories
+            .AsNoTracking()
+            .Where(category => category.CustomerId == customerId && category.Id == categoryId)
+            .Select(category => new TransactionCategoryRef(
+                category.Id,
+                category.DisplayName,
+                category.Kind,
+                category.IsSystem,
+                category.IsArchived))
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
-    private static async Task<IReadOnlyList<(Guid Id, string DisplayName, string[] Tokens)>>
-        LoadActiveTagsAsync(NpgsqlConnection connection,
-                            NpgsqlTransaction transaction,
-                            Guid customerId,
-                            CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<(Guid Id, string DisplayName, string[] Tokens)>> LoadActiveTagsAsync(ArgusDbContext context,
+                                                                                                                 Guid customerId,
+                                                                                                                 CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT id, display_name, normalized_name
-            FROM merchant_tags
-            WHERE customer_id = @customer_id AND is_archived = FALSE
-            ORDER BY normalized_name, id
-            """;
-        command.Parameters.AddWithValue("customer_id", customerId);
-        var tags = new List<(Guid Id, string DisplayName, string[] Tokens)>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            tags.Add((reader.GetGuid(0), reader.GetString(1), reader.GetString(2).Split(' ', StringSplitOptions.RemoveEmptyEntries)));
-        }
+        var rows = await context.MerchantTags
+            .AsNoTracking()
+            .Where(tag => tag.CustomerId == customerId && !tag.IsArchived)
+            .OrderBy(tag => tag.NormalizedName)
+            .ThenBy(tag => tag.Id)
+            .Select(tag => new { tag.Id, tag.DisplayName, tag.NormalizedName })
+            .ToListAsync(cancellationToken);
 
-        return tags;
+        return rows
+            .Select(tag => (tag.Id, tag.DisplayName, tag.NormalizedName.Split(' ', StringSplitOptions.RemoveEmptyEntries)))
+            .ToList();
     }
 }

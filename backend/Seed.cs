@@ -1,6 +1,8 @@
 using argus.Server.Configuration;
 using argus.Server.Data;
+using argus.Server.Data.Entities;
 using argus.Server.Security;
+using Microsoft.EntityFrameworkCore;
 
 namespace argus.Server;
 
@@ -10,19 +12,20 @@ namespace argus.Server;
 /// </summary>
 public static class Seed
 {
-    public static async Task RunAsync(Db db,
+    public static async Task RunAsync(string databaseUrl,
+                                      FinanceStore financeStore,
+                                      IDbContextFactory<ArgusDbContext> contextFactory,
                                       AppSettings settings,
                                       ILogger logger,
                                       CancellationToken cancellationToken = default)
     {
-        await db.MigrateAsync(cancellationToken);
-        var financeStore = new FinanceStore(db);
-        await SeedAccountAsync(db, financeStore, logger, settings.SeedDevPassword, "dev@example.test", isAdmin: true, isLifetime: true, cancellationToken);
-        await SeedAccountAsync(db, financeStore, logger, settings.SeedUserPassword, "user@example.test", isAdmin: false, isLifetime: false, cancellationToken);
+        await new InitializationCoordinator(databaseUrl, NoopInitializationFaultInjector.Instance).InitializeAsync(cancellationToken);
+        await SeedAccountAsync(financeStore, contextFactory, logger, settings.SeedDevPassword, "dev@example.test", isAdmin: true, isLifetime: true, cancellationToken);
+        await SeedAccountAsync(financeStore, contextFactory, logger, settings.SeedUserPassword, "user@example.test", isAdmin: false, isLifetime: false, cancellationToken);
     }
 
-    private static async Task SeedAccountAsync(Db db,
-                                               FinanceStore financeStore,
+    private static async Task SeedAccountAsync(FinanceStore financeStore,
+                                               IDbContextFactory<ArgusDbContext> contextFactory,
                                                ILogger logger,
                                                string? pinnedPassword,
                                                string email,
@@ -33,41 +36,44 @@ public static class Seed
         string password = string.IsNullOrEmpty(pinnedPassword) ? Tokens.NewToken() : pinnedPassword;
         string passwordHash = PasswordHasher.Hash(password);
 
-        await using var connection = await db.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT INTO customers (
-                id, canonical_email, password_hash, email_verified_at,
-                subscriber_activated_at, next_billing_at, is_lifetime, is_admin,
-                created_at, updated_at, failed_login_count, locked_until
-            )
-            VALUES (@id, @email, @hash, NOW(), NOW(), NULL, @lifetime, @admin, NOW(), NOW(), 0, NULL)
-            ON CONFLICT (canonical_email) DO NOTHING
-            """;
-        command.Parameters.AddWithValue("id", Guid.NewGuid());
-        command.Parameters.AddWithValue("email", email);
-        command.Parameters.AddWithValue("hash", passwordHash);
-        command.Parameters.AddWithValue("lifetime", isLifetime);
-        command.Parameters.AddWithValue("admin", isAdmin);
-
-        int inserted = await command.ExecuteNonQueryAsync(cancellationToken);
-        if (inserted == 1)
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        List<Customer> inserted = await context.Customers
+            .FromSqlInterpolated($"""
+                WITH inserted AS (
+                    INSERT INTO customers (
+                        id, canonical_email, password_hash, email_verified_at,
+                        subscriber_activated_at, next_billing_at, is_lifetime, is_admin,
+                        created_at, updated_at, failed_login_count, locked_until
+                    )
+                    VALUES (
+                        {Guid.NewGuid()}, {email}, {passwordHash}, NOW(),
+                        NOW(), NULL, {isLifetime}, {isAdmin}, NOW(), NOW(), 0, NULL
+                    )
+                    ON CONFLICT (canonical_email) DO NOTHING
+                    RETURNING *
+                )
+                SELECT * FROM inserted
+                """)
+            .AsTracking()
+            .ToListAsync(cancellationToken);
+        if (inserted.Count == 1)
         {
             Console.WriteLine($"seed: created {email} password {password}");
             logger.LogInformation("seed_account email={Email} outcome={Outcome}", email, "created");
-        }
-        else
-        {
-            Console.WriteLine($"seed: kept existing account {email}");
-            logger.LogInformation("seed_account email={Email} outcome={Outcome}", email, "kept");
+            await financeStore.EnsureCategoriesSeededAsync(inserted[0].Id, cancellationToken);
+            return;
         }
 
-        await using var lookup = connection.CreateCommand();
-        lookup.CommandText = "SELECT id FROM customers WHERE canonical_email = @email";
-        lookup.Parameters.AddWithValue("email", email);
-        if (await lookup.ExecuteScalarAsync(cancellationToken) is Guid customerId)
+        Console.WriteLine($"seed: kept existing account {email}");
+        logger.LogInformation("seed_account email={Email} outcome={Outcome}", email, "kept");
+        Guid? customerId = await context.Customers
+            .AsNoTracking()
+            .Where(customer => customer.CanonicalEmail == email)
+            .Select(customer => (Guid?)customer.Id)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (customerId is Guid existingId)
         {
-            await financeStore.EnsureCategoriesSeededAsync(customerId, cancellationToken);
+            await financeStore.EnsureCategoriesSeededAsync(existingId, cancellationToken);
         }
     }
 }

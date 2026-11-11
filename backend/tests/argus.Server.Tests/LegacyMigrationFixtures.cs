@@ -1,398 +1,29 @@
-using System.Globalization;
-using argus.Server.Imports;
-using Npgsql;
-
-namespace argus.Server.Data;
-
-public sealed record CustomerRecord(Guid Id,
-                                    string CanonicalEmail,
-                                    string PasswordHash,
-                                    DateTime? EmailVerifiedAt,
-                                    DateTime? SubscriberActivatedAt,
-                                    DateTime? NextBillingAt,
-                                    bool IsLifetime,
-                                    bool IsAdmin,
-                                    DateTime CreatedAt,
-                                    DateTime UpdatedAt,
-                                    int FailedLoginCount,
-                                    DateTime? LockedUntil);
-
-public abstract record ResetRequestOutcome
-{
-    public sealed record Issued(Guid CustomerId, string Recipient, string RawToken) : ResetRequestOutcome;
-
-    public sealed record Shade : ResetRequestOutcome;
-}
+namespace argus.Server.Tests;
 
 /// <summary>
-/// PostgreSQL connection factory and startup migration runner. Migrations are
-/// embedded, applied in filename order, and recorded so a restart is a no-op.
+/// Frozen legacy DDL copied from the public a416206 baseline. These fixtures
+/// are intentionally independent of the production migration definitions so a
+/// future production change cannot silently change both sides of a test.
 /// </summary>
-public sealed class Db
+public static class LegacyMigrationFixtures
 {
-    private readonly string _connectionString;
+    public const string CanonicalBackfillMarker = "0006_canonical_identity_backfill";
 
-    public Db(string databaseUrl)
-    {
-        _connectionString = BuildConnectionString(databaseUrl);
-    }
-
-    public NpgsqlConnection Connect() => new(_connectionString);
-
-    public async Task<NpgsqlConnection> OpenAsync(CancellationToken cancellationToken = default)
-    {
-        NpgsqlConnection connection = Connect();
-        await connection.OpenAsync(cancellationToken);
-
-        return connection;
-    }
-
-    public async Task MigrateAsync(CancellationToken cancellationToken = default)
-    {
-        await using NpgsqlConnection connection = await OpenAsync(cancellationToken);
-
-        await using (NpgsqlCommand create = connection.CreateCommand())
-        {
-            create.CommandText = "CREATE TABLE IF NOT EXISTS schema_migrations (" + "name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())";
-            await create.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        foreach ((string? name, string? sql) in Migrations.All)
-        {
-            await using (var check = connection.CreateCommand())
-            {
-                check.CommandText = "SELECT 1 FROM schema_migrations WHERE name = @name";
-                check.Parameters.AddWithValue("name", name);
-                if (await check.ExecuteScalarAsync(cancellationToken) is not null)
-                {
-                    continue;
-                }
-            }
-
-            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-            await using (var apply = connection.CreateCommand())
-            {
-                apply.Transaction = transaction;
-                apply.CommandText = sql;
-                await apply.ExecuteNonQueryAsync(cancellationToken);
-            }
-            await using (var record = connection.CreateCommand())
-            {
-                record.Transaction = transaction;
-                record.CommandText = "INSERT INTO schema_migrations (name) VALUES (@name)";
-                record.Parameters.AddWithValue("name", name);
-                await record.ExecuteNonQueryAsync(cancellationToken);
-            }
-            await transaction.CommitAsync(cancellationToken);
-        }
-
-        await BackfillCanonicalIdentitiesAsync(connection, cancellationToken);
-    }
-
-    /// <summary>
-    /// One-time data backfill after schema migration 0006. It derives canonical
-    /// transaction identities and statement fingerprints from stored rows and
-    /// allocates deterministic occurrence slots without dropping data. The
-    /// marker makes the operation idempotent across restarts.
-    /// </summary>
-    public static async Task BackfillCanonicalIdentitiesAsync(NpgsqlConnection connection, CancellationToken cancellationToken = default)
-    {
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-
-        await using (var create = connection.CreateCommand())
-        {
-            create.Transaction = transaction;
-            create.CommandText = """
-                CREATE TABLE IF NOT EXISTS data_migrations (
-                    name TEXT PRIMARY KEY,
-                    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """;
-            await create.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        await using (var check = connection.CreateCommand())
-        {
-            check.Transaction = transaction;
-            check.CommandText = "SELECT 1 FROM data_migrations WHERE name = @name";
-            check.Parameters.AddWithValue("name", "0006_canonical_identity_backfill");
-            if (await check.ExecuteScalarAsync(cancellationToken) is not null)
-            {
-                await transaction.CommitAsync(cancellationToken);
-                return;
-            }
-        }
-
-        var transactions = new List<BackfillTransaction>();
-        await using (var select = connection.CreateCommand())
-        {
-            select.Transaction = transaction;
-            select.CommandText = """
-                SELECT id, customer_id, financial_account_id, transaction_date,
-                       (amount * 100)::bigint, normalized_description, created_at
-                FROM transactions
-                ORDER BY customer_id, financial_account_id, created_at, id
-                """;
-            await using var reader = await select.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                var date = reader.GetFieldValue<DateOnly>(3);
-                long cents = reader.GetInt64(4);
-                string normalized = reader.GetString(5);
-                transactions.Add(new BackfillTransaction(reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2), date, cents, normalized, StatementIdentity.ComputeIdentityKey(date, cents, normalized), reader.GetFieldValue<DateTime>(6)));
-            }
-        }
-
-        // Stage every row on a unique temporary key before writing canonical
-        // keys. This avoids colliding with a row that already owns the target
-        // (identity_key, occurrence_index) while the unique constraint is live.
-        await using (var stage = connection.CreateCommand())
-        {
-            stage.Transaction = transaction;
-            stage.CommandText = """
-                UPDATE transactions
-                SET identity_key = 'tmp:' || id::text,
-                    occurrence_index = 1,
-                    identity_version = 1
-                """;
-            await stage.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        foreach (var group in transactions.GroupBy(
-                     row => (row.CustomerId, row.AccountId, row.IdentityKey)))
-        {
-            int occurrence = 1;
-            foreach (var row in group.OrderBy(row => row.CreatedAt).ThenBy(row => row.Id))
-            {
-                await using var update = connection.CreateCommand();
-                update.Transaction = transaction;
-                update.CommandText = """
-                    UPDATE transactions
-                    SET identity_key = @identity_key,
-                        identity_version = 1,
-                        occurrence_index = @occurrence_index
-                    WHERE id = @id
-                    """;
-                update.Parameters.AddWithValue("identity_key", row.IdentityKey);
-                update.Parameters.AddWithValue("occurrence_index", occurrence);
-                update.Parameters.AddWithValue("id", row.Id);
-                await update.ExecuteNonQueryAsync(cancellationToken);
-                occurrence++;
-            }
-        }
-
-        var statements = new List<BackfillStatement>();
-        await using (var select = connection.CreateCommand())
-        {
-            select.Transaction = transaction;
-            select.CommandText = """
-                SELECT id, customer_id, financial_account_id, start_date, end_date, created_at
-                FROM statement_imports
-                ORDER BY customer_id, financial_account_id, created_at, id
-                """;
-            await using var reader = await select.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                statements.Add(new BackfillStatement(reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2), reader.GetFieldValue<DateOnly>(3), reader.GetFieldValue<DateOnly>(4), reader.GetFieldValue<DateTime>(5), []));
-            }
-        }
-
-        var statementsById = statements.ToDictionary(statement => statement.Id);
-        await using (var select = connection.CreateCommand())
-        {
-            select.Transaction = transaction;
-            select.CommandText = """
-                SELECT statement_import_id, id, transaction_date, description,
-                       normalized_description, (amount * 100)::bigint, source_page, source_row_number
-                FROM transactions
-                WHERE statement_import_id IS NOT NULL
-                ORDER BY statement_import_id, source_row_number, id
-                """;
-            await using var reader = await select.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                if (!statementsById.TryGetValue(reader.GetGuid(0), out var statement))
-                {
-                    continue;
-                }
-
-                var date = reader.GetFieldValue<DateOnly>(2);
-                long cents = reader.GetInt64(5);
-                string description = reader.GetString(3);
-                string normalized = reader.GetString(4);
-                statement.Rows.Add(new ParsedStatementRow(
-                    reader.GetGuid(1),
-                    reader.IsDBNull(7) ? 1 : reader.GetInt32(7),
-                    reader.IsDBNull(6) ? null : reader.GetInt32(6),
-                    reader.IsDBNull(7) ? 1 : reader.GetInt32(7),
-                    new Dictionary<string, string?>(StringComparer.Ordinal)
-                    {
-                        ["date"] = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                        ["description"] = description,
-                        ["amount"] = StatementText.FormatCents(cents),
-                    },
-                    date,
-                    description,
-                    normalized,
-                    cents,
-                    [],
-                    [],
-                    null,
-                    null));
-            }
-        }
-
-        foreach (var statement in statements)
-        {
-            statement.Fingerprint = StatementIdentity.ComputeStatementFingerprint(statement.Rows, statement.StartDate, statement.EndDate);
-        }
-
-        await using (var stage = connection.CreateCommand())
-        {
-            stage.Transaction = transaction;
-            stage.CommandText = """
-                UPDATE statement_imports
-                SET statement_fingerprint = 'tmp:' || id::text,
-                    fingerprint_occurrence = 1
-                """;
-            await stage.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        foreach (var group in statements.GroupBy(
-                     statement => (statement.CustomerId, statement.AccountId, statement.Fingerprint)))
-        {
-            int occurrence = 1;
-            foreach (var statement in group.OrderBy(item => item.CreatedAt).ThenBy(item => item.Id))
-            {
-                await using var update = connection.CreateCommand();
-                update.Transaction = transaction;
-                update.CommandText = """
-                    UPDATE statement_imports
-                    SET statement_fingerprint = @fingerprint,
-                        fingerprint_occurrence = @occurrence
-                    WHERE id = @id
-                    """;
-                update.Parameters.AddWithValue("fingerprint", statement.Fingerprint);
-                update.Parameters.AddWithValue("occurrence", occurrence);
-                update.Parameters.AddWithValue("id", statement.Id);
-                await update.ExecuteNonQueryAsync(cancellationToken);
-                occurrence++;
-            }
-        }
-
-        await using (var marker = connection.CreateCommand())
-        {
-            marker.Transaction = transaction;
-            marker.CommandText = "INSERT INTO data_migrations (name) VALUES ('0006_canonical_identity_backfill')";
-            await marker.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        await transaction.CommitAsync(cancellationToken);
-    }
-
-    private sealed class BackfillTransaction(Guid id,
-                                             Guid customerId,
-                                             Guid accountId,
-                                             DateOnly date,
-                                             long cents,
-                                             string normalized,
-                                             string identityKey,
-                                             DateTime createdAt)
-    {
-        public Guid Id { get; } = id;
-        public Guid CustomerId { get; } = customerId;
-        public Guid AccountId { get; } = accountId;
-        public DateOnly Date { get; } = date;
-        public long Cents { get; } = cents;
-        public string Normalized { get; } = normalized;
-        public string IdentityKey { get; } = identityKey;
-        public DateTime CreatedAt { get; } = createdAt;
-    }
-
-    private sealed class BackfillStatement(Guid id,
-                                           Guid customerId,
-                                           Guid accountId,
-                                           DateOnly startDate,
-                                           DateOnly endDate,
-                                           DateTime createdAt,
-                                           List<ParsedStatementRow> rows)
-    {
-        public Guid Id { get; } = id;
-        public Guid CustomerId { get; } = customerId;
-        public Guid AccountId { get; } = accountId;
-        public DateOnly StartDate { get; } = startDate;
-        public DateOnly EndDate { get; } = endDate;
-        public DateTime CreatedAt { get; } = createdAt;
-        public List<ParsedStatementRow> Rows { get; } = rows;
-        public string Fingerprint { get; set; } = string.Empty;
-    }
-
-    public static string BuildConnectionString(string databaseUrl)
-    {
-        if (!Uri.TryCreate(databaseUrl, UriKind.Absolute, out var uri))
-        {
-            throw new InvalidOperationException("database URL is not a valid URI");
-        }
-
-        var builder = new NpgsqlConnectionStringBuilder
-        {
-            Host = uri.Host,
-            Port = uri.IsDefaultPort ? 5432 : uri.Port,
-            Database = uri.AbsolutePath.TrimStart('/'),
-        };
-
-        if (!string.IsNullOrEmpty(uri.UserInfo))
-        {
-            string[] parts = uri.UserInfo.Split(':', 2);
-            builder.Username = Uri.UnescapeDataString(parts[0]);
-            if (parts.Length == 2)
-            {
-                builder.Password = Uri.UnescapeDataString(parts[1]);
-            }
-        }
-
-        string? sslmode = QueryValue(uri.Query, "sslmode");
-        if (sslmode is not null)
-        {
-            builder.SslMode = sslmode switch
-            {
-                "disable" => SslMode.Disable,
-                "prefer" => SslMode.Prefer,
-                "require" => SslMode.Require,
-                "verify-ca" => SslMode.VerifyCA,
-                "verify-full" => SslMode.VerifyFull,
-                _ => throw new InvalidOperationException($"unsupported sslmode '{sslmode}'"),
-            };
-        }
-
-        return builder.ConnectionString;
-    }
-
-    private static string? QueryValue(string query, string name)
-    {
-        foreach (string pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            int separator = pair.IndexOf('=');
-            if (separator <= 0)
-            {
-                continue;
-            }
-
-            if (pair[..separator].Equals(name, StringComparison.OrdinalIgnoreCase))
-            {
-                return Uri.UnescapeDataString(pair[(separator + 1)..]).ToLowerInvariant();
-            }
-        }
-
-        return null;
-    }
-}
-
-public static class Migrations
-{
-    public static readonly (string Name, string Sql)[] All =
+    public static readonly string[] LegacyNames =
     [
-        ("0001_customer_accounts", """
+        "0001_customer_accounts",
+        "0002_email_verification_tokens",
+        "0003_password_reset_tokens",
+        "0004_failed_login_lockout",
+        "0005_finance_foundation",
+        "0006_statement_import",
+        "0007_transaction_workspace",
+        "0008_suggestion_learning",
+        "0009_review_category_suggestion",
+        "0010_transaction_category_confirmation",
+    ];
+
+    public const string M0001CustomerAccounts = """
             CREATE TABLE customers (
                 id UUID PRIMARY KEY,
                 canonical_email TEXT NOT NULL UNIQUE,
@@ -417,8 +48,9 @@ public static class Migrations
             );
 
             CREATE INDEX sessions_customer_id_idx ON sessions(customer_id);
-            """),
-        ("0002_email_verification_tokens", """
+        """;
+
+    public const string M0002EmailVerificationTokens = """
             CREATE TABLE email_verification_tokens (
                 id UUID PRIMARY KEY,
                 customer_id UUID NOT NULL REFERENCES customers(id),
@@ -430,8 +62,9 @@ public static class Migrations
 
             CREATE INDEX email_verification_tokens_customer_id_idx
                 ON email_verification_tokens(customer_id);
-            """),
-        ("0003_password_reset_tokens", """
+        """;
+
+    public const string M0003PasswordResetTokens = """
             CREATE TABLE password_reset_tokens (
                 id UUID PRIMARY KEY,
                 customer_id UUID NOT NULL REFERENCES customers(id),
@@ -443,13 +76,15 @@ public static class Migrations
 
             CREATE INDEX password_reset_tokens_customer_id_idx
                 ON password_reset_tokens(customer_id);
-            """),
-        ("0004_failed_login_lockout", """
+        """;
+
+    public const string M0004FailedLoginLockout = """
             ALTER TABLE customers
                 ADD COLUMN failed_login_count INT NOT NULL DEFAULT 0,
                 ADD COLUMN locked_until TIMESTAMPTZ NULL;
-            """),
-        ("0005_finance_foundation", """
+        """;
+
+    public const string M0005FinanceFoundation = """
             ALTER TABLE customers
                 ADD COLUMN categories_seeded_at TIMESTAMPTZ NULL;
 
@@ -571,8 +206,9 @@ public static class Migrations
 
             CREATE INDEX transaction_merchant_tags_tag_idx
                 ON transaction_merchant_tags(merchant_tag_id);
-            """),
-        ("0006_statement_import", """
+        """;
+
+    public const string M0006StatementImport = """
             ALTER TABLE financial_accounts
                 ADD COLUMN import_version BIGINT NOT NULL DEFAULT 0;
 
@@ -813,9 +449,9 @@ public static class Migrations
 
             CREATE INDEX import_commit_receipts_customer_idx
                 ON import_commit_receipts(customer_id, operation_id);
-            """)
-        ,
-        ("0007_transaction_workspace", """
+        """;
+
+    public const string M0007TransactionWorkspace = """
             CREATE TABLE transaction_operations (
                 customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
                 operation_id UUID NOT NULL,
@@ -876,8 +512,9 @@ public static class Migrations
                 ON transactions(customer_id, transaction_date, id);
             CREATE INDEX transactions_customer_amount_idx
                 ON transactions(customer_id, amount, id);
-            """),
-        ("0008_suggestion_learning", """
+        """;
+
+    public const string M0008SuggestionLearning = """
             CREATE FUNCTION argus_merchant_key(description TEXT) RETURNS TEXT
             LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
                 SELECT string_agg(token, ' ' ORDER BY ordinality)
@@ -916,20 +553,22 @@ public static class Migrations
                 ON merchant_aliases(customer_id, normalized_alias);
             CREATE INDEX merchant_aliases_customer_idx
                 ON merchant_aliases(customer_id);
-            """),
-        ("0009_review_category_suggestion", """
+        """;
+
+    public const string M0009ReviewCategorySuggestion = """
             ALTER TABLE import_review_rows
                 ADD COLUMN suggested_category_id UUID NULL,
                 ADD COLUMN selected_category_id UUID NULL,
                 ADD COLUMN category_decided BOOLEAN NOT NULL DEFAULT FALSE;
-            """),
-        ("0010_transaction_category_confirmation", """
+        """;
+
+    public const string M0010TransactionCategoryConfirmation = """
             ALTER TABLE transactions
                 ADD COLUMN category_confirmed BOOLEAN NOT NULL DEFAULT TRUE;
 
             CREATE INDEX transactions_customer_unconfirmed_idx
                 ON transactions(customer_id)
                 WHERE category_confirmed = FALSE;
-            """)
-    ];
+        """;
+
 }

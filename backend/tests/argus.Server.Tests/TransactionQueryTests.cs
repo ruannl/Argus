@@ -66,6 +66,33 @@ public sealed class TransactionQueryTests(KitFactory factory, ITestOutputHelper 
     }
 
     [Fact]
+    public async Task LargePageNumbersReturnEmptyPagesWithoutOffsetWrapping()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var (_, expenseId) = await DefaultCategoriesAsync(session);
+        var statementId = await SeedStatementAsync(customerId, accountId);
+        for (int index = 1; index <= 8; index++)
+        {
+            await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2024, 4, index), $"Paged row {index}", -index, index);
+        }
+
+        var first = await QueryAsync(session, new { page = 1, page_size = 100 });
+        Assert.Equal(8, Rows(first).Length);
+
+        // Both offsets exceed int.MaxValue; one would wrap to row 5 and one
+        // would become negative under a 32-bit narrowing.
+        foreach (int page in new[] { 42_949_674, 21_474_838 })
+        {
+            var far = await QueryAsync(session, new { page, page_size = 100 });
+            Assert.Equal(HttpStatusCode.OK, (await QueryResponseAsync(session, new { page, page_size = 100 })).StatusCode);
+            Assert.Empty(Rows(far));
+            Assert.Equal(8, Count(far, "filtered_total"));
+            Assert.Equal(page, far.GetProperty("page").GetInt32());
+        }
+    }
+
+    [Fact]
     public async Task AmountsAreExactInvariantStringsAndDirectionFollowsSign()
     {
         var (session, customerId) = await NewCustomerAsync();
@@ -449,6 +476,7 @@ public sealed class TransactionQueryTests(KitFactory factory, ITestOutputHelper 
     }
 
     [Fact]
+    [Trait("Category", "Performance")]
     public async Task TwentyThousandRowMeasurementRecordsTimingsAndPlan()
     {
         var (session, customerId) = await NewCustomerAsync();

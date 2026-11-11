@@ -7,6 +7,7 @@ using argus.Server.Http;
 using argus.Server.Mail;
 using argus.Server.Security;
 using argus.Server.Transactions;
+using Microsoft.EntityFrameworkCore;
 
 // The PDF parser child must run before configuration, migrations, logging, or
 // web services are loaded. It reads only its bounded stdin frame and writes
@@ -59,6 +60,11 @@ builder.Logging.SetMinimumLevel(settings.LogLevel switch
     _ => LogLevel.Information,
 });
 
+// Framework database errors can carry provider primary text in several
+// categories, including Update and Query. Suppress the entire EF logging
+// namespace at the host boundary; application and audit logs remain.
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.None);
+
 builder.WebHost.UseUrls($"http://{settings.Host}:{settings.Port}");
 
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -71,7 +77,8 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
     .WithHeaders(Brand.ApplicationSecretHeader, Brand.SessionHeader, Brand.FrontendOriginHeader)));
 
 builder.Services.AddSingleton(settings);
-builder.Services.AddSingleton(new Db(settings.DatabaseUrl));
+builder.Services.AddSingleton<IInitializationFaultInjector>(NoopInitializationFaultInjector.Instance);
+builder.Services.AddPooledDbContextFactory<ArgusDbContext>(options => PersistenceOptions.Configure(options, PersistenceOptions.BuildConnectionString(settings.DatabaseUrl)));
 builder.Services.AddSingleton<Store>();
 builder.Services.AddSingleton<FinanceStore>();
 builder.Services.AddSingleton<Policy>();
@@ -93,6 +100,12 @@ builder.Services.AddHostedService<TransactionCleanupService>();
 builder.Services.AddHostedService<ImportCleanupService>();
 
 var app = builder.Build();
+
+if (args.Contains("migrate", StringComparer.Ordinal))
+{
+    new InitializationCoordinator(settings.DatabaseUrl, app.Services.GetRequiredService<IInitializationFaultInjector>()).Initialize();
+    return 0;
+}
 
 app.UseExceptionHandler(handler => handler.Run(async context =>
 {
@@ -126,12 +139,16 @@ app.Use(async (context, next) =>
     app.Logger.LogInformation("http_request method={Method} path={Path} status={Status} elapsed_ms={ElapsedMs}", context.Request.Method, context.Request.Path.Value, context.Response.StatusCode, stopwatch.ElapsedMilliseconds);
 });
 
-var db = app.Services.GetRequiredService<Db>();
-await db.MigrateAsync();
+await new InitializationCoordinator(settings.DatabaseUrl, app.Services.GetRequiredService<IInitializationFaultInjector>()).InitializeAsync();
 
 if (args.Contains("seed"))
 {
-    await Seed.RunAsync(db, settings, app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("seed"));
+    await Seed.RunAsync(
+        settings.DatabaseUrl,
+        app.Services.GetRequiredService<FinanceStore>(),
+        app.Services.GetRequiredService<IDbContextFactory<ArgusDbContext>>(),
+        settings,
+        app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("seed"));
     return 0;
 }
 
