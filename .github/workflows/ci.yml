@@ -58,8 +58,11 @@ jobs:
           dotnet format tests/argus.Server.Tests/argus.Server.Tests.csproj --verify-no-changes
           dotnet format style tests/argus.Server.Tests/argus.Server.Tests.csproj --diagnostics IDE0005 --severity info --verify-no-changes
 
-      - name: Isolation tests (real PostgreSQL)
+      - name: Isolation tests (real PostgreSQL, excluding performance)
         run: dotnet test tests/argus.Server.Tests -warnaserror
+
+      - name: Persistence performance tests (real PostgreSQL)
+        run: dotnet test tests/argus.Server.Tests -warnaserror --filter "Category=Performance"
 
       - name: Release build
         run: dotnet build -c Release -warnaserror

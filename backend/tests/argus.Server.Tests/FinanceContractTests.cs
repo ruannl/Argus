@@ -3,6 +3,7 @@ using System.Net;
 using System.Text.Json;
 using argus.Server.Data;
 using argus.Server.Security;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace argus.Server.Tests;
@@ -295,7 +296,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         Assert.Equal(HttpStatusCode.OK, delete.StatusCode);
 
         // Re-invoking the seeder must not restore the renamed or deleted defaults.
-        FinanceStore store = new FinanceStore(Factory.CreateDb());
+        FinanceStore store = Factory.Services.GetRequiredService<FinanceStore>();
         await store.EnsureCategoriesSeededAsync(customerId);
 
         var categories = await ListCategoriesAsync(session);
@@ -1136,6 +1137,38 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         Assert.Fail($"The alias write did not reach the {table} row-lock wait.");
     }
 
+    [Fact]
+    public async Task ListsPreserveArchivedAndStableOrdering()
+    {
+        var (session, _) = await NewCustomerAsync();
+
+        Assert.Equal(HttpStatusCode.Created, (await SendAsync(Post(TagsPath, Json(new { display_name = "ZuluTag" }), session: session))).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await SendAsync(Post(TagsPath, Json(new { display_name = "AlphaTag" }), session: session))).StatusCode);
+        string[] tagNames = (await ListTagsAsync(session))
+            .EnumerateArray()
+            .Select(item => item.GetProperty("display_name").GetString()!)
+            .ToArray();
+        Assert.Equal(["AlphaTag", "ZuluTag"], tagNames);
+
+        Assert.Equal(HttpStatusCode.Created, (await SendAsync(Post(CategoriesPath, Json(new { display_name = "ZuluCategory", kind = "Expense" }), session: session))).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await SendAsync(Post(CategoriesPath, Json(new { display_name = "AlphaCategory", kind = "Expense" }), session: session))).StatusCode);
+        string[] categoryNames = (await ListCategoriesAsync(session))
+            .EnumerateArray()
+            .Select(item => item.GetProperty("display_name").GetString()!)
+            .ToArray();
+        Assert.True(Array.IndexOf(categoryNames, "AlphaCategory") < Array.IndexOf(categoryNames, "ZuluCategory"));
+        Assert.Equal("Uncategorised", categoryNames[0]);
+
+        Guid zuluAccountId = await CreateAccountAsync(session, "ZuluAccount");
+        _ = await CreateAccountAsync(session, "AlphaAccount");
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(Post($"{AccountsPath}/{zuluAccountId}/archive", string.Empty, session: session))).StatusCode);
+        string[] accountNames = (await ListAccountsAsync(session))
+            .EnumerateArray()
+            .Select(item => item.GetProperty("display_name").GetString()!)
+            .ToArray();
+        Assert.Equal(["AlphaAccount", "ZuluAccount"], accountNames);
+    }
+
     // --- Concurrency -------------------------------------------------------
 
     [Fact]
@@ -1217,5 +1250,90 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
             Factory.LogCapture.Contains("audit.finance_account_created"),
             "log capture is not receiving finance audit events");
         Assert.False(Factory.LogCapture.Contains("Canary"), string.Join("\n", Factory.LogCapture.Snapshot()));
+    }
+
+    [Fact]
+    public async Task ProviderErrorCanaryDoesNotReachFrameworkLogs()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        string canary = "CanaryProvider_" + Guid.NewGuid().ToString("N");
+        string suffix = Guid.NewGuid().ToString("N");
+        string functionName = "canary_provider_error_" + suffix;
+        string triggerName = "canary_provider_error_" + suffix;
+        await ExecuteSqlAsync($"""
+            CREATE FUNCTION {functionName}() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                RAISE EXCEPTION 'provider canary %', NEW.display_name;
+                RETURN NEW;
+            END;
+            $$
+            """);
+        await ExecuteSqlAsync($"""
+            CREATE TRIGGER {triggerName} BEFORE INSERT ON financial_accounts
+            FOR EACH ROW EXECUTE FUNCTION {functionName}()
+            """);
+        try
+        {
+            Factory.LogCapture.Clear();
+            var response = await SendAsync(Post(AccountsPath, Json(new { display_name = canary }), session: session));
+            Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+            Assert.Equal("internal_server_error", (await BodyAsync(response)).GetProperty("error").GetString());
+            Assert.Equal(0L, await CountWhereAsync("financial_accounts", $"customer_id = '{customerId}' AND display_name = '{canary}'"));
+        }
+        finally
+        {
+            await ExecuteSqlAsync($"DROP TRIGGER IF EXISTS {triggerName} ON financial_accounts");
+            await ExecuteSqlAsync($"DROP FUNCTION IF EXISTS {functionName}()");
+        }
+
+        Assert.True(Factory.LogCapture.Contains("finance_operation_failed"), "sanitized application error log missing");
+        Assert.False(Factory.LogCapture.Contains(canary), string.Join("\n", Factory.LogCapture.Snapshot()));
+    }
+
+    [Fact]
+    public async Task QueryErrorCanaryDoesNotReachFrameworkLogs()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        string canary = "CanaryQuery_" + Guid.NewGuid().ToString("N");
+        string suffix = Guid.NewGuid().ToString("N");
+        string functionName = "canary_query_error_" + suffix;
+        string triggerName = "canary_query_error_" + suffix;
+        _ = await CreateAccountAsync(session, canary);
+        await ExecuteSqlAsync($"""
+            CREATE FUNCTION {functionName}() RETURNS trigger LANGUAGE plpgsql AS $$
+            DECLARE canary text;
+            BEGIN
+                SELECT display_name INTO canary FROM financial_accounts
+                WHERE customer_id = NEW.customer_id ORDER BY created_at LIMIT 1;
+                IF canary IS NOT NULL THEN
+                    RAISE EXCEPTION 'query canary %', canary;
+                END IF;
+                RETURN NEW;
+            END;
+            $$
+            """);
+        await ExecuteSqlAsync($"""
+            CREATE TRIGGER {triggerName} BEFORE UPDATE ON sessions
+            FOR EACH ROW EXECUTE FUNCTION {functionName}()
+            """);
+        try
+        {
+            string? before = await StringScalarAsync($"SELECT last_seen_at::text FROM sessions WHERE customer_id = '{customerId}' ORDER BY created_at DESC LIMIT 1");
+            Factory.LogCapture.Clear();
+            var response = await SendAsync(Get(AccountsPath, session: session));
+            Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+            Assert.Equal("internal_server_error", (await BodyAsync(response)).GetProperty("error").GetString());
+            string? after = await StringScalarAsync($"SELECT last_seen_at::text FROM sessions WHERE customer_id = '{customerId}' ORDER BY created_at DESC LIMIT 1");
+            Assert.Equal(before, after);
+        }
+        finally
+        {
+            await ExecuteSqlAsync($"DROP TRIGGER IF EXISTS {triggerName} ON sessions");
+            await ExecuteSqlAsync($"DROP FUNCTION IF EXISTS {functionName}()");
+        }
+
+        Assert.True(Factory.LogCapture.Contains("finance_operation_failed"), "sanitized application error log missing");
+        Assert.False(Factory.LogCapture.Contains(canary), string.Join("\n", Factory.LogCapture.Snapshot()));
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(Get(AccountsPath, session: session))).StatusCode);
     }
 }

@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using argus.Server.Data;
 using argus.Server.Imports;
 
 namespace argus.Server.Tests;
@@ -1072,11 +1071,7 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         // test database.
         await ExecuteSqlAsync(
             "DELETE FROM data_migrations WHERE name = '0006_canonical_identity_backfill'");
-        var db = Factory.CreateDb();
-        await using (var connection = await db.OpenAsync())
-        {
-            await Db.BackfillCanonicalIdentitiesAsync(connection);
-        }
+        await PersistenceTestSupport.BackfillAsync(TestEnvironment.RequireTestDatabaseUrl());
 
         var csv = "one\ntwo\nthree\nfour\nfive\nsix\n" + "Date,Amount,Balance,Description\n" + "2025/01/02,-10.00,0.00,Legacy coffee\n";
         var review = await PrepareAsync(session, accountId, System.Text.Encoding.UTF8.GetBytes(csv), new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31));
@@ -1148,11 +1143,7 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
                  1, '{canonicalKey}', 1, NOW() - INTERVAL '1 minute', NOW() - INTERVAL '1 minute');
             """);
         await ExecuteSqlAsync("DELETE FROM data_migrations WHERE name = '0006_canonical_identity_backfill'");
-        var db = Factory.CreateDb();
-        await using (var connection = await db.OpenAsync())
-        {
-            await Db.BackfillCanonicalIdentitiesAsync(connection);
-        }
+        await PersistenceTestSupport.BackfillAsync(TestEnvironment.RequireTestDatabaseUrl());
 
         Assert.Equal(2L, await CountWhereAsync("transactions", $"identity_key = '{canonicalKey}'"));
         Assert.Equal(1L, await CountWhereAsync("transactions", $"identity_key = '{canonicalKey}' AND occurrence_index = 1"));
@@ -1928,4 +1919,137 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var fixture = StatementFixtureBuilder.BuildStandardBankPdf(4, 49, 66);
         await AssertPdfRejectionHasNoEffectsAsync("Synthetic merchant", fixture.Bytes);
     }
+
+    [Fact]
+    public async Task WrappedProviderFailureNeverLogsFinancialSourceText()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var config = new
+        {
+            format = "generic",
+            header_line = 1,
+            delimiter = ",",
+            date_format = "yyyy-MM-dd",
+            decimal_separator = ".",
+            thousands_separator = "none",
+            amount_mode = "signed",
+            date_column = 0,
+            description_column = 1,
+            amount_column = 2,
+            direction = "normal",
+        };
+        const string canary = "ProviderCanary_5527";
+        var file = Encoding.UTF8.GetBytes("Date,Description,Amount\n" + $"2025-01-02,{canary} purchase,-10.00\n");
+        var review = await PrepareAsync(session, accountId, file, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), sourceKind: "generic_csv", parserConfig: config);
+        var reviewId = review.GetProperty("summary").GetProperty("id").GetGuid();
+        long reviewRowsBefore = await CountRowsAsync("import_review_rows");
+        Factory.LogCapture.Clear();
+
+        await ExecuteSqlAsync("""
+            CREATE OR REPLACE FUNCTION raise_import_canary() RETURNS trigger AS $$
+            DECLARE found_text text;
+            BEGIN
+                SELECT description INTO found_text
+                FROM import_review_rows
+                WHERE customer_id = NEW.customer_id AND description LIKE 'ProviderCanary%'
+                LIMIT 1;
+                IF found_text IS NOT NULL THEN
+                    RAISE EXCEPTION 'synthetic provider failure: %', found_text;
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            DROP TRIGGER IF EXISTS raise_import_canary ON statement_imports;
+            CREATE TRIGGER raise_import_canary BEFORE INSERT ON statement_imports
+            FOR EACH ROW EXECUTE FUNCTION raise_import_canary();
+            """);
+        try
+        {
+            var failed = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
+            Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+            Assert.Equal("internal_server_error", await ErrorKindAsync(failed));
+        }
+        finally
+        {
+            await ExecuteSqlAsync("""
+                DROP TRIGGER IF EXISTS raise_import_canary ON statement_imports;
+                DROP FUNCTION IF EXISTS raise_import_canary();
+                """);
+        }
+
+        Assert.False(Factory.LogCapture.Contains(canary));
+        Assert.False(Factory.LogCapture.Contains("synthetic provider failure"));
+        Assert.Contains("finance_operation_failed", string.Join("\n", Factory.LogCapture.Snapshot()));
+        Assert.Contains("sql_state=", string.Join("\n", Factory.LogCapture.Snapshot()));
+        Assert.False(Factory.LogCapture.Contains("audit.import_committed"));
+        Assert.Equal(0L, await CountRowsAsync("statement_imports"));
+        Assert.Equal(0L, await CountRowsAsync("transactions"));
+        Assert.Equal(0L, await CountRowsAsync("import_commit_receipts"));
+        Assert.Equal(reviewRowsBefore, await CountRowsAsync("import_review_rows"));
+        Assert.Equal(1L, await CountWhereAsync("import_reviews", $"id = '{reviewId}' AND status = 'Prepared'"));
+
+        var retried = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
+        Assert.Equal(HttpStatusCode.Created, retried.StatusCode);
+    }
+
+    [Fact]
+    public async Task LegacyStatementDeletionReceiptUsesTheDatabaseClock()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var file = StatementFixtureBuilder.BuildFnbCsv(3, chequeAccount: false).Bytes;
+        var review = await PrepareAsync(session, accountId, file, new DateOnly(2024, 1, 1), new DateOnly(2024, 1, 31));
+        var reviewId = review.GetProperty("summary").GetProperty("id").GetGuid();
+        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
+        Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
+        var statementId = (await BodyAsync(commit)).GetProperty("statement").GetProperty("id").GetGuid();
+        var detail = await BodyAsync(await SendAsync(Get($"{ImportsPath}/{statementId}", session: session)));
+        int version = detail.GetProperty("statement").GetProperty("version").GetInt32();
+        long expectedCount = detail.GetProperty("expected_transaction_count").GetInt64();
+
+        // Legacy statements predate commit receipts, so deletion creates the
+        // fallback Deleted receipt.
+        await ExecuteSqlAsync($"DELETE FROM import_commit_receipts WHERE statement_import_id = '{statementId}'");
+        await ExecuteSqlAsync("""
+            CREATE OR REPLACE FUNCTION delay_statement_delete() RETURNS trigger AS $$
+            BEGIN
+                PERFORM pg_sleep(1.2);
+                RETURN OLD;
+            END;
+            $$ LANGUAGE plpgsql;
+            DROP TRIGGER IF EXISTS delay_statement_delete ON statement_imports;
+            CREATE TRIGGER delay_statement_delete BEFORE DELETE ON statement_imports
+            FOR EACH ROW EXECUTE FUNCTION delay_statement_delete();
+            """);
+        try
+        {
+            string before = (await StringScalarAsync("SELECT clock_timestamp()::text"))!;
+            var deleted = await SendAsync(DeleteJson($"{ImportsPath}/{statementId}", Json(new { expected_version = version, expected_transaction_count = expectedCount, confirm = true }), session: session));
+            string after = (await StringScalarAsync("SELECT clock_timestamp()::text"))!;
+            Assert.Equal(HttpStatusCode.OK, deleted.StatusCode);
+
+            Assert.Equal(1L, await CountWhereAsync("import_commit_receipts", $"statement_import_id = '{statementId}' AND state = 'Deleted'"));
+            Assert.Equal(1L, await CountWhereAsync("import_commit_receipts", $"statement_import_id = '{statementId}' AND created_at = updated_at"));
+            Assert.Equal(1L, await CountWhereAsync(
+                "import_commit_receipts",
+                $"statement_import_id = '{statementId}' AND created_at >= TIMESTAMPTZ '{before}' AND created_at <= TIMESTAMPTZ '{after}'"));
+            // The statement-delete trigger sleeps after the transaction began
+            // and before the receipt is written. Database NOW() stays at
+            // transaction start, so the receipt must be at least a second
+            // older than the post-response clock; an application timestamp
+            // captured at insert time would fail this.
+            Assert.Equal(1L, await CountWhereAsync(
+                "import_commit_receipts",
+                $"statement_import_id = '{statementId}' AND created_at <= TIMESTAMPTZ '{after}' - INTERVAL '1 second'"));
+        }
+        finally
+        {
+            await ExecuteSqlAsync("""
+                DROP TRIGGER IF EXISTS delay_statement_delete ON statement_imports;
+                DROP FUNCTION IF EXISTS delay_statement_delete();
+                """);
+        }
+    }
+
 }

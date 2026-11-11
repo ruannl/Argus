@@ -50,6 +50,11 @@ public sealed class TransactionApi(FinanceGuard guard,
             _logger.LogError("finance_operation_failed operation={Operation} error_class={ErrorClass} sql_state={SqlState}", operation, "postgres", exception.SqlState);
             return Errors.Internal();
         }
+        catch (Exception exception) when (PersistenceErrors.FindPostgresException(exception) is { } postgres)
+        {
+            _logger.LogError("finance_operation_failed operation={Operation} error_class={ErrorClass} sql_state={SqlState}", operation, "postgres", postgres.SqlState);
+            return Errors.Internal();
+        }
         catch (Exception exception)
         {
             _logger.LogError(exception, "finance_operation_failed operation={Operation} error_class={ErrorClass}", operation, exception.GetType().Name);

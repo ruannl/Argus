@@ -5,6 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- Performance tests seed up to 50,000 rows and run serially. Keep them
+         out of the default test command; CI runs them in a separate step. -->
+    <VSTestTestCaseFilter Condition="'$(VSTestTestCaseFilter)' == ''">Category!=Performance</VSTestTestCaseFilter>
   </PropertyGroup>
 
   <ItemGroup>

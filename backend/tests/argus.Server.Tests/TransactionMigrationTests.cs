@@ -1,5 +1,3 @@
-using argus.Server.Data;
-using Npgsql;
 
 namespace argus.Server.Tests;
 
@@ -11,27 +9,13 @@ public sealed class TransactionMigrationTests(KitFactory factory) : IClassFixtur
     public async Task Populated0006UpgradesThroughSuggestionLearningAndKeepsManifestRowsWithoutLiveCascades()
     {
         var schema = "txn_migration_" + Guid.NewGuid().ToString("N");
-        var db = _factory.CreateDb();
-        await using var connection = await db.OpenAsync();
+        string databaseUrl = TestEnvironment.RequireTestDatabaseUrl();
+        string schemaUrl = PersistenceTestSupport.SchemaUrl(databaseUrl, schema);
+        await PersistenceTestSupport.CreateSchemaAsync(databaseUrl, schema);
         try
         {
-            await using (var create = connection.CreateCommand())
-            {
-                create.CommandText = $"CREATE SCHEMA {schema}";
-                await create.ExecuteNonQueryAsync();
-            }
-            await using (var use = connection.CreateCommand())
-            {
-                use.CommandText = $"SET search_path TO {schema}; " + "CREATE TABLE schema_migrations (" + "name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());";
-                await use.ExecuteNonQueryAsync();
-            }
-
-            foreach (var (_, sql) in Migrations.All.Take(6))
-            {
-                await using var apply = connection.CreateCommand();
-                apply.CommandText = sql;
-                await apply.ExecuteNonQueryAsync();
-            }
+            await PersistenceTestSupport.ApplyLegacyAsync(schemaUrl, 6, canonicalMarkerPresent: true);
+            await using var connection = await PersistenceTestSupport.OpenSchemaConnectionAsync(schemaUrl);
 
             Guid customerId = Guid.NewGuid();
             Guid accountId = Guid.NewGuid();
@@ -71,48 +55,26 @@ public sealed class TransactionMigrationTests(KitFactory factory) : IClassFixtur
                 await seed.ExecuteNonQueryAsync();
             }
 
-            await using (var apply = connection.CreateCommand())
-            {
-                apply.CommandText = Migrations.All[6].Sql;
-                await apply.ExecuteNonQueryAsync();
-            }
+            await PersistenceTestSupport.RunCoordinatorAsync(schemaUrl);
 
-            await using (var applyLearning = connection.CreateCommand())
-            {
-                applyLearning.CommandText = Migrations.All[7].Sql;
-                await applyLearning.ExecuteNonQueryAsync();
-            }
-
-            await using (var applyCategorySuggestion = connection.CreateCommand())
-            {
-                applyCategorySuggestion.CommandText = Migrations.All[8].Sql;
-                await applyCategorySuggestion.ExecuteNonQueryAsync();
-            }
-
-            await using (var applyCategoryConfirmation = connection.CreateCommand())
-            {
-                applyCategoryConfirmation.CommandText = Migrations.All[9].Sql;
-                await applyCategoryConfirmation.ExecuteNonQueryAsync();
-            }
-
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM transactions")));
-            Assert.True((bool)(await ScalarAsync(connection, "SELECT category_confirmed FROM transactions"))!);
-            Assert.Equal(3L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM information_schema.columns " + $"WHERE table_schema = '{schema}' AND table_name = 'import_review_rows' " + "AND column_name IN ('suggested_category_id', 'selected_category_id', 'category_decided')")));
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM pg_indexes " + $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_unconfirmed_idx'")));
-            Assert.Equal("migration row", (string)(await ScalarAsync(connection, "SELECT merchant_key FROM transactions"))!);
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM pg_indexes " + $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_merchant_key_idx'")));
-            Assert.Equal(0L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM merchant_aliases")));
-            Assert.Equal(3L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM pg_constraint c " + "JOIN pg_class t ON t.oid = c.conrelid " + "JOIN pg_namespace n ON n.oid = t.relnamespace " + $"WHERE n.nspname = '{schema}' AND t.relname = 'merchant_aliases' AND c.contype = 'f'")));
-            string aliasTagFk = (string)(await ScalarAsync(connection, "SELECT pg_get_constraintdef(c.oid) " + "FROM pg_constraint c " + "JOIN pg_class t ON t.oid = c.conrelid " + "JOIN pg_namespace n ON n.oid = t.relnamespace " + $"WHERE n.nspname = '{schema}' AND t.relname = 'merchant_aliases' " + "AND c.conname = 'merchant_aliases_merchant_tag_id_fkey'"))!;
+            Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM transactions")));
+            Assert.True((bool)(await PersistenceTestSupport.ScalarAsync(connection, "SELECT category_confirmed FROM transactions"))!);
+            Assert.Equal(3L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM information_schema.columns " + $"WHERE table_schema = '{schema}' AND table_name = 'import_review_rows' " + "AND column_name IN ('suggested_category_id', 'selected_category_id', 'category_decided')")));
+            Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM pg_indexes " + $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_unconfirmed_idx'")));
+            Assert.Equal("migration row", (string)(await PersistenceTestSupport.ScalarAsync(connection, "SELECT merchant_key FROM transactions"))!);
+            Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM pg_indexes " + $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_merchant_key_idx'")));
+            Assert.Equal(0L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM merchant_aliases")));
+            Assert.Equal(3L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM pg_constraint c " + "JOIN pg_class t ON t.oid = c.conrelid " + "JOIN pg_namespace n ON n.oid = t.relnamespace " + $"WHERE n.nspname = '{schema}' AND t.relname = 'merchant_aliases' AND c.contype = 'f'")));
+            string aliasTagFk = (string)(await PersistenceTestSupport.ScalarAsync(connection, "SELECT pg_get_constraintdef(c.oid) " + "FROM pg_constraint c " + "JOIN pg_class t ON t.oid = c.conrelid " + "JOIN pg_namespace n ON n.oid = t.relnamespace " + $"WHERE n.nspname = '{schema}' AND t.relname = 'merchant_aliases' " + "AND c.conname = 'merchant_aliases_merchant_tag_id_fkey'"))!;
             Assert.Contains("ON DELETE CASCADE", aliasTagFk);
-            string aliasCategoryFk = (string)(await ScalarAsync(connection, "SELECT pg_get_constraintdef(c.oid) " + "FROM pg_constraint c " + "JOIN pg_class t ON t.oid = c.conrelid " + "JOIN pg_namespace n ON n.oid = t.relnamespace " + $"WHERE n.nspname = '{schema}' AND t.relname = 'merchant_aliases' " + "AND c.conname = 'merchant_aliases_category_id_fkey'"))!;
+            string aliasCategoryFk = (string)(await PersistenceTestSupport.ScalarAsync(connection, "SELECT pg_get_constraintdef(c.oid) " + "FROM pg_constraint c " + "JOIN pg_class t ON t.oid = c.conrelid " + "JOIN pg_namespace n ON n.oid = t.relnamespace " + $"WHERE n.nspname = '{schema}' AND t.relname = 'merchant_aliases' " + "AND c.conname = 'merchant_aliases_category_id_fkey'"))!;
             Assert.Contains("ON DELETE SET NULL", aliasCategoryFk);
-            Assert.Equal("migration-identity", (string)(await ScalarAsync(connection, "SELECT identity_key FROM transactions"))!);
-            Assert.Equal("-12.34", (string)(await ScalarAsync(connection, "SELECT amount::text FROM transactions"))!);
-            Assert.Equal("fingerprint", (string)(await ScalarAsync(connection, "SELECT statement_fingerprint FROM statement_imports"))!);
-            Assert.Equal(2L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM information_schema.tables " + $"WHERE table_schema = '{schema}' AND table_name IN " + "('transaction_operations', 'transaction_operation_items')")));
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM pg_indexes " + $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_date_idx'")));
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM pg_indexes " + $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_amount_idx'")));
+            Assert.Equal("migration-identity", (string)(await PersistenceTestSupport.ScalarAsync(connection, "SELECT identity_key FROM transactions"))!);
+            Assert.Equal("-12.34", (string)(await PersistenceTestSupport.ScalarAsync(connection, "SELECT amount::text FROM transactions"))!);
+            Assert.Equal("fingerprint", (string)(await PersistenceTestSupport.ScalarAsync(connection, "SELECT statement_fingerprint FROM statement_imports"))!);
+            Assert.Equal(2L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM information_schema.tables " + $"WHERE table_schema = '{schema}' AND table_name IN " + "('transaction_operations', 'transaction_operation_items')")));
+            Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM pg_indexes " + $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_date_idx'")));
+            Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM pg_indexes " + $"WHERE schemaname = '{schema}' AND indexname = 'transactions_customer_amount_idx'")));
 
             Guid operationId = Guid.NewGuid();
             var stamp = DateTime.UtcNow;
@@ -155,39 +117,18 @@ public sealed class TransactionMigrationTests(KitFactory factory) : IClassFixtur
 
             // The manifest deliberately has no live-transaction foreign key:
             // deleting a captured member must leave the frozen scope intact.
-            await using (var deleteTransaction = connection.CreateCommand())
-            {
-                deleteTransaction.CommandText = $"DELETE FROM transactions WHERE id = '{transactionId}'";
-                await deleteTransaction.ExecuteNonQueryAsync();
-            }
-            Assert.Equal(1L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM transaction_operation_items")));
+            await PersistenceTestSupport.ExecuteAsync(connection, $"DELETE FROM transactions WHERE id = '{transactionId}'");
+            Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM transaction_operation_items")));
 
-            await using (var deleteHeader = connection.CreateCommand())
-            {
-                deleteHeader.CommandText = $"""
-                    DELETE FROM transaction_operations
-                    WHERE customer_id = '{customerId}' AND operation_id = '{operationId}'
-                    """;
-                await deleteHeader.ExecuteNonQueryAsync();
-            }
-            Assert.Equal(0L, Convert.ToInt64(await ScalarAsync(connection, "SELECT COUNT(*) FROM transaction_operation_items")));
+            await PersistenceTestSupport.ExecuteAsync(connection, $"""
+                DELETE FROM transaction_operations
+                WHERE customer_id = '{customerId}' AND operation_id = '{operationId}'
+                """);
+            Assert.Equal(0L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM transaction_operation_items")));
         }
         finally
         {
-            await using var drop = connection.CreateCommand();
-            drop.CommandText = $"DROP SCHEMA IF EXISTS {schema} CASCADE";
-            await drop.ExecuteNonQueryAsync();
-            await using var reset = connection.CreateCommand();
-            reset.CommandText = "SET search_path TO public";
-            await reset.ExecuteNonQueryAsync();
+            await PersistenceTestSupport.DropSchemaAsync(databaseUrl, schema);
         }
-    }
-
-    private static async Task<object?> ScalarAsync(NpgsqlConnection connection, string sql)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-
-        return await command.ExecuteScalarAsync();
     }
 }
