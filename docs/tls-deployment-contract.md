@@ -19,8 +19,10 @@ the certificates, and the network boundary.
    disable that.
 4. **Host trust is explicit.** `ARGUS_AUTH_TRUST_HOST=true` is for local
    development and trusted proxies that set `X-Forwarded-Host`. In production,
-   leave it unset and set the Auth.js public URL so mismatched hosts are
-   rejected.
+   leave it unset: `ARGUS_FRONTEND_URL` is pinned as the Auth.js public URL, and
+   incoming request origins are rewritten to it, so a spoofed `Host` header
+   cannot change callbacks or cookies. Setting the variable to `false` rejects
+   every host and is not the production setting.
 5. **The database requires a password and TLS off-localhost.** A non-local
    `ARGUS_DATABASE_URL` without a password, or without
    `sslmode=require`/`verify-full`, is rejected at startup.

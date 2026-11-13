@@ -32,7 +32,7 @@ public interface IMailer
 public sealed class ResendMailer(AppSettings settings, ILogger<ResendMailer> logger) : IMailer
 {
     private const string Endpoint = "https://api.resend.com/emails";
-    private const int AntiEnumerationPadMs = 750;
+    internal const int AntiEnumerationPadMs = 750;
     private const int NetworkTimeoutMs = 2000;
 
     private static readonly HttpClient _client = new() { Timeout = Timeout.InfiniteTimeSpan };

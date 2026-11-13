@@ -18,11 +18,26 @@ function requiredAuthSecret(): string {
   return secret;
 }
 
-// Auth.js host trust is explicit and fail-closed: only the literal value "true"
-// enables it. When off (the default), Auth.js derives the origin from AUTH_URL
-// and rejects requests whose Host header does not match.
-function resolveTrustHost(): boolean {
-  return process.env[AUTH_TRUST_HOST_NAME] === "true";
+// Auth.js host trust is explicit. Only the literal value "true" trusts the
+// request Host header; an explicit "false" (or a misspelt value) fails closed,
+// rejecting every host. When the variable is unset, trust is left to Auth.js,
+// which enables it only because the public URL below is pinned.
+function resolveTrustHost(): boolean | undefined {
+  const value = process.env[AUTH_TRUST_HOST_NAME];
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+
+  return value === "true";
+}
+
+// Auth.js derives its public origin from AUTH_URL and rewrites every incoming
+// request URL to that origin, so a spoofed Host header cannot redirect a
+// callback or set a cookie for another host. The kit has one public origin in
+// ARGUS_FRONTEND_URL; pin AUTH_URL to it unless an operator set one explicitly.
+const publicFrontendOrigin = process.env.ARGUS_FRONTEND_URL;
+if (publicFrontendOrigin && !process.env.AUTH_URL && !process.env.NEXTAUTH_URL) {
+  process.env.AUTH_URL = publicFrontendOrigin;
 }
 
 function validBackendToken(value: unknown): value is string {

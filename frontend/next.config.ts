@@ -46,6 +46,13 @@ const nextConfig: NextConfig = {
   // Actions remain reachable reopens the disclosure.
   logging: {
     serverFunctions: false,
+    // Recovery links carry one-time verification and reset tokens in the query
+    // string, and the development request logger prints the full URL. Skip
+    // those requests entirely so a token cannot reach terminal or CI logs. The
+    // token pattern also covers an absolute URL form.
+    incomingRequests: {
+      ignore: [/[?&]token=/, /^\/reset(\?|$)/, /^\/verify(\?|$)/],
+    },
   },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
