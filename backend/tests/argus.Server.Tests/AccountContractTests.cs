@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
 
@@ -192,6 +193,29 @@ public sealed class AccountContractTests(KitFactory factory) : ApiTestBase(facto
         await ExecuteSqlAsync("UPDATE sessions SET last_seen_at = NOW() - INTERVAL '31 minutes'");
         var idle = await SendAsync(Get("/v1/me", session: idleSession));
         Assert.Equal(HttpStatusCode.Unauthorized, idle.StatusCode);
+    }
+
+    [Fact]
+    public async Task PasswordReset_Request_UsesTheSameResponseFloorForKnownAndUnknownEmails()
+    {
+        var email = UniqueEmail();
+        await RegisterVerifyLoginAsync(email);
+        var unknownEmail = UniqueEmail();
+
+        var known = Stopwatch.StartNew();
+        var knownResponse = await SendAsync(Post("/v1/password/reset/request", Json(new { email })));
+        known.Stop();
+
+        var unknown = Stopwatch.StartNew();
+        var unknownResponse = await SendAsync(Post("/v1/password/reset/request", Json(new { email = unknownEmail })));
+        unknown.Stop();
+
+        Assert.Equal(HttpStatusCode.Accepted, knownResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, unknownResponse.StatusCode);
+        Assert.True(unknown.ElapsedMilliseconds >= 600,
+                    $"unknown-email response returned in {unknown.ElapsedMilliseconds} ms, below the response floor");
+        Assert.True(Math.Abs(known.ElapsedMilliseconds - unknown.ElapsedMilliseconds) <= 400,
+                    $"known {known.ElapsedMilliseconds} ms vs unknown {unknown.ElapsedMilliseconds} ms");
     }
 
     [Fact]

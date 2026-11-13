@@ -86,9 +86,10 @@ describe("Auth.js configuration", () => {
 
   it("pins the JWT cookie policy and nominal lifetime", () => {
     expect(authConfig.session).toEqual({ strategy: "jwt", maxAge: 43_200 });
-    // Host trust is env-driven and fail-closed: this test file never sets
-    // ARGUS_AUTH_TRUST_HOST, so the default must be false.
-    expect(authConfig.trustHost).toBe(false);
+    // Host trust is env-driven: this test file never sets
+    // ARGUS_AUTH_TRUST_HOST, so the value is left to Auth.js, which then
+    // derives it from the pinned AUTH_URL.
+    expect(authConfig.trustHost).toBeUndefined();
     expect(authConfig.cookies?.sessionToken).toMatchObject({
       options: {
         httpOnly: true,
@@ -97,6 +98,31 @@ describe("Auth.js configuration", () => {
         secure: false,
       },
     });
+  });
+
+  it("pins the Auth.js public URL to the configured frontend origin", async () => {
+    vi.resetModules();
+    const previousFrontendUrl = process.env.ARGUS_FRONTEND_URL;
+    const previousAuthUrl = process.env.AUTH_URL;
+    delete process.env.ARGUS_AUTH_TRUST_HOST;
+    delete process.env.AUTH_URL;
+    process.env.ARGUS_FRONTEND_URL = "https://app.example.test";
+
+    const pinned = await import("@/auth");
+    expect(pinned.authConfig.trustHost).toBeUndefined();
+    expect(process.env.AUTH_URL).toBe("https://app.example.test");
+
+    if (previousFrontendUrl === undefined) {
+      delete process.env.ARGUS_FRONTEND_URL;
+    } else {
+      process.env.ARGUS_FRONTEND_URL = previousFrontendUrl;
+    }
+    if (previousAuthUrl === undefined) {
+      delete process.env.AUTH_URL;
+    } else {
+      process.env.AUTH_URL = previousAuthUrl;
+    }
+    vi.resetModules();
   });
 
   it("enables host trust only for the literal true", async () => {

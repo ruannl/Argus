@@ -312,6 +312,11 @@ public sealed class AccountApi(AppSettings settings,
             return Errors.RateLimited();
         }
 
+        // Same response floor as the reset request: the unknown-email branch
+        // performs no egress, so without it the two branches are separable by
+        // timing. Mail delivery pads itself; this wait overlaps that pad.
+        Task responseFloor = Task.Delay(ResendMailer.AntiEnumerationPadMs, CancellationToken.None);
+
         var customer = await store.FindCustomerByEmailAsync(canonicalEmail, cancellationToken);
         if (customer is { EmailVerifiedAt: not null })
         {
@@ -324,6 +329,7 @@ public sealed class AccountApi(AppSettings settings,
         }
         // Unknown email: no egress, identical accepted response.
 
+        await responseFloor;
         return Results.Json(new { status = "accepted" }, statusCode: 202);
     }
 
@@ -353,6 +359,11 @@ public sealed class AccountApi(AppSettings settings,
             return Errors.RateLimited();
         }
 
+        // The response floor starts before the lookup so both branches return at
+        // the same time. Known accounts additionally await delivery, which has
+        // its own anti-enumeration pad; the floor then overlaps that wait.
+        Task responseFloor = Task.Delay(ResendMailer.AntiEnumerationPadMs, CancellationToken.None);
+
         if (canonicalEmail is not null)
         {
             var outcome = await store.RequestPasswordResetAsync(canonicalEmail, cancellationToken);
@@ -364,6 +375,7 @@ public sealed class AccountApi(AppSettings settings,
             // Shade: unknown or unverified email gets no reset link.
         }
 
+        await responseFloor;
         return Results.Json(new { status = "accepted" }, statusCode: 202);
     }
 
