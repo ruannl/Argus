@@ -18,7 +18,7 @@ public sealed class PersistenceMigrationTests
             await PersistenceTestSupport.RunCoordinatorAsync(schemaUrl);
 
             await using var connection = await PersistenceTestSupport.OpenSchemaConnectionAsync(schemaUrl);
-            Assert.Equal(10L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
+            Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
             Assert.Equal(0L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM schema_migrations")));
             Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM data_migrations WHERE name = '0006_canonical_identity_backfill'")));
             Assert.Equal(20L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'")));
@@ -79,7 +79,7 @@ public sealed class PersistenceMigrationTests
             await PersistenceTestSupport.RunCoordinatorAsync(schemaUrl);
             var afterLedger = await ReadLedgerAsync(connection);
 
-            Assert.Equal(10L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
+            Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
             Assert.Equal(8, afterLedger.Count);
             Assert.Equal(beforeLedger, afterLedger);
             Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM data_migrations WHERE name = '0006_canonical_identity_backfill'")));
@@ -111,7 +111,7 @@ public sealed class PersistenceMigrationTests
 
             await PersistenceTestSupport.RunCoordinatorAsync(schemaUrl);
 
-            Assert.Equal(10L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
+            Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
             Assert.Equal(5L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM schema_migrations")));
             Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM data_migrations WHERE name = '0006_canonical_identity_backfill'")));
         }
@@ -280,7 +280,7 @@ public sealed class PersistenceMigrationTests
 
             await PersistenceTestSupport.RunCoordinatorAsync(schemaUrl);
 
-            Assert.Equal(10L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
+            Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
             Assert.Equal(5L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM schema_migrations")));
             Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM data_migrations WHERE name = '0006_canonical_identity_backfill'")));
         }
@@ -311,7 +311,7 @@ public sealed class PersistenceMigrationTests
             await Task.WhenAll(first, second);
 
             await using var connection = await PersistenceTestSupport.OpenSchemaConnectionAsync(schemaUrl);
-            Assert.Equal(10L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
+            Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
             Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM data_migrations WHERE name = '0006_canonical_identity_backfill'")));
         }
         finally
@@ -332,17 +332,19 @@ public sealed class PersistenceMigrationTests
         await PersistenceTestSupport.CreateSchemaAsync(databaseUrl, mixedSchema);
         try
         {
+            string syncOwnerUrl = DatabaseRoleFixture.AppendRole(syncUrl, DatabaseIsolationContract.OwnerRole);
             var syncBarrier = new BarrierInitializationFaultInjector(BarrierInitializationFaultInjector.BarrierPoint.AfterMigrationCommit);
-            Task firstSync = Task.Run(() => new InitializationCoordinator(syncUrl, syncBarrier).Initialize());
+            Task firstSync = Task.Run(() => new InitializationCoordinator(syncOwnerUrl, syncBarrier).Initialize());
             await syncBarrier.Reached.Task.WaitAsync(TimeSpan.FromSeconds(15));
-            Task secondSync = Task.Run(() => new InitializationCoordinator(syncUrl, NoopInitializationFaultInjector.Instance).Initialize());
+            Task secondSync = Task.Run(() => new InitializationCoordinator(syncOwnerUrl, NoopInitializationFaultInjector.Instance).Initialize());
             await Task.Delay(500);
             Assert.False(secondSync.IsCompleted, "second synchronous initializer must wait on the session advisory lock");
             syncBarrier.Release.TrySetResult();
             await Task.WhenAll(firstSync, secondSync);
 
+            string mixedOwnerUrl = DatabaseRoleFixture.AppendRole(mixedUrl, DatabaseIsolationContract.OwnerRole);
             var mixedBarrier = new BarrierInitializationFaultInjector(BarrierInitializationFaultInjector.BarrierPoint.AfterMigrationCommit);
-            Task firstMixedSync = Task.Run(() => new InitializationCoordinator(mixedUrl, mixedBarrier).Initialize());
+            Task firstMixedSync = Task.Run(() => new InitializationCoordinator(mixedOwnerUrl, mixedBarrier).Initialize());
             await mixedBarrier.Reached.Task.WaitAsync(TimeSpan.FromSeconds(15));
             Task secondMixedAsync = PersistenceTestSupport.RunCoordinatorAsync(mixedUrl);
             await Task.Delay(500);
@@ -352,8 +354,8 @@ public sealed class PersistenceMigrationTests
 
             await using var syncConnection = await PersistenceTestSupport.OpenSchemaConnectionAsync(syncUrl);
             await using var mixedConnection = await PersistenceTestSupport.OpenSchemaConnectionAsync(mixedUrl);
-            Assert.Equal(10L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(syncConnection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
-            Assert.Equal(10L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(mixedConnection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
+            Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(syncConnection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
+            Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(mixedConnection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
         }
         finally
         {
@@ -438,7 +440,7 @@ public sealed class PersistenceMigrationTests
             await AssertContenderWaitsAtAsync(schemaUrl, BarrierInitializationFaultInjector.BarrierPoint.AfterLockAcquireAttempt);
 
             await using var connection = await PersistenceTestSupport.OpenSchemaConnectionAsync(schemaUrl);
-            Assert.Equal(10L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
+            Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
             Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM data_migrations WHERE name = '0006_canonical_identity_backfill'")));
         }
         finally
@@ -498,7 +500,7 @@ public sealed class PersistenceMigrationTests
             await first;
 
             await using var connection = await PersistenceTestSupport.OpenSchemaConnectionAsync(schemaUrl);
-            Assert.Equal(10L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
+            Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
             Assert.Equal(0L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection,
                 $"SELECT COUNT(*) FROM pg_locks l JOIN pg_database d ON d.oid = l.database WHERE l.locktype = 'advisory' AND l.classid = {InitializationCoordinator.LockKey1}::oid AND l.objid = {InitializationCoordinator.LockKey2}::oid AND l.objsubid = 2 AND d.datname = current_database()")));
         }
@@ -570,7 +572,7 @@ public sealed class PersistenceMigrationTests
             await Assert.ThrowsAnyAsync<Exception>(() => first);
 
             await using var connection = await PersistenceTestSupport.OpenSchemaConnectionAsync(schemaUrl);
-            Assert.Equal(10L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
+            Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
             Assert.Equal(0L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM data_migrations WHERE name = '0006_canonical_identity_backfill'")));
 
             await PersistenceTestSupport.RunCoordinatorAsync(schemaUrl);
@@ -619,7 +621,7 @@ public sealed class PersistenceMigrationTests
             Assert.Contains("cleanup failed", exception.Message, StringComparison.OrdinalIgnoreCase);
 
             await using var connection = await PersistenceTestSupport.OpenSchemaConnectionAsync(schemaUrl);
-            Assert.Equal(10L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
+            Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
             Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM data_migrations WHERE name = '0006_canonical_identity_backfill'")));
             Assert.Equal(0L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection,
                 $"SELECT COUNT(*) FROM pg_locks l JOIN pg_database d ON d.oid = l.database WHERE l.locktype = 'advisory' AND l.classid = {InitializationCoordinator.LockKey1}::oid AND l.objid = {InitializationCoordinator.LockKey2}::oid AND l.objsubid = 2 AND d.datname = current_database()")));
@@ -944,7 +946,7 @@ public sealed class PersistenceMigrationTests
             await PersistenceTestSupport.RunCoordinatorAsync(schemaUrl);
 
             await using var check = await PersistenceTestSupport.OpenSchemaConnectionAsync(schemaUrl);
-            Assert.Equal(10L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(check, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
+            Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(check, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
             Assert.Equal(0L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(check, "SELECT COUNT(*) FROM schema_migrations")));
             Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(check, "SELECT COUNT(*) FROM data_migrations WHERE name = '0006_canonical_identity_backfill'")));
             Assert.Equal(20L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(check, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'")));

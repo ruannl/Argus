@@ -28,7 +28,7 @@ public sealed class TransactionApi(FinanceGuard guard,
         app.MapPost("/v1/finance/transactions/operations/{id:guid}/abandon", AbandonAsync);
     }
 
-    private Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(HttpContext context, CancellationToken cancellationToken) => guard.AuthenticateAsync(context, cancellationToken);
+    private Task<(FinanceAuthority? Authority, IResult? Failure)> AuthenticateAsync(HttpContext context, CancellationToken cancellationToken) => guard.AuthenticateAsync(context, cancellationToken);
 
     private async Task<IResult> GuardedAsync(Func<Task<IResult>> action, string operation)
     {
@@ -39,6 +39,10 @@ public sealed class TransactionApi(FinanceGuard guard,
         catch (TransactionStoreException exception)
         {
             return TransactionError(exception);
+        }
+        catch (FinanceAuthorityException)
+        {
+            return Errors.Unauthorized();
         }
         catch (PostgresException exception) when (IsRetryable(exception))
         {
@@ -74,7 +78,7 @@ public sealed class TransactionApi(FinanceGuard guard,
     private Task<IResult> QueryAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            (Guid? customerId, IResult? failure) = await AuthenticateAsync(context, cancellationToken);
+            (FinanceAuthority? authority, IResult? failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -91,14 +95,14 @@ public sealed class TransactionApi(FinanceGuard guard,
                 return Errors.InvalidRequest();
             }
 
-            TransactionPageResult page = await store.QueryAsync(customerId!.Value, plan, cancellationToken);
+            TransactionPageResult page = await store.QueryAsync(authority!, plan, cancellationToken);
             return Results.Json(page);
         }, "transactions_query");
 
     private Task<IResult> GetAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            (Guid? customerId, IResult? failure) = await AuthenticateAsync(context, cancellationToken);
+            (FinanceAuthority? authority, IResult? failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -110,7 +114,7 @@ public sealed class TransactionApi(FinanceGuard guard,
                 return Errors.NotFound();
             }
 
-            TransactionDetailResult detail = await store.GetAsync(customerId!.Value, id.Value, cancellationToken);
+            TransactionDetailResult detail = await store.GetAsync(authority!, id.Value, cancellationToken);
             return Results.Json(detail);
         }, "transactions_detail");
 
@@ -119,7 +123,7 @@ public sealed class TransactionApi(FinanceGuard guard,
     private Task<IResult> PatchAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            (Guid? customerId, IResult? failure) = await AuthenticateAsync(context, cancellationToken);
+            (FinanceAuthority? authority, IResult? failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -147,20 +151,20 @@ public sealed class TransactionApi(FinanceGuard guard,
                 return Errors.InvalidRequest();
             }
 
-            var result = await store.PatchAsync(customerId!.Value, id.Value, request.ExpectedVersion.Value, action, cancellationToken);
+            var result = await store.PatchAsync(authority!, id.Value, request.ExpectedVersion.Value, action, cancellationToken);
             return Results.Json(result);
         }, "transactions_patch");
 
     private Task<IResult> PrepareAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
             }
 
-            if (!rateLimiter.CheckTransactionPreparation(customerId!.Value))
+            if (!rateLimiter.CheckTransactionPreparation(authority!.CustomerId))
             {
                 return TransactionError(TransactionErrorCodes.OperationQuota);
             }
@@ -176,14 +180,14 @@ public sealed class TransactionApi(FinanceGuard guard,
                 return Errors.InvalidRequest();
             }
 
-            var result = await store.PrepareAsync(customerId!.Value, request.OperationId.Value, selection, action, cancellationToken);
+            var result = await store.PrepareAsync(authority!, request.OperationId.Value, selection, action, cancellationToken);
             return Results.Json(result, statusCode: result.Created ? 201 : 200);
         }, "transactions_prepare");
 
     private Task<IResult> StatusAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -195,14 +199,14 @@ public sealed class TransactionApi(FinanceGuard guard,
                 return Errors.NotFound();
             }
 
-            var result = await store.StatusAsync(customerId!.Value, id.Value, cancellationToken);
+            var result = await store.StatusAsync(authority!, id.Value, cancellationToken);
             return Results.Json(result);
         }, "transactions_operation_status");
 
     private Task<IResult> ApplyAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -225,14 +229,14 @@ public sealed class TransactionApi(FinanceGuard guard,
                 return Errors.InvalidRequest();
             }
 
-            TransactionOperationApplyResponse result = await store.ApplyAsync(customerId!.Value, id.Value, request.ConfirmationHash, request.ExpectedSelectedCount.Value, cancellationToken);
+            TransactionOperationApplyResponse result = await store.ApplyAsync(authority!, id.Value, request.ConfirmationHash, request.ExpectedSelectedCount.Value, cancellationToken);
             return Results.Json(result);
         }, "transactions_operation_apply");
 
     private Task<IResult> AbandonAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -250,7 +254,7 @@ public sealed class TransactionApi(FinanceGuard guard,
                 return bodyFailure;
             }
 
-            var result = await store.AbandonAsync(customerId!.Value, id.Value, cancellationToken);
+            var result = await store.AbandonAsync(authority!, id.Value, cancellationToken);
             return Results.Json(result);
         }, "transactions_operation_abandon");
 

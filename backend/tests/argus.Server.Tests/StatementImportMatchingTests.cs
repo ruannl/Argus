@@ -1,6 +1,7 @@
 using System.Net;
 using argus.Server.Data;
 using argus.Server.Imports;
+using argus.Server.Security;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace argus.Server.Tests;
@@ -68,6 +69,7 @@ public sealed class StatementImportMatchingTests(KitFactory factory) : ApiTestBa
         var (session, customerId) = await NewCustomerAsync();
         var accountId = await CreateAccountAsync(session);
         var store = Factory.Services.GetRequiredService<StatementImportStore>();
+        var authority = new FinanceAuthority(customerId, Tokens.HashToken(session));
         ParserConfig config = new ParserConfig { Format = "generic" };
 
         var firstRows = new[]
@@ -75,13 +77,13 @@ public sealed class StatementImportMatchingTests(KitFactory factory) : ApiTestBa
             Row(0, "A", "x"),
             Row(1, null, null),
         };
-        var first = await store.CreateReviewAsync(customerId, accountId, StatementSourceKind.GenericCsv, config, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), Statement(firstRows));
+        var first = await store.CreateReviewAsync(authority, accountId, StatementSourceKind.GenericCsv, config, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), Statement(firstRows));
         var identityKey = StatementIdentity.ComputeIdentityKey(new DateOnly(2025, 1, 2), -1000, "coffee");
-        var patched = await store.PatchReviewAsync(customerId, first.Summary.Id, first.Summary.Version, [new ImportDecision(firstRows[0].RowId, null, null, null, identityKey, "keep_all", null, null, false, false)], null);
-        var committed = await store.CommitReviewAsync(customerId, first.Summary.Id, patched.Version, patched.SummaryHash);
+        var patched = await store.PatchReviewAsync(authority, first.Summary.Id, first.Summary.Version, [new ImportDecision(firstRows[0].RowId, null, null, null, identityKey, "keep_all", null, null, false, false)], null);
+        var committed = await store.CommitReviewAsync(authority, first.Summary.Id, patched.Version, patched.SummaryHash);
         Assert.Equal(2, committed.Summary.ImportedCount);
 
-        var second = await store.CreateReviewAsync(customerId, accountId, StatementSourceKind.GenericCsv, config, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), Statement(Row(0, "B", "p"), Row(1, "A", "y")));
+        var second = await store.CreateReviewAsync(authority, accountId, StatementSourceKind.GenericCsv, config, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), Statement(Row(0, "B", "p"), Row(1, "A", "y")));
 
         Assert.Equal(0, second.Summary.ImportedCount);
         Assert.Equal(2, second.Summary.SuppressedCount);

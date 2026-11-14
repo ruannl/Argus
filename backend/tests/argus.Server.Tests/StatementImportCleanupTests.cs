@@ -1,6 +1,7 @@
 using System.Net;
 using argus.Server.Data;
 using argus.Server.Imports;
+using argus.Server.Security;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace argus.Server.Tests;
@@ -12,7 +13,7 @@ namespace argus.Server.Tests;
 /// </summary>
 public sealed class StatementImportCleanupTests(KitFactory factory) : ApiTestBase(factory)
 {
-    private async Task<(Guid CustomerId, Guid AccountId)> NewCustomerAndAccountAsync()
+    private async Task<(FinanceAuthority Authority, Guid AccountId)> NewCustomerAndAccountAsync()
     {
         var session = await RegisterVerifyLoginAsync(UniqueEmail());
         var me = await SendAsync(Get("/v1/me", session: session));
@@ -21,7 +22,7 @@ public sealed class StatementImportCleanupTests(KitFactory factory) : ApiTestBas
         var account = await SendAsync(Post("/v1/finance/accounts", Json(new { display_name = "Cheque" }), session: session));
         Assert.Equal(HttpStatusCode.Created, account.StatusCode);
 
-        return (customerId, (await BodyAsync(account)).GetProperty("id").GetGuid());
+        return (new FinanceAuthority(customerId, Tokens.HashToken(session)), (await BodyAsync(account)).GetProperty("id").GetGuid());
     }
 
     private static ParsedStatement Statement(string description) => new(
@@ -56,14 +57,14 @@ public sealed class StatementImportCleanupTests(KitFactory factory) : ApiTestBas
     [Fact]
     public async Task ExpiredReviewRetainsTerminalHeaderAndOldTerminalHeadersArePruned()
     {
-        var (customerId, accountId) = await NewCustomerAndAccountAsync();
+        var (authority, accountId) = await NewCustomerAndAccountAsync();
         var store = Factory.Services.GetRequiredService<StatementImportStore>();
         var config = new ParserConfig { Format = "generic" };
 
-        var expired = await store.CreateReviewAsync(customerId, accountId, StatementSourceKind.GenericCsv, config, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), Statement("Expired coffee"));
-        var live = await store.CreateReviewAsync(customerId, accountId, StatementSourceKind.GenericCsv, config, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), Statement("Live coffee"));
-        var oldAbandoned = await store.CreateReviewAsync(customerId, accountId, StatementSourceKind.GenericCsv, config, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), Statement("Old abandoned coffee"));
-        var recentAbandoned = await store.CreateReviewAsync(customerId, accountId, StatementSourceKind.GenericCsv, config, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), Statement("Recent abandoned coffee"));
+        var expired = await store.CreateReviewAsync(authority, accountId, StatementSourceKind.GenericCsv, config, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), Statement("Expired coffee"));
+        var live = await store.CreateReviewAsync(authority, accountId, StatementSourceKind.GenericCsv, config, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), Statement("Live coffee"));
+        var oldAbandoned = await store.CreateReviewAsync(authority, accountId, StatementSourceKind.GenericCsv, config, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), Statement("Old abandoned coffee"));
+        var recentAbandoned = await store.CreateReviewAsync(authority, accountId, StatementSourceKind.GenericCsv, config, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), Statement("Recent abandoned coffee"));
 
         await ExecuteSqlAsync($"UPDATE import_reviews SET expires_at = NOW() - INTERVAL '1 hour' WHERE id = '{expired.Summary.Id}'");
         await ExecuteSqlAsync($"UPDATE import_reviews SET status = 'Abandoned', updated_at = NOW() - INTERVAL '40 days' WHERE id = '{oldAbandoned.Summary.Id}'");

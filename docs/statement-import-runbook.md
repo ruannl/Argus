@@ -342,8 +342,10 @@ Before applying it to a database with customer data:
 2. Confirm no transaction references a statement owned by another customer or
    account, and no tag link joins rows from different customers. The migration
    fails closed with an operator-safe diagnostic on either condition.
-3. Run the backend migration through normal startup or `dotnet run -- seed` in
-   a controlled environment. The migration is transactional per migration.
+3. Run the explicit maintenance command `dotnet run -- migrate` (or `dotnet
+   run -- seed`) with the separate migrator credential in a controlled
+   environment. Normal web startup validates only and does not migrate. The
+   migration is transactional per migration.
 4. Verify populated `0005` upgrades with `StatementImportMigrationTests` and
    check that counts and historical rows are unchanged.
 
@@ -378,8 +380,10 @@ npm run test:e2e
 ```
 
 `dotnet test` requires exactly `ARGUS_TEST_DATABASE_URL` against an isolated
-PostgreSQL database. Never point it at a development or production customer
-database. Parser-only tests need no database.
+PostgreSQL database. `node scripts/run-backend-tests.mjs` reads the ignored
+`backend/.env.test` and supplies only that value. Never point it at a
+development or production customer database. Parser-only tests need no
+database.
 
 The parser evidence includes genuinely encrypted PDF fixtures (RC4-128 with an
 empty user password and AES-128 with a non-empty user password), parent-death

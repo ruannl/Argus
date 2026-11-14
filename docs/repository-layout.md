@@ -16,7 +16,8 @@ commands with the working directory inside the relevant tree.
 │   ├── Brand.cs              canonical brand/header/env constants
 │   ├── Configuration/        fail-closed prefixed configuration
 │   ├── Data/                 Npgsql connection, migrations, Store, FinanceStore,
-│   │                         StatementImportStore, TransactionStore, cleanup services
+│   │                         StatementImportStore, TransactionStore, CustomerDbScope,
+│   │                         isolation contract/validators, cleanup services
 │   ├── Transactions/         filter/action/limit contracts, fault seam, shared DTOs
 │   ├── Finance/              merchant-key, alias/history and tag-token suggestion helpers shared with imports
 │   ├── Imports/              bounded FNB/generic CSV parsers, identity/fingerprint
@@ -26,12 +27,15 @@ commands with the working directory inside the relevant tree.
 │   │                         and transaction endpoints, bounded bodies
 │   ├── Mail/                 Resend mailer
 │   ├── Billing/              HMAC webhook verification and event parsing
-│   ├── Seed.cs               idempotent dev-account seeding
-│   ├── Program.cs            host, logging, middleware, routes, seed command
+│   ├── Seed.cs               idempotent dev-account seeding under an owner context
+│   ├── MaintenanceProgram.cs offline migrate/seed entry point
+│   ├── Program.cs            host, logging, middleware, routes, startup validation
 │   ├── data/common-passwords.txt
 │   ├── argus.Server.csproj
 │   ├── Dockerfile            non-root image with health check
-│   ├── .env.example
+│   ├── .env.example          runtime-only template
+│   ├── .env.test.example     test-maintenance template
+│   ├── .env.maintenance.example  migrator template
 │   └── tests/argus.Server.Tests/   xunit isolation tests
 ├── frontend/
 │   ├── src/app/              App Router routes (landing, auth, workspace)
@@ -45,9 +49,10 @@ commands with the working directory inside the relevant tree.
 │   ├── package.json / package-lock.json
 │   └── .env.example
 ├── scripts/
-│   ├── bootstrap-dev.mjs     first-run databases, env, migrations, seed
-│   ├── verify-kit-declaration.mjs / .test.mjs   kit-only checks
-│   └── bootstrap-dev.test.mjs                   kit-only checks
+│   ├── bootstrap-dev.mjs / .test.mjs      first-run databases, roles, env, migrate, seed
+│   ├── provision-db-roles.mjs / .test.mjs role provisioning and drift checks
+│   ├── adopt-db-objects.mjs / .test.mjs   bounded previous-owner transfer
+│   └── run-backend-tests.mjs / .test.mjs  scoped test-maintenance launcher
 ├── docs/                     operational documentation (ships)
 └── documentation/            published developer documentation (kit-only)
 ```
@@ -56,10 +61,15 @@ commands with the working directory inside the relevant tree.
 
 ```bash
 # Backend (from backend/)
-dotnet run                    # serve on 127.0.0.1:3001
+dotnet run                    # validate prepared schema/role, then serve on 127.0.0.1:3001
+dotnet run -- migrate         # explicit owner migration/backfill
 dotnet run -- seed            # migrate + seed (idempotent)
 dotnet test tests/argus.Server.Tests
 dotnet build -c Release
+
+# Repository root
+node scripts/bootstrap-dev.mjs
+node scripts/run-backend-tests.mjs
 
 # Frontend (from frontend/)
 npm ci

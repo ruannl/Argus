@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text;
 using argus.Server.Data.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -123,28 +124,7 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
     public const int MaxMerchantAliases = 100;
 
     public static readonly (string Name, string Kind, bool IsSystem, int SortOrder)[] DefaultCategories =
-    [
-        ("Uncategorised", "Uncategorised", true, 0),
-        ("Groceries", "Expense", false, 1),
-        ("Dining and takeaways", "Expense", false, 2),
-        ("Transport", "Expense", false, 3),
-        ("Housing and rent", "Expense", false, 4),
-        ("Home loan", "Expense", false, 5),
-        ("Levies", "Expense", false, 6),
-        ("Utilities", "Expense", false, 7),
-        ("Health", "Expense", false, 8),
-        ("Education and school fees", "Expense", false, 9),
-        ("Shopping", "Expense", false, 10),
-        ("Entertainment", "Expense", false, 11),
-        ("Subscriptions", "Expense", false, 12),
-        ("Fees and charges", "Expense", false, 13),
-        ("Travel", "Expense", false, 14),
-        ("Other expenses", "Expense", false, 15),
-        ("Salary", "Income", false, 16),
-        ("Other income", "Income", false, 17),
-        ("Transfers", "Transfer", false, 18),
-        ("Excluded", "Excluded", false, 19),
-    ];
+        CategoryDefaults.All;
 
     // --- Name normalisation ------------------------------------------------
 
@@ -244,74 +224,31 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
     /// serialize, and the under-lock re-check stops a second seeder from
     /// resurrecting defaults after the customer renamed or deleted them.
     /// </summary>
-    public async Task EnsureCategoriesSeededAsync(Guid customerId, CancellationToken cancellationToken = default)
+    public async Task EnsureCategoriesSeededAsync(FinanceAuthority authority, CancellationToken cancellationToken = default)
     {
-        await using (var checkContext = await contextFactory.CreateDbContextAsync(cancellationToken))
-        {
-            var state = await checkContext.Customers
-                .AsNoTracking()
-                .Where(customer => customer.Id == customerId)
-                .Select(customer => new { customer.CategoriesSeededAt })
-                .SingleOrDefaultAsync(cancellationToken);
-            if (state is null || state.CategoriesSeededAt is not null)
-            {
-                return;
-            }
-        }
-
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-        List<Guid> locked = await context.Database.SqlQuery<Guid>($"""
-            SELECT id FROM customers WHERE id = {customerId} FOR UPDATE
-            """).ToListAsync(cancellationToken);
-        if (locked.Count == 0)
-        {
-            await transaction.CommitAsync(cancellationToken);
-            return;
-        }
-
-        Customer customer = await context.Customers.SingleAsync(item => item.Id == customerId, cancellationToken);
-        if (customer.CategoriesSeededAt is not null)
-        {
-            await transaction.CommitAsync(cancellationToken);
-            return;
-        }
-
-        foreach ((string name, string kind, bool isSystem, int sortOrder) in DefaultCategories)
-        {
-            await context.Database.ExecuteSqlInterpolatedAsync($"""
-                INSERT INTO categories (
-                    id, customer_id, display_name, normalized_name, kind, is_system,
-                    is_default, is_archived, archived_at, sort_order, created_at, updated_at
-                )
-                VALUES (
-                    {Guid.NewGuid()}, {customerId}, {name}, {name.ToLowerInvariant()}, {kind}, {isSystem},
-                    TRUE, FALSE, NULL, {sortOrder}, NOW(), NOW()
-                )
-                ON CONFLICT (customer_id, normalized_name) DO NOTHING
-                """, cancellationToken);
-        }
-
-        customer.CategoriesSeededAt = DateTime.UtcNow;
-        customer.UpdatedAt = DateTime.UtcNow;
-        await context.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenExclusiveAsync(contextFactory, authority, cancellationToken);
+        await CategoryDefaults.EnsureSeededAsync(scope.Context, authority.CustomerId, customerLocked: true, cancellationToken);
+        await scope.CommitAsync(cancellationToken);
     }
 
     // --- Financial accounts ------------------------------------------------
 
-    public async Task<IReadOnlyList<FinancialAccountRecord>> ListAccountsAsync(Guid customerId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<FinancialAccountRecord>> ListAccountsAsync(FinanceAuthority authority, CancellationToken cancellationToken = default)
     {
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(contextFactory, authority, cancellationToken);
 
-        return await AccountRecords(context, customerId).ToListAsync(cancellationToken);
+        var accounts = await AccountRecords(scope.Context, authority.CustomerId).ToListAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
+
+        return accounts;
     }
 
-    public async Task<AccountOutcome> CreateAccountAsync(Guid customerId,
+    public async Task<AccountOutcome> CreateAccountAsync(FinanceAuthority authority,
                                                          string? displayName,
                                                          string? institution,
                                                          CancellationToken cancellationToken = default)
     {
+        Guid customerId = authority.CustomerId;
         if (!TryNormalizeName(displayName, out string? name, out _) || !TryNormalizeInstitution(institution, out string? normalizedInstitution))
         {
             return new AccountOutcome.InvalidName();
@@ -319,7 +256,8 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
 
         var id = Guid.NewGuid();
         var now = DateTime.UtcNow;
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(contextFactory, authority, cancellationToken);
+        var context = scope.Context;
         context.FinancialAccounts.Add(new FinancialAccount
         {
             Id = id,
@@ -336,6 +274,7 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
         await context.SaveChangesAsync(cancellationToken);
 
         FinancialAccountRecord? created = await FindAccountAsync(context, customerId, id, cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return created is null ? new AccountOutcome.NotFound() : new AccountOutcome.Success(created);
     }
@@ -345,13 +284,14 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
     /// is false the stored institution is preserved; when it is true, null or an
     /// empty value clears it.
     /// </summary>
-    public async Task<AccountOutcome> UpdateAccountAsync(Guid customerId,
+    public async Task<AccountOutcome> UpdateAccountAsync(FinanceAuthority authority,
                                                          Guid id,
                                                          string? displayName,
                                                          bool institutionProvided,
                                                          string? institution,
                                                          CancellationToken cancellationToken = default)
     {
+        Guid customerId = authority.CustomerId;
         if (!TryNormalizeName(displayName, out string? name, out _))
         {
             return new AccountOutcome.InvalidName();
@@ -363,11 +303,10 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
             return new AccountOutcome.InvalidName();
         }
 
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(contextFactory, authority, cancellationToken);
+        var context = scope.Context;
         if (!await LockAccountAsync(context, customerId, id, cancellationToken))
         {
-            await transaction.CommitAsync(cancellationToken);
             return new AccountOutcome.NotFound();
         }
 
@@ -382,22 +321,22 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
         account.UpdatedAt = DateTime.UtcNow;
         await context.SaveChangesAsync(cancellationToken);
         FinancialAccountRecord? updated = await FindAccountAsync(context, customerId, id, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return updated is null ? new AccountOutcome.NotFound() : new AccountOutcome.Success(updated);
     }
 
     /// <summary>Archive or restore. Repeating the same transition is an idempotent success.</summary>
-    public async Task<AccountOutcome> SetAccountArchivedAsync(Guid customerId,
+    public async Task<AccountOutcome> SetAccountArchivedAsync(FinanceAuthority authority,
                                                               Guid id,
                                                               bool archived,
                                                               CancellationToken cancellationToken = default)
     {
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenSharedAsync(contextFactory, authority, cancellationToken);
+        var context = scope.Context;
         if (!await LockAccountAsync(context, customerId, id, cancellationToken))
         {
-            await transaction.CommitAsync(cancellationToken);
             return new AccountOutcome.NotFound();
         }
 
@@ -409,7 +348,7 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
         account.UpdatedAt = DateTime.UtcNow;
         await context.SaveChangesAsync(cancellationToken);
         FinancialAccountRecord? updated = await FindAccountAsync(context, customerId, id, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return updated is null ? new AccountOutcome.NotFound() : new AccountOutcome.Success(updated);
     }
@@ -460,21 +399,22 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
 
     // --- Categories --------------------------------------------------------
 
-    public async Task<IReadOnlyList<CategoryRecord>> ListCategoriesAsync(Guid customerId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<CategoryRecord>> ListCategoriesAsync(FinanceAuthority authority, CancellationToken cancellationToken = default)
     {
-        await EnsureCategoriesSeededAsync(customerId, cancellationToken);
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenExclusiveAsync(contextFactory, authority, cancellationToken);
+        await CategoryDefaults.EnsureSeededAsync(scope.Context, authority.CustomerId, customerLocked: true, cancellationToken);
+        var categories = await CategoryRecords(scope.Context, authority.CustomerId).ToListAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
-        return await CategoryRecords(context, customerId).ToListAsync(cancellationToken);
+        return categories;
     }
 
-    public async Task<CategoryOutcome> CreateCategoryAsync(Guid customerId,
+    public async Task<CategoryOutcome> CreateCategoryAsync(FinanceAuthority authority,
                                                            string? displayName,
                                                            string? kind,
                                                            CancellationToken cancellationToken = default)
     {
-        await EnsureCategoriesSeededAsync(customerId, cancellationToken);
-
+        Guid customerId = authority.CustomerId;
         if (!TryNormalizeName(displayName, out string? name, out string? normalizedName))
         {
             return new CategoryOutcome.InvalidName();
@@ -487,7 +427,9 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
 
         var id = Guid.NewGuid();
         var now = DateTime.UtcNow;
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenExclusiveAsync(contextFactory, authority, cancellationToken);
+        await CategoryDefaults.EnsureSeededAsync(scope.Context, customerId, customerLocked: true, cancellationToken);
+        var context = scope.Context;
         try
         {
             context.Categories.Add(new Category
@@ -517,19 +459,19 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
         }
 
         CategoryRecord? created = await FindCategoryAsync(context, customerId, id, cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return created is null ? new CategoryOutcome.NotFound() : new CategoryOutcome.Success(created);
     }
 
-    public async Task<CategoryOutcome> UpdateCategoryAsync(Guid customerId,
+    public async Task<CategoryOutcome> UpdateCategoryAsync(FinanceAuthority authority,
                                                            Guid id,
                                                            string? displayName,
                                                            string? kind,
                                                            bool confirmKindChange,
                                                            CancellationToken cancellationToken = default)
     {
-        await EnsureCategoriesSeededAsync(customerId, cancellationToken);
-
+        Guid customerId = authority.CustomerId;
         if (!TryNormalizeName(displayName, out string? name, out string? normalizedName))
         {
             return new CategoryOutcome.InvalidName();
@@ -540,22 +482,20 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
             return new CategoryOutcome.InvalidKind();
         }
 
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenExclusiveAsync(contextFactory, authority, cancellationToken);
+        await CategoryDefaults.EnsureSeededAsync(scope.Context, customerId, customerLocked: true, cancellationToken);
+        var context = scope.Context;
         Category? category = await LockCategoryAsync(context, customerId, id, cancellationToken);
         if (category is null)
         {
-            await transaction.CommitAsync(cancellationToken);
             return new CategoryOutcome.NotFound();
         }
         if (category.IsSystem)
         {
-            await transaction.CommitAsync(cancellationToken);
             return new CategoryOutcome.SystemCategoryImmutable();
         }
         if (!string.Equals(category.Kind, kind, StringComparison.Ordinal) && !confirmKindChange)
         {
-            await transaction.CommitAsync(cancellationToken);
             return new CategoryOutcome.KindChangeConfirmationRequired();
         }
 
@@ -569,40 +509,36 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
         }
         catch (Exception exception) when (PersistenceErrors.IsUniqueViolation(exception))
         {
-            await transaction.RollbackAsync(cancellationToken);
             return new CategoryOutcome.DuplicateName();
         }
         catch (Exception exception) when (PersistenceErrors.IsCheckViolation(exception))
         {
-            await transaction.RollbackAsync(cancellationToken);
             return new CategoryOutcome.InvalidKind();
         }
 
         CategoryRecord? updated = await FindCategoryAsync(context, customerId, id, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return updated is null ? new CategoryOutcome.NotFound() : new CategoryOutcome.Success(updated);
     }
 
     /// <summary>Archive or restore. Repeating the same transition is an idempotent success.</summary>
-    public async Task<CategoryOutcome> SetCategoryArchivedAsync(Guid customerId,
+    public async Task<CategoryOutcome> SetCategoryArchivedAsync(FinanceAuthority authority,
                                                                 Guid id,
                                                                 bool archived,
                                                                 CancellationToken cancellationToken = default)
     {
-        await EnsureCategoriesSeededAsync(customerId, cancellationToken);
-
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenExclusiveAsync(contextFactory, authority, cancellationToken);
+        await CategoryDefaults.EnsureSeededAsync(scope.Context, customerId, customerLocked: true, cancellationToken);
+        var context = scope.Context;
         Category? category = await LockCategoryAsync(context, customerId, id, cancellationToken);
         if (category is null)
         {
-            await transaction.CommitAsync(cancellationToken);
             return new CategoryOutcome.NotFound();
         }
         if (category.IsSystem)
         {
-            await transaction.CommitAsync(cancellationToken);
             return new CategoryOutcome.SystemCategoryImmutable();
         }
 
@@ -615,12 +551,11 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
         }
         catch (Exception exception) when (PersistenceErrors.IsCheckViolation(exception))
         {
-            await transaction.RollbackAsync(cancellationToken);
             return new CategoryOutcome.SystemCategoryImmutable();
         }
 
         CategoryRecord? updated = await FindCategoryAsync(context, customerId, id, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return updated is null ? new CategoryOutcome.NotFound() : new CategoryOutcome.Success(updated);
     }
@@ -630,21 +565,19 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
     /// to the customer's system <c>Uncategorised</c> bucket. No transaction row
     /// is ever deleted.
     /// </summary>
-    public async Task<CategoryDeleteOutcome> DeleteCategoryAsync(Guid customerId, Guid id, CancellationToken cancellationToken = default)
+    public async Task<CategoryDeleteOutcome> DeleteCategoryAsync(FinanceAuthority authority, Guid id, CancellationToken cancellationToken = default)
     {
-        await EnsureCategoriesSeededAsync(customerId, cancellationToken);
-
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenExclusiveAsync(contextFactory, authority, cancellationToken);
+        await CategoryDefaults.EnsureSeededAsync(scope.Context, customerId, customerLocked: true, cancellationToken);
+        var context = scope.Context;
         Category? category = await LockCategoryAsync(context, customerId, id, cancellationToken);
         if (category is null)
         {
-            await transaction.CommitAsync(cancellationToken);
             return new CategoryDeleteOutcome.NotFound();
         }
         if (category.IsSystem)
         {
-            await transaction.CommitAsync(cancellationToken);
             return new CategoryDeleteOutcome.SystemCategoryImmutable();
         }
 
@@ -654,7 +587,6 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
             .SingleOrDefaultAsync(cancellationToken);
         if (uncategorisedId is null)
         {
-            await transaction.RollbackAsync(cancellationToken);
             return new CategoryDeleteOutcome.NotFound();
         }
 
@@ -665,6 +597,12 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
             FOR UPDATE
             """).ToListAsync(cancellationToken);
 
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE merchant_aliases
+            SET category_id = NULL, updated_at = NOW()
+            WHERE customer_id = {customerId} AND category_id = {id}
+            """, cancellationToken);
+
         int reassigned = await context.Transactions
             .Where(item => item.CustomerId == customerId && item.CategoryId == id)
             .ExecuteUpdateAsync(setters => setters
@@ -674,7 +612,7 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
         await context.Categories
             .Where(item => item.CustomerId == customerId && item.Id == id)
             .ExecuteDeleteAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return new CategoryDeleteOutcome.Success(reassigned, uncategorisedId.Value);
     }
@@ -734,15 +672,19 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
 
     // --- Merchant tags -----------------------------------------------------
 
-    public async Task<IReadOnlyList<MerchantTagRecord>> ListMerchantTagsAsync(Guid customerId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<MerchantTagRecord>> ListMerchantTagsAsync(FinanceAuthority authority, CancellationToken cancellationToken = default)
     {
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(contextFactory, authority, cancellationToken);
 
-        return await MerchantTagRecords(context, customerId).ToListAsync(cancellationToken);
+        var tags = await MerchantTagRecords(scope.Context, authority.CustomerId).ToListAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
+
+        return tags;
     }
 
-    public async Task<MerchantTagOutcome> CreateMerchantTagAsync(Guid customerId, string? displayName, CancellationToken cancellationToken = default)
+    public async Task<MerchantTagOutcome> CreateMerchantTagAsync(FinanceAuthority authority, string? displayName, CancellationToken cancellationToken = default)
     {
+        Guid customerId = authority.CustomerId;
         if (!TryNormalizeName(displayName, out string? name, out string? normalizedName))
         {
             return new MerchantTagOutcome.InvalidName();
@@ -750,7 +692,8 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
 
         var id = Guid.NewGuid();
         var now = DateTime.UtcNow;
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(contextFactory, authority, cancellationToken);
+        var context = scope.Context;
         try
         {
             context.MerchantTags.Add(new MerchantTag
@@ -772,26 +715,27 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
         }
 
         MerchantTagRecord? created = await FindMerchantTagAsync(context, customerId, id, cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return created is null ? new MerchantTagOutcome.NotFound() : new MerchantTagOutcome.Success(created);
     }
 
-    public async Task<MerchantTagOutcome> UpdateMerchantTagAsync(Guid customerId,
+    public async Task<MerchantTagOutcome> UpdateMerchantTagAsync(FinanceAuthority authority,
                                                                  Guid id,
                                                                  string? displayName,
                                                                  CancellationToken cancellationToken = default)
     {
+        Guid customerId = authority.CustomerId;
         if (!TryNormalizeName(displayName, out string? name, out string? normalizedName))
         {
             return new MerchantTagOutcome.InvalidName();
         }
 
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(contextFactory, authority, cancellationToken);
+        var context = scope.Context;
         MerchantTag? tag = await LockMerchantTagAsync(context, customerId, id, cancellationToken);
         if (tag is null)
         {
-            await transaction.CommitAsync(cancellationToken);
             return new MerchantTagOutcome.NotFound();
         }
 
@@ -805,28 +749,27 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
         }
         catch (Exception exception) when (PersistenceErrors.IsUniqueViolation(exception))
         {
-            await transaction.RollbackAsync(cancellationToken);
             return new MerchantTagOutcome.DuplicateName();
         }
 
         MerchantTagRecord? updated = await FindMerchantTagAsync(context, customerId, id, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return updated is null ? new MerchantTagOutcome.NotFound() : new MerchantTagOutcome.Success(updated);
     }
 
     /// <summary>Archive or restore. Repeating the same transition is an idempotent success.</summary>
-    public async Task<MerchantTagOutcome> SetMerchantTagArchivedAsync(Guid customerId,
+    public async Task<MerchantTagOutcome> SetMerchantTagArchivedAsync(FinanceAuthority authority,
                                                                       Guid id,
                                                                       bool archived,
                                                                       CancellationToken cancellationToken = default)
     {
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenSharedAsync(contextFactory, authority, cancellationToken);
+        var context = scope.Context;
         MerchantTag? tag = await LockMerchantTagAsync(context, customerId, id, cancellationToken);
         if (tag is null)
         {
-            await transaction.CommitAsync(cancellationToken);
             return new MerchantTagOutcome.NotFound();
         }
 
@@ -835,7 +778,7 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
         tag.UpdatedAt = DateTime.UtcNow;
         await context.SaveChangesAsync(cancellationToken);
         MerchantTagRecord? updated = await FindMerchantTagAsync(context, customerId, id, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return updated is null ? new MerchantTagOutcome.NotFound() : new MerchantTagOutcome.Success(updated);
     }
@@ -844,14 +787,14 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
     /// Deletes a merchant tag and atomically removes its transaction
     /// assignments. Transactions themselves are preserved.
     /// </summary>
-    public async Task<MerchantTagDeleteOutcome> DeleteMerchantTagAsync(Guid customerId, Guid id, CancellationToken cancellationToken = default)
+    public async Task<MerchantTagDeleteOutcome> DeleteMerchantTagAsync(FinanceAuthority authority, Guid id, CancellationToken cancellationToken = default)
     {
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenSharedAsync(contextFactory, authority, cancellationToken);
+        var context = scope.Context;
         MerchantTag? tag = await LockMerchantTagAsync(context, customerId, id, cancellationToken);
         if (tag is null)
         {
-            await transaction.CommitAsync(cancellationToken);
             return new MerchantTagDeleteOutcome.NotFound();
         }
 
@@ -882,7 +825,7 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
         await context.MerchantTags
             .Where(item => item.CustomerId == customerId && item.Id == id)
             .ExecuteDeleteAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return new MerchantTagDeleteOutcome.Success(unassigned);
     }
@@ -939,21 +882,25 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
 
     // --- Merchant aliases --------------------------------------------------
 
-    public async Task<IReadOnlyList<MerchantAliasRecord>> ListMerchantAliasesAsync(Guid customerId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<MerchantAliasRecord>> ListMerchantAliasesAsync(FinanceAuthority authority, CancellationToken cancellationToken = default)
     {
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(contextFactory, authority, cancellationToken);
 
-        return await AliasRecords(context, customerId)
+        var aliases = await AliasRecords(scope.Context, authority.CustomerId)
             .Take(MaxMerchantAliases)
             .ToListAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
+
+        return aliases;
     }
 
-    public async Task<MerchantAliasOutcome> CreateMerchantAliasAsync(Guid customerId,
+    public async Task<MerchantAliasOutcome> CreateMerchantAliasAsync(FinanceAuthority authority,
                                                                      string? displayAlias,
                                                                      Guid? merchantTagId,
                                                                      Guid? categoryId,
                                                                      CancellationToken cancellationToken = default)
     {
+        Guid customerId = authority.CustomerId;
         if (!TryNormalizeName(displayAlias, out string? alias, out string? normalizedAlias) || merchantTagId is null)
         {
             return new MerchantAliasOutcome.InvalidName();
@@ -961,8 +908,8 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
 
         var id = Guid.NewGuid();
         var now = DateTime.UtcNow;
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(contextFactory, authority, cancellationToken);
+        var context = scope.Context;
         try
         {
             await context.Database.ExecuteSqlInterpolatedAsync($"""
@@ -997,32 +944,33 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
                 UpdatedAt = now,
             });
             await context.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
         }
         catch (Exception exception) when (PersistenceErrors.IsUniqueViolation(exception))
         {
             return new MerchantAliasOutcome.DuplicateName();
         }
 
-        MerchantAliasRecord? created = await FindMerchantAliasAsync(customerId, id, cancellationToken);
+        MerchantAliasRecord? created = await FindMerchantAliasAsync(context, customerId, id, cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return created is null ? new MerchantAliasOutcome.NotFound() : new MerchantAliasOutcome.Success(created);
     }
 
-    public async Task<MerchantAliasOutcome> UpdateMerchantAliasAsync(Guid customerId,
+    public async Task<MerchantAliasOutcome> UpdateMerchantAliasAsync(FinanceAuthority authority,
                                                                      Guid id,
                                                                      string? displayAlias,
                                                                      Guid? merchantTagId,
                                                                      Guid? categoryId,
                                                                      CancellationToken cancellationToken = default)
     {
+        Guid customerId = authority.CustomerId;
         if (!TryNormalizeName(displayAlias, out string? alias, out string? normalizedAlias) || merchantTagId is null)
         {
             return new MerchantAliasOutcome.InvalidName();
         }
 
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(contextFactory, authority, cancellationToken);
+        var context = scope.Context;
         try
         {
             if (!await AliasTagExistsAsync(context, customerId, merchantTagId.Value, cancellationToken))
@@ -1055,25 +1003,25 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
             {
                 return new MerchantAliasOutcome.NotFound();
             }
-
-            await transaction.CommitAsync(cancellationToken);
         }
         catch (Exception exception) when (PersistenceErrors.IsUniqueViolation(exception))
         {
             return new MerchantAliasOutcome.DuplicateName();
         }
 
-        MerchantAliasRecord? updatedAlias = await FindMerchantAliasAsync(customerId, id, cancellationToken);
+        MerchantAliasRecord? updatedAlias = await FindMerchantAliasAsync(context, customerId, id, cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return updatedAlias is null ? new MerchantAliasOutcome.NotFound() : new MerchantAliasOutcome.Success(updatedAlias);
     }
 
-    public async Task<bool> DeleteMerchantAliasAsync(Guid customerId, Guid id, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteMerchantAliasAsync(FinanceAuthority authority, Guid id, CancellationToken cancellationToken = default)
     {
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        int deleted = await context.MerchantAliases
-            .Where(alias => alias.CustomerId == customerId && alias.Id == id)
+        await using var scope = await CustomerDbScope.OpenSharedAsync(contextFactory, authority, cancellationToken);
+        int deleted = await scope.Context.MerchantAliases
+            .Where(alias => alias.CustomerId == authority.CustomerId && alias.Id == id)
             .ExecuteDeleteAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return deleted > 0;
     }
@@ -1103,12 +1051,11 @@ public sealed class FinanceStore(IDbContextFactory<ArgusDbContext> contextFactor
             item.Alias.UpdatedAt));
     }
 
-    private async Task<MerchantAliasRecord?> FindMerchantAliasAsync(Guid customerId, Guid id, CancellationToken cancellationToken)
-    {
-        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-
-        return await AliasRecords(context, customerId, id).SingleOrDefaultAsync(cancellationToken);
-    }
+    private static async Task<MerchantAliasRecord?> FindMerchantAliasAsync(ArgusDbContext context,
+                                                                          Guid customerId,
+                                                                          Guid id,
+                                                                          CancellationToken cancellationToken) =>
+        await AliasRecords(context, customerId, id).SingleOrDefaultAsync(cancellationToken);
 
     private static async Task<bool> AliasTagExistsAsync(ArgusDbContext context,
                                                         Guid customerId,

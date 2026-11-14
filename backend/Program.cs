@@ -20,6 +20,13 @@ if (args.Contains("--parse-statement-pdf", StringComparer.Ordinal))
     return await argus.Server.Imports.PdfParserChild.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput(), Console.OpenStandardError());
 }
 
+// Maintenance commands never load the normal runtime configuration, build the
+// web host or start routes/cleanup services.
+if (args.Contains("migrate", StringComparer.Ordinal) || args.Contains("seed", StringComparer.Ordinal))
+{
+    return await MaintenanceProgram.RunAsync(args);
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 AppSettings settings;
@@ -101,12 +108,6 @@ builder.Services.AddHostedService<ImportCleanupService>();
 
 var app = builder.Build();
 
-if (args.Contains("migrate", StringComparer.Ordinal))
-{
-    new InitializationCoordinator(settings.DatabaseUrl, app.Services.GetRequiredService<IInitializationFaultInjector>()).Initialize();
-    return 0;
-}
-
 app.UseExceptionHandler(handler => handler.Run(async context =>
 {
     context.Response.StatusCode = 500;
@@ -139,18 +140,7 @@ app.Use(async (context, next) =>
     app.Logger.LogInformation("http_request method={Method} path={Path} status={Status} elapsed_ms={ElapsedMs}", context.Request.Method, context.Request.Path.Value, context.Response.StatusCode, stopwatch.ElapsedMilliseconds);
 });
 
-await new InitializationCoordinator(settings.DatabaseUrl, app.Services.GetRequiredService<IInitializationFaultInjector>()).InitializeAsync();
-
-if (args.Contains("seed"))
-{
-    await Seed.RunAsync(
-        settings.DatabaseUrl,
-        app.Services.GetRequiredService<FinanceStore>(),
-        app.Services.GetRequiredService<IDbContextFactory<ArgusDbContext>>(),
-        settings,
-        app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("seed"));
-    return 0;
-}
+await RuntimeDatabaseValidator.ValidateAsync(settings.DatabaseUrl);
 
 app.Services.GetRequiredService<AccountApi>().Map(app);
 app.Services.GetRequiredService<FinanceApi>().Map(app);

@@ -297,7 +297,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
 
         // Re-invoking the seeder must not restore the renamed or deleted defaults.
         FinanceStore store = Factory.Services.GetRequiredService<FinanceStore>();
-        await store.EnsureCategoriesSeededAsync(customerId);
+        await store.EnsureCategoriesSeededAsync(new FinanceAuthority(customerId, Tokens.HashToken(session)));
 
         var categories = await ListCategoriesAsync(session);
         Assert.NotNull(FindByName(categories, "Supermarket"));
@@ -841,6 +841,11 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
     public async Task MerchantAliasCapSerializesConcurrentCreates()
     {
         var (session, customerId) = await NewCustomerAsync();
+        var me = await SendAsync(Get("/v1/me", session: session));
+        string email = (await BodyAsync(me)).GetProperty("email").GetString()!;
+        var secondLogin = await SendAsync(Post("/v1/login", Json(new { email, password = TestEnvironment.GoodPassword })));
+        Assert.Equal(HttpStatusCode.OK, secondLogin.StatusCode);
+        string secondSession = (await BodyAsync(secondLogin)).GetProperty("token").GetString()!;
         var tagResponse = await SendAsync(Post(TagsPath, Json(new { display_name = "Concurrent target" }), session: session));
         var tagId = (await BodyAsync(tagResponse)).GetProperty("id").GetGuid();
         await ExecuteSqlAsync($"""
@@ -884,7 +889,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
             {
                 display_alias = "Concurrent beta",
                 merchant_tag_id = tagId,
-            }), session: session));
+            }), session: secondSession));
 
             await WaitForBlockedAliasCreatesAsync(observer, blockerPid, 2);
             Assert.False(first.IsCompleted);
@@ -933,7 +938,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         }
     }
 
-    private static async Task WaitForBlockedAliasCreatesAsync(NpgsqlConnection observer, int blockerPid, int expected)
+    private async Task WaitForBlockedAliasCreatesAsync(NpgsqlConnection observer, int blockerPid, int expected)
     {
         for (var attempt = 0; attempt < 200; attempt++)
         {
@@ -952,7 +957,14 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
             await Task.Delay(25);
         }
 
-        Assert.Fail("Concurrent alias creates did not reach the advisory-lock wait.");
+        await using var snapshot = observer.CreateCommand();
+        snapshot.CommandText = """
+            SELECT string_agg(pid::text || ':' || coalesce(wait_event_type, '') || ':' || coalesce(wait_event, '') || ':' || query, E'\n')
+            FROM pg_stat_activity
+            WHERE datname = current_database() AND pid <> pg_backend_pid() AND state <> 'idle'
+            """;
+        string activity = Convert.ToString(await snapshot.ExecuteScalarAsync()) ?? string.Empty;
+        Assert.Fail("Concurrent alias creates did not reach the advisory-lock wait. Activity: " + activity + "\nLogs:\n" + string.Join("\n", Factory.LogCapture.Snapshot()));
     }
 
     [Fact]
@@ -1300,7 +1312,7 @@ public sealed class FinanceContractTests(KitFactory factory) : ApiTestBase(facto
         string triggerName = "canary_query_error_" + suffix;
         _ = await CreateAccountAsync(session, canary);
         await ExecuteSqlAsync($"""
-            CREATE FUNCTION {functionName}() RETURNS trigger LANGUAGE plpgsql AS $$
+            CREATE FUNCTION {functionName}() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
             DECLARE canary text;
             BEGIN
                 SELECT display_name INTO canary FROM financial_accounts

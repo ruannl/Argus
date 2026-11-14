@@ -40,7 +40,7 @@ public sealed class StatementImportApi(FinanceGuard guard,
         app.MapDelete("/v1/finance/imports/{id:guid}", DeleteAsync);
     }
 
-    private async Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private async Task<(FinanceAuthority? Authority, IResult? Failure)> AuthenticateAsync(HttpContext context, CancellationToken cancellationToken) =>
         await guard.AuthenticateAsync(context, cancellationToken);
 
     private async Task<IResult> GuardedAsync(Func<Task<IResult>> action, string operation)
@@ -60,6 +60,10 @@ public sealed class StatementImportApi(FinanceGuard guard,
         catch (ImportStoreException exception)
         {
             return StoreError(exception.Error);
+        }
+        catch (FinanceAuthorityException)
+        {
+            return Errors.Unauthorized();
         }
         catch (PostgresException exception)
         {
@@ -86,10 +90,10 @@ public sealed class StatementImportApi(FinanceGuard guard,
     private Task<IResult> InspectAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
 
-            if (!rateLimiter.CheckImportCustomer(customerId!.Value)) return Errors.RateLimited();
+            if (!rateLimiter.CheckImportCustomer(authority!.CustomerId)) return Errors.RateLimited();
 
             var multipart = await MultipartImportReader.ReadAsync(context.Request, cancellationToken);
             var parsedOptions = JsonBody.ParseBytes<ImportOptionsRequest>(Encoding.UTF8.GetBytes(multipart.OptionsJson));
@@ -114,7 +118,7 @@ public sealed class StatementImportApi(FinanceGuard guard,
                 end = parsedEnd;
             }
 
-            var account = await store.GetAccountAsync(customerId.Value, options.FinancialAccountId.Value, cancellationToken);
+            var account = await store.GetAccountAsync(authority!, options.FinancialAccountId.Value, cancellationToken);
             if (account is null) return Errors.NotFound();
 
             if (account.IsArchived) return StoreError(ImportErrorCodes.AccountArchived);
@@ -145,10 +149,10 @@ public sealed class StatementImportApi(FinanceGuard guard,
     private Task<IResult> CreateReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
 
-            if (!rateLimiter.CheckImportCustomer(customerId!.Value)) return Errors.RateLimited();
+            if (!rateLimiter.CheckImportCustomer(authority!.CustomerId)) return Errors.RateLimited();
 
             var multipart = await MultipartImportReader.ReadAsync(context.Request, cancellationToken);
             var parsedOptions = JsonBody.ParseBytes<ImportOptionsRequest>(Encoding.UTF8.GetBytes(multipart.OptionsJson));
@@ -166,7 +170,7 @@ public sealed class StatementImportApi(FinanceGuard guard,
                 return Errors.InvalidRequest();
             }
 
-            var account = await store.GetAccountAsync(customerId.Value, options.FinancialAccountId.Value, cancellationToken);
+            var account = await store.GetAccountAsync(authority!, options.FinancialAccountId.Value, cancellationToken);
             if (account is null) return Errors.NotFound();
 
             if (account.IsArchived) return StoreError(ImportErrorCodes.AccountArchived);
@@ -176,26 +180,26 @@ public sealed class StatementImportApi(FinanceGuard guard,
                 Format = sourceKind == StatementSourceKind.GenericCsv ? "generic" : null,
             };
             var parsed = await StatementParser.PrepareAsync(multipart.FileBytes, sourceKind, config, start, end, pdfRunner, parserAdmission, cancellationToken);
-            var detail = await store.CreateReviewAsync(customerId.Value, options.FinancialAccountId.Value, sourceKind, config, start, end, parsed, cancellationToken);
+            var detail = await store.CreateReviewAsync(authority!, options.FinancialAccountId.Value, sourceKind, config, start, end, parsed, cancellationToken);
 
-            _audit.LogInformation("audit.import_review_created customer_id={CustomerId} review_id={ReviewId} rows={Rows}", customerId.Value, detail.Summary.Id, detail.Summary.TotalRows);
+            _audit.LogInformation("audit.import_review_created customer_id={CustomerId} review_id={ReviewId} rows={Rows}", authority!.CustomerId, detail.Summary.Id, detail.Summary.TotalRows);
             return Results.Json(ReviewResponse.From(detail), statusCode: 201);
         }, "imports_review_create");
 
     private Task<IResult> ListReviewsAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
 
-            var reviews = await store.ListOpenReviewsAsync(customerId!.Value, cancellationToken);
+            var reviews = await store.ListOpenReviewsAsync(authority!, cancellationToken);
             return Results.Json(new { reviews = reviews.Select(OpenReviewResponse.From).ToArray() });
         }, "imports_reviews_list");
 
     private Task<IResult> GetReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
 
             var id = RouteGuid(context);
@@ -206,14 +210,14 @@ public sealed class StatementImportApi(FinanceGuard guard,
             string sortDirection = context.Request.Query["sort_direction"].ToString();
             bool possibleDuplicatesOnly = string.Equals(context.Request.Query["duplicates"].ToString(), "possible", StringComparison.OrdinalIgnoreCase);
             bool untaggedOnly = string.Equals(context.Request.Query["untagged"].ToString(), "true", StringComparison.OrdinalIgnoreCase);
-            var detail = await store.GetReviewAsync(customerId!.Value, id.Value, page, pageSize, sortDirection, possibleDuplicatesOnly, untaggedOnly, cancellationToken);
+            var detail = await store.GetReviewAsync(authority!, id.Value, page, pageSize, sortDirection, possibleDuplicatesOnly, untaggedOnly, cancellationToken);
             return Results.Json(ReviewResponse.From(detail));
         }, "imports_review_get");
 
     private Task<IResult> PatchReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
 
             var id = RouteGuid(context);
@@ -274,14 +278,14 @@ public sealed class StatementImportApi(FinanceGuard guard,
                     resetCategory));
             }
 
-            var summary = await store.PatchReviewAsync(customerId!.Value, id.Value, parsed.Value.ExpectedReviewVersion.Value, decisions, parsed.Value.StatementOverride, cancellationToken);
+            var summary = await store.PatchReviewAsync(authority!, id.Value, parsed.Value.ExpectedReviewVersion.Value, decisions, parsed.Value.StatementOverride, cancellationToken);
             return Results.Json(ReviewSummaryResponse.From(summary));
         }, "imports_review_patch");
 
     private Task<IResult> RefreshReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
 
             var id = RouteGuid(context);
@@ -294,14 +298,14 @@ public sealed class StatementImportApi(FinanceGuard guard,
                 return Errors.InvalidRequest();
             }
 
-            var summary = await store.RefreshReviewAsync(customerId!.Value, id.Value, parsed.Value.ExpectedReviewVersion.Value, cancellationToken);
+            var summary = await store.RefreshReviewAsync(authority!, id.Value, parsed.Value.ExpectedReviewVersion.Value, cancellationToken);
             return Results.Json(ReviewSummaryResponse.From(summary));
         }, "imports_review_refresh");
 
     private Task<IResult> CommitReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
 
             var id = RouteGuid(context);
@@ -314,15 +318,15 @@ public sealed class StatementImportApi(FinanceGuard guard,
                 return Errors.InvalidRequest();
             }
 
-            var result = await store.CommitReviewAsync(customerId!.Value, id.Value, parsed.Value.ExpectedReviewVersion.Value, parsed.Value.ConfirmedSummaryHash, cancellationToken);
-            _audit.LogInformation("audit.import_committed customer_id={CustomerId} statement_id={StatementId} rows={Rows} replayed={Replayed}", customerId.Value, result.Summary.Id, result.Summary.ImportedCount, result.Replayed);
+            var result = await store.CommitReviewAsync(authority!, id.Value, parsed.Value.ExpectedReviewVersion.Value, parsed.Value.ConfirmedSummaryHash, cancellationToken);
+            _audit.LogInformation("audit.import_committed customer_id={CustomerId} statement_id={StatementId} rows={Rows} replayed={Replayed}", authority!.CustomerId, result.Summary.Id, result.Summary.ImportedCount, result.Replayed);
             return Results.Json(CommitResponse.From(result), statusCode: result.Replayed ? 200 : 201);
         }, "imports_review_commit");
 
     private Task<IResult> AbandonReviewAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
 
             var id = RouteGuid(context);
@@ -335,7 +339,7 @@ public sealed class StatementImportApi(FinanceGuard guard,
                 return Errors.InvalidRequest();
             }
 
-            var result = await store.AbandonReviewAsync(customerId!.Value, id.Value, parsed.Value.ExpectedReviewVersion.Value, cancellationToken);
+            var result = await store.AbandonReviewAsync(authority!, id.Value, parsed.Value.ExpectedReviewVersion.Value, cancellationToken);
             return Results.Json(new { committed = result.Committed, statement = result.Commit is null ? null : StatementSummaryResponse.From(result.Commit.Summary), replayed = result.Commit?.Replayed ?? false, });
         }, "imports_review_abandon");
 
@@ -344,21 +348,21 @@ public sealed class StatementImportApi(FinanceGuard guard,
     private Task<IResult> ListHistoryAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
 
             var accountId = QueryGuid(context, "account_id");
             string state = context.Request.Query["state"].ToString();
             string cursor = context.Request.Query["cursor"].ToString();
             int limit = QueryInt(context, "limit", 50);
-            var page = await store.ListHistoryAsync(customerId!.Value, accountId, string.IsNullOrWhiteSpace(state) ? null : state, string.IsNullOrWhiteSpace(cursor) ? null : cursor, limit, cancellationToken);
+            var page = await store.ListHistoryAsync(authority!, accountId, string.IsNullOrWhiteSpace(state) ? null : state, string.IsNullOrWhiteSpace(cursor) ? null : cursor, limit, cancellationToken);
             return Results.Json(new { items = page.Items.Select(StatementSummaryResponse.From).ToArray(), next_cursor = page.NextCursor, });
         }, "imports_history_list");
 
     private Task<IResult> GetImportAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
 
             var id = RouteGuid(context);
@@ -366,7 +370,7 @@ public sealed class StatementImportApi(FinanceGuard guard,
 
             int page = QueryInt(context, "page", 1);
             int pageSize = QueryInt(context, "page_size", ImportLimits.MaxPageSize);
-            var detail = await store.GetStatementAsync(customerId!.Value, id.Value, page, pageSize, cancellationToken);
+            var detail = await store.GetStatementAsync(authority!, id.Value, page, pageSize, cancellationToken);
             return Results.Json(new
             {
                 statement = StatementSummaryResponse.From(detail.Summary),
@@ -386,7 +390,7 @@ public sealed class StatementImportApi(FinanceGuard guard,
     private Task<IResult> SetVisibilityAsync(HttpContext context, CancellationToken cancellationToken, bool hidden) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
 
             var id = RouteGuid(context);
@@ -399,14 +403,14 @@ public sealed class StatementImportApi(FinanceGuard guard,
                 return Errors.InvalidRequest();
             }
 
-            var summary = await store.SetStatementVisibilityAsync(customerId!.Value, id.Value, hidden, parsed.Value.ExpectedVersion.Value, parsed.Value.ExpectedTransactionCount.Value, true, cancellationToken);
+            var summary = await store.SetStatementVisibilityAsync(authority!, id.Value, hidden, parsed.Value.ExpectedVersion.Value, parsed.Value.ExpectedTransactionCount.Value, true, cancellationToken);
             return Results.Json(StatementSummaryResponse.From(summary));
         }, hidden ? "imports_statement_hide" : "imports_statement_restore");
 
     private Task<IResult> DeleteAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null) return failure;
 
             var id = RouteGuid(context);
@@ -420,8 +424,8 @@ public sealed class StatementImportApi(FinanceGuard guard,
                 return Errors.InvalidRequest();
             }
 
-            var result = await store.DeleteStatementAsync(customerId!.Value, id.Value, parsed.Value.ExpectedVersion.Value, parsed.Value.ExpectedTransactionCount.Value, true, cancellationToken);
-            _audit.LogInformation("audit.import_deleted customer_id={CustomerId} statement_id={StatementId} deleted={Deleted}", customerId.Value, id.Value, result.DeletedTransactionCount);
+            var result = await store.DeleteStatementAsync(authority!, id.Value, parsed.Value.ExpectedVersion.Value, parsed.Value.ExpectedTransactionCount.Value, true, cancellationToken);
+            _audit.LogInformation("audit.import_deleted customer_id={CustomerId} statement_id={StatementId} deleted={Deleted}", authority!.CustomerId, id.Value, result.DeletedTransactionCount);
             return Results.Json(new { deleted = result.Deleted, deleted_transaction_count = result.DeletedTransactionCount, });
         }, "imports_statement_delete");
 

@@ -266,27 +266,26 @@ public sealed class StatementImportStore
         LIMIT {5}
         """;
 
-    private readonly FinanceStore _financeStore;
     private readonly IImportFaultInjector _faults;
     private readonly IDbContextFactory<ArgusDbContext> _contextFactory;
 
-    public StatementImportStore(FinanceStore financeStore,
-                                IImportFaultInjector faults,
+    public StatementImportStore(IImportFaultInjector faults,
                                 IDbContextFactory<ArgusDbContext> contextFactory)
     {
-        _financeStore = financeStore;
         _faults = faults;
         _contextFactory = contextFactory;
     }
 
-    public async Task<ImportAccountRecord?> GetAccountAsync(Guid customerId, Guid accountId, CancellationToken cancellationToken = default)
+    public async Task<ImportAccountRecord?> GetAccountAsync(FinanceAuthority authority, Guid accountId, CancellationToken cancellationToken = default)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(_contextFactory, authority, cancellationToken);
+        var account = await GetAccountAsync(scope.Context, authority.CustomerId, accountId, cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
-        return await GetAccountAsync(context, customerId, accountId, cancellationToken);
+        return account;
     }
 
-    public async Task<ImportReviewDetail> CreateReviewAsync(Guid customerId,
+    public async Task<ImportReviewDetail> CreateReviewAsync(FinanceAuthority authority,
                                                             Guid accountId,
                                                             StatementSourceKind sourceKind,
                                                             ParserConfig config,
@@ -295,6 +294,7 @@ public sealed class StatementImportStore
                                                             ParsedStatement parsed,
                                                             CancellationToken cancellationToken = default)
     {
+        Guid customerId = authority.CustomerId;
         if (parsed.Rows.Count == 0)
         {
             throw new ImportStoreException(ImportErrorCodes.NoIncludedRows);
@@ -304,17 +304,13 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
         }
 
-        // Seeding happens before the quota/account lock order so no later step
-        // enters that order while holding a customer-row lock.
-        await _financeStore.EnsureCategoriesSeededAsync(customerId, cancellationToken);
-
         long estimatedPayloadBytes = EstimatePayload(parsed, config);
         var reviewId = Guid.NewGuid();
         var now = DateTime.UtcNow;
         var expiresAt = now.AddHours(ImportLimits.ReviewLifetimeHours);
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenExclusiveAsync(_contextFactory, authority, cancellationToken);
+        var context = scope.Context;
 
         await LockQuotaAsync(context, customerId, cancellationToken);
         long usedPayloadBytes = await EnforceQuotaAsync(context, customerId, estimatedPayloadBytes, cancellationToken);
@@ -328,6 +324,8 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
+
+        await CategoryDefaults.EnsureSeededAsync(context, customerId, customerLocked: true, cancellationToken);
 
         var snapshot = await ComputeDuplicateSnapshotAsync(context, customerId, accountId, parsed.Rows, null, cancellationToken);
         var rows = snapshot.Rows.Select(row => row with
@@ -363,7 +361,7 @@ public sealed class StatementImportStore
             rows,
             cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         var summary = new ImportReviewSummaryRecord(
             reviewId,
@@ -396,9 +394,11 @@ public sealed class StatementImportStore
         return new ImportReviewDetail(summary, page);
     }
 
-    public async Task<IReadOnlyList<ImportOpenReviewSummary>> ListOpenReviewsAsync(Guid customerId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ImportOpenReviewSummary>> ListOpenReviewsAsync(FinanceAuthority authority, CancellationToken cancellationToken = default)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(_contextFactory, authority, cancellationToken);
+        var context = scope.Context;
+        Guid customerId = authority.CustomerId;
         List<ImportReview> reviews = await context.ImportReviews
             .FromSqlInterpolated($"""
                 SELECT * FROM import_reviews
@@ -409,7 +409,7 @@ public sealed class StatementImportStore
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
-        return reviews
+        var items = reviews
             .Select(review => new ImportOpenReviewSummary(
                 review.Id,
                 review.FinancialAccountId,
@@ -424,9 +424,12 @@ public sealed class StatementImportStore
                 review.SkippedCount,
                 review.CreatedAt))
             .ToList();
+        await scope.CommitAsync(cancellationToken);
+
+        return items;
     }
 
-    public async Task<ImportReviewDetail> GetReviewAsync(Guid customerId,
+    public async Task<ImportReviewDetail> GetReviewAsync(FinanceAuthority authority,
                                                          Guid reviewId,
                                                          int page,
                                                          int pageSize,
@@ -435,10 +438,12 @@ public sealed class StatementImportStore
                                                          bool untaggedOnly = false,
                                                          CancellationToken cancellationToken = default)
     {
+        Guid customerId = authority.CustomerId;
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, ImportLimits.MaxPageSize);
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(_contextFactory, authority, cancellationToken);
+        var context = scope.Context;
         var summary = await ReadReviewHeaderAsync(context, customerId, reviewId, false, cancellationToken);
         if (summary is null)
         {
@@ -456,17 +461,19 @@ public sealed class StatementImportStore
         bool descending = string.Equals(sortDirection, "desc", StringComparison.OrdinalIgnoreCase);
         var rows = await ReadReviewRowsAsync(context, reviewId, page, pageSize, descending, possibleDuplicatesOnly, untaggedOnly, cancellationToken);
         int total = await CountReviewRowsAsync(context, reviewId, possibleDuplicatesOnly, untaggedOnly, cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return new ImportReviewDetail(summary, new ImportReviewPage(rows, total, page, pageSize));
     }
 
-    public async Task<ImportReviewSummaryRecord> PatchReviewAsync(Guid customerId,
+    public async Task<ImportReviewSummaryRecord> PatchReviewAsync(FinanceAuthority authority,
                                                                   Guid reviewId,
                                                                   int expectedVersion,
                                                                   IReadOnlyList<ImportDecision> decisions,
                                                                   bool? statementOverride,
                                                                   CancellationToken cancellationToken = default)
     {
+        Guid customerId = authority.CustomerId;
         if (decisions.Count > ImportLimits.MaxReviewDecisionsPerRequest)
         {
             throw new ImportStoreException(ImportErrorCodes.ProcessingLimit);
@@ -476,8 +483,8 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(_contextFactory, authority, cancellationToken);
+        var context = scope.Context;
 
         var accountId = await ReviewAccountIdAsync(context, customerId, reviewId, cancellationToken);
         if (accountId is null)
@@ -659,7 +666,7 @@ public sealed class StatementImportStore
         int version = summary.Version + 1;
         string hash = ComputeSummaryHash(reviewId, version, updatedRows, counts, overrideFlag);
         await UpdateReviewSummaryAsync(context, reviewId, version, counts, hash, overrideFlag, payloadBytes, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return summary with
         {
@@ -681,13 +688,14 @@ public sealed class StatementImportStore
         };
     }
 
-    public async Task<ImportReviewSummaryRecord> RefreshReviewAsync(Guid customerId,
+    public async Task<ImportReviewSummaryRecord> RefreshReviewAsync(FinanceAuthority authority,
                                                                     Guid reviewId,
                                                                     int expectedVersion,
                                                                     CancellationToken cancellationToken = default)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenSharedAsync(_contextFactory, authority, cancellationToken);
+        var context = scope.Context;
 
         var accountId = await ReviewAccountIdAsync(context, customerId, reviewId, cancellationToken);
         if (accountId is null)
@@ -772,7 +780,7 @@ public sealed class StatementImportStore
         string hash = ComputeSummaryHash(reviewId, version, refreshed, counts, summary.StatementOverride);
         await UpdateReviewSummaryAsync(context, reviewId, version, counts, hash, summary.StatementOverride, payloadBytes, cancellationToken);
         await UpdateReviewAccountVersionAsync(context, reviewId, account.ImportVersion, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return summary with
         {
@@ -792,13 +800,14 @@ public sealed class StatementImportStore
         };
     }
 
-    public async Task<ImportAbandonResult> AbandonReviewAsync(Guid customerId,
+    public async Task<ImportAbandonResult> AbandonReviewAsync(FinanceAuthority authority,
                                                               Guid reviewId,
                                                               int expectedVersion,
                                                               CancellationToken cancellationToken = default)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenSharedAsync(_contextFactory, authority, cancellationToken);
+        var context = scope.Context;
 
         // A committed import purges the review header, so resolve a terminal
         // operation from its receipt before looking for the review.
@@ -816,7 +825,7 @@ public sealed class StatementImportStore
                 var statement = await ReadStatementSummaryAsync(context, customerId, terminal.StatementImportId!.Value, cancellationToken);
                 if (statement is not null)
                 {
-                    await transaction.CommitAsync(cancellationToken);
+                    await scope.CommitAsync(cancellationToken);
                     return new ImportAbandonResult(true, new ImportCommitResult(statement, true));
                 }
             }
@@ -839,7 +848,7 @@ public sealed class StatementImportStore
                     var lateStatement = await ReadStatementSummaryAsync(context, customerId, lateReceipt.StatementImportId!.Value, cancellationToken);
                     if (lateStatement is not null)
                     {
-                        await transaction.CommitAsync(cancellationToken);
+                        await scope.CommitAsync(cancellationToken);
                         return new ImportAbandonResult(true, new ImportCommitResult(lateStatement, true));
                     }
                 }
@@ -858,7 +867,7 @@ public sealed class StatementImportStore
             var statement = await ReadStatementSummaryAsync(context, customerId, racedReceipt.StatementImportId!.Value, cancellationToken);
             if (statement is not null)
             {
-                await transaction.CommitAsync(cancellationToken);
+                await scope.CommitAsync(cancellationToken);
                 return new ImportAbandonResult(true, new ImportCommitResult(statement, true));
             }
         }
@@ -874,7 +883,7 @@ public sealed class StatementImportStore
         }
         if (summary.Status == "Abandoned")
         {
-            await transaction.CommitAsync(cancellationToken);
+            await scope.CommitAsync(cancellationToken);
             return new ImportAbandonResult(false, null);
         }
         EnsureEditable(summary, expectedVersion);
@@ -904,7 +913,7 @@ public sealed class StatementImportStore
             WHERE customer_id = {{customerId}} AND id = {{reviewId}}
             """, cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return new ImportAbandonResult(false, null);
     }
@@ -2185,25 +2194,26 @@ public sealed class StatementImportStore
 
     // --- Commit and terminal lifecycle -------------------------------------
 
-    public async Task<ImportCommitResult> CommitReviewAsync(Guid customerId,
+    public async Task<ImportCommitResult> CommitReviewAsync(FinanceAuthority authority,
                                                             Guid reviewId,
                                                             int expectedVersion,
                                                             string confirmedSummaryHash,
                                                             CancellationToken cancellationToken = default)
     {
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenExclusiveAsync(_contextFactory, authority, cancellationToken);
+        var context = scope.Context;
+
         // A denied commit must not seed finance data. Prove the operation
         // belongs to this customer before category initialization; the normal
         // lock-order rechecks below still establish commit authority.
-        if (!await OwnedOperationExistsAsync(customerId, reviewId, cancellationToken))
+        if (!await OwnedOperationExistsAsync(context, customerId, reviewId, cancellationToken))
         {
             throw new ImportStoreException(ImportErrorCodes.NotFound);
         }
 
-        await _financeStore.EnsureCategoriesSeededAsync(customerId, cancellationToken);
+        await CategoryDefaults.EnsureSeededAsync(context, customerId, customerLocked: true, cancellationToken);
         string requestDigest = Digest($"commit-v1|{expectedVersion}|{confirmedSummaryHash}");
-
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
 
         // A receipt is the truth after a lost response, including after the
         // review payload has been purged. Resolve the account from the receipt
@@ -2213,7 +2223,7 @@ public sealed class StatementImportStore
         {
             _ = await LockAccountAsync(context, customerId, receiptAccountId.Value, cancellationToken);
             var replay = await ReplayReceiptAsync(context, customerId, reviewId, requestDigest, cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            await scope.CommitAsync(cancellationToken);
             return replay;
         }
 
@@ -2225,7 +2235,7 @@ public sealed class StatementImportStore
             {
                 _ = await LockAccountAsync(context, customerId, lateReceiptAccount.Value, cancellationToken);
                 var replay = await ReplayReceiptAsync(context, customerId, reviewId, requestDigest, cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
+                await scope.CommitAsync(cancellationToken);
                 return replay;
             }
             throw new ImportStoreException(ImportErrorCodes.NotFound);
@@ -2239,7 +2249,7 @@ public sealed class StatementImportStore
         if (racedReceipt is not null)
         {
             var replay = await ReplayReceiptAsync(context, customerId, reviewId, requestDigest, cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            await scope.CommitAsync(cancellationToken);
             return replay;
         }
 
@@ -2447,7 +2457,7 @@ public sealed class StatementImportStore
         var summary = await ReadStatementSummaryAsync(context, customerId, statementId, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
         _faults.OnStep("before_commit");
         await ThrowIfCommitExpiredAsync(context, review.ExpiresAt, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
         _faults.OnStep("after_commit_before_response");
 
         return new ImportCommitResult(summary, false);
@@ -2488,13 +2498,14 @@ public sealed class StatementImportStore
         return new ImportCommitResult(summary, true);
     }
 
-    public async Task<ImportHistoryPage> ListHistoryAsync(Guid customerId,
+    public async Task<ImportHistoryPage> ListHistoryAsync(FinanceAuthority authority,
                                                           Guid? accountId,
                                                           string? state,
                                                           string? cursor,
                                                           int limit,
                                                           CancellationToken cancellationToken = default)
     {
+        Guid customerId = authority.CustomerId;
         limit = Math.Clamp(limit, 1, 100);
         state = state is "visible" or "hidden" ? state : "all";
         DateTime? cursorCreated = null;
@@ -2504,7 +2515,8 @@ public sealed class StatementImportStore
             (cursorCreated, cursorId) = DecodeCursor(cursor);
         }
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(_contextFactory, authority, cancellationToken);
+        var context = scope.Context;
         List<StatementSummaryRow> rows = await context.Database
             .SqlQueryRaw<StatementSummaryRow>(
                 HistorySql,
@@ -2518,23 +2530,27 @@ public sealed class StatementImportStore
         var items = rows.Select(ToStatementSummary).ToList();
         if (items.Count <= limit)
         {
+            await scope.CommitAsync(cancellationToken);
             return new ImportHistoryPage(items, null);
         }
 
         items.RemoveAt(items.Count - 1);
+        await scope.CommitAsync(cancellationToken);
 
         return new ImportHistoryPage(items, EncodeCursor(items[^1].CreatedAt, items[^1].Id));
     }
 
-    public async Task<ImportStatementDetail> GetStatementAsync(Guid customerId,
+    public async Task<ImportStatementDetail> GetStatementAsync(FinanceAuthority authority,
                                                                Guid statementId,
                                                                int page,
                                                                int pageSize,
                                                                CancellationToken cancellationToken = default)
     {
+        Guid customerId = authority.CustomerId;
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, ImportLimits.MaxPageSize);
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(_contextFactory, authority, cancellationToken);
+        var context = scope.Context;
         var summary = await ReadStatementSummaryAsync(context, customerId, statementId, cancellationToken);
         if (summary is null)
         {
@@ -2546,11 +2562,12 @@ public sealed class StatementImportStore
                 transaction => transaction.CustomerId == customerId && transaction.StatementImportId == statementId,
                 cancellationToken);
         var rows = await ReadStatementRowsAsync(context, customerId, statementId, page, pageSize, cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return new ImportStatementDetail(summary, rows, page, pageSize, expectedTransactionCount);
     }
 
-    public async Task<ImportStatementSummary> SetStatementVisibilityAsync(Guid customerId,
+    public async Task<ImportStatementSummary> SetStatementVisibilityAsync(FinanceAuthority authority,
                                                                           Guid statementId,
                                                                           bool hidden,
                                                                           int expectedVersion,
@@ -2558,12 +2575,13 @@ public sealed class StatementImportStore
                                                                           bool confirm,
                                                                           CancellationToken cancellationToken = default)
     {
+        Guid customerId = authority.CustomerId;
         if (!confirm)
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(_contextFactory, authority, cancellationToken);
+        var context = scope.Context;
         var accountId = await StatementAccountIdAsync(context, customerId, statementId, cancellationToken);
         if (accountId is null)
         {
@@ -2586,7 +2604,7 @@ public sealed class StatementImportStore
         }
         if (summary.IsHidden == hidden)
         {
-            await transaction.CommitAsync(cancellationToken);
+            await scope.CommitAsync(cancellationToken);
             return summary;
         }
         await context.Database.ExecuteSqlInterpolatedAsync($"""
@@ -2603,26 +2621,27 @@ public sealed class StatementImportStore
             WHERE customer_id = {customerId} AND statement_import_id = {statementId}
             """, cancellationToken);
         var updated = await ReadStatementSummaryAsync(context, customerId, statementId, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return updated;
     }
 
-    public async Task<ImportDeleteResult> DeleteStatementAsync(Guid customerId,
+    public async Task<ImportDeleteResult> DeleteStatementAsync(FinanceAuthority authority,
                                                                Guid statementId,
                                                                int expectedVersion,
                                                                long expectedTransactionCount,
                                                                bool confirm,
                                                                CancellationToken cancellationToken = default)
     {
+        Guid customerId = authority.CustomerId;
         if (!confirm)
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
         string deletionDigest = Digest($"delete-v1|{expectedVersion}|{expectedTransactionCount}|true");
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        await using var scope = await CustomerDbScope.OpenSharedAsync(_contextFactory, authority, cancellationToken);
+        var context = scope.Context;
 
         var accountId = await StatementAccountIdAsync(context, customerId, statementId, cancellationToken);
         if (accountId is not null)
@@ -2636,7 +2655,7 @@ public sealed class StatementImportStore
             var tombstone = await ReadDeletionReceiptAsync(context, customerId, statementId, cancellationToken);
             if (tombstone is not null && tombstone.DeletionDigest == deletionDigest && tombstone.DeletionExpectedCount == expectedTransactionCount)
             {
-                await transaction.CommitAsync(cancellationToken);
+                await scope.CommitAsync(cancellationToken);
                 return new ImportDeleteResult(true, expectedTransactionCount);
             }
             throw new ImportStoreException(ImportErrorCodes.NotFound);
@@ -2693,7 +2712,7 @@ public sealed class StatementImportStore
             WHERE customer_id = {customerId} AND id = {statement.FinancialAccountId}
             """, cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return new ImportDeleteResult(true, count);
     }
@@ -2702,54 +2721,9 @@ public sealed class StatementImportStore
     {
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-
-        // Lock the headers before touching their child rows. Commit and
-        // review edits acquire the review header first; cleanup must not
-        // invert that order. The lock wait also re-evaluates the expiry
-        // predicate, so a concurrent commit that purges the review removes
-        // it from this set.
-        List<Guid> expired = await context.Database.SqlQuery<Guid>($"""
-            SELECT id FROM import_reviews
-            WHERE status = 'Prepared' AND expires_at <= NOW()
-            ORDER BY expires_at
-            LIMIT 1000
-            FOR UPDATE
-            """).ToListAsync(cancellationToken);
-
-        if (expired.Count > 0)
-        {
-            await context.ImportReviewRows
-                .Where(row => expired.Contains(row.ReviewId))
-                .ExecuteDeleteAsync(cancellationToken);
-            await context.Database.ExecuteSqlInterpolatedAsync($$"""
-                UPDATE import_reviews
-                SET status = 'Expired',
-                    parser_config = '{}'::jsonb,
-                    start_date = NULL,
-                    end_date = NULL,
-                    statement_fingerprint = '',
-                    summary_hash = '',
-                    total_rows = 0,
-                    imported_count = 0,
-                    suppressed_count = 0,
-                    skipped_count = 0,
-                    possible_duplicate_count = 0,
-                    exact_override_count = 0,
-                    statement_override = FALSE,
-                    statement_override_count = 0,
-                    payload_bytes = 0,
-                    version = version + 1,
-                    updated_at = NOW()
-                WHERE id = ANY({{expired.ToArray()}})
-                """, cancellationToken);
-        }
-
-        await context.Database.ExecuteSqlInterpolatedAsync($"""
-            DELETE FROM import_reviews
-            WHERE status IN ('Abandoned', 'Expired')
-              AND updated_at < NOW() - INTERVAL '30 days'
-            """, cancellationToken);
-
+        await context.Database
+            .SqlQueryRaw<string>("SELECT argus_cleanup_import_reviews()::text AS \"Value\"")
+            .SingleAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -2761,9 +2735,11 @@ public sealed class StatementImportStore
     /// receipt both establish ownership; anything else must return the same
     /// 404 as an unknown operation.
     /// </summary>
-    private async Task<bool> OwnedOperationExistsAsync(Guid customerId, Guid operationId, CancellationToken cancellationToken)
+    private static async Task<bool> OwnedOperationExistsAsync(ArgusDbContext context,
+                                                              Guid customerId,
+                                                              Guid operationId,
+                                                              CancellationToken cancellationToken)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
         bool reviewExists = await context.ImportReviews
             .AnyAsync(review => review.CustomerId == customerId && review.Id == operationId, cancellationToken);
         if (reviewExists)

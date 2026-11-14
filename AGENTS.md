@@ -114,11 +114,13 @@ optional ones can be set later, and local development starts without a real
 Resend key because the bootstrap writes a placeholder.
 
 The setup action is `node scripts/bootstrap-dev.mjs`. It creates the
-development and isolation-test databases, writes `backend/.env` and
-`frontend/.env` without overwriting values that already exist, and seeds two
-local accounts. Because it changes the project, summarize the collected
-values and ask the user to proceed first; run the action only after the user's
-explicit approval.
+development and isolation-test databases, provisions the owner/migrator/
+restricted-runtime roles, writes a runtime-only `backend/.env`, ignored
+`backend/.env.test` and `backend/.env.maintenance` files and `frontend/.env`
+without overwriting values that already exist, runs migrate/seed in separate
+maintenance children, and seeds two local accounts. Because it changes the
+project, summarize the collected values and ask the user to proceed first; run
+the action only after the user's explicit approval.
 
 ## First run
 
@@ -137,12 +139,15 @@ npm run dev
 With every prerequisite present, these commands are all it takes to start
 local development: the backend serves on `http://127.0.0.1:3001` and the
 frontend on `http://127.0.0.1:3000`. The bootstrap is idempotent and safe to
-re-run; it creates the development and isolation-test databases, writes
-aligned `backend/.env` and `frontend/.env` files without overwriting values
-that already exist, applies the migrations, and seeds two verified accounts.
-Re-running it preserves your secrets and accounts. Real email delivery
-additionally needs `ARGUS_RESEND_API_KEY` and `ARGUS_RESEND_FROM`
-replaced with your own values in `backend/.env`.
+re-run; it creates the development and isolation-test databases, provisions
+the three database roles, writes a runtime-only `backend/.env`, ignored
+`backend/.env.test` and `backend/.env.maintenance` files and `frontend/.env`
+without overwriting values that already exist, applies the migrations in a
+migrator child, and seeds two verified accounts. Re-running it preserves your
+secrets, role passwords and accounts. Normal backend startup validates the
+prepared schema and runtime role; it does not migrate. Real email delivery
+additionally needs `ARGUS_RESEND_API_KEY` and `ARGUS_RESEND_FROM` replaced with
+your own values in `backend/.env`.
 
 ## Exploring this project
 
@@ -168,13 +173,20 @@ authentication.
   rate limiting, the billing webhook, Resend email, and structured logging
   with the `audit.*` event stream.
 - Configuration comes from non-secret defaults plus prefixed environment
-  variables only; `backend/.env` is auto-loaded for local development and real
-  environment variables win. Unprefixed aliases are ignored, and a non-local
-  database URL must carry a password and require TLS.
+  variables only; runtime `backend/.env` is auto-loaded for local development
+  and real environment variables win. Unprefixed aliases are ignored, a
+  non-local database URL must carry a password and require TLS, and the normal
+  host must use the restricted runtime login. `backend/.env.test` and
+  `backend/.env.maintenance` are read only by their explicit test/maintenance
+  entry points, never by the web host.
 - Isolation tests require exactly `ARGUS_TEST_DATABASE_URL` and fail
-  closed without it. Unit tests never need a database.
-- `dotnet run -- seed` creates the two local dev accounts. It is idempotent
-  and never resets existing passwords.
+  closed without it. Unit tests never need a database. `node
+  scripts/run-backend-tests.mjs` reads the ignored test file and supplies only
+  that value to the test process.
+- `dotnet run -- migrate` applies migrations/backfill and `dotnet run -- seed`
+  creates the two local dev accounts; both require the separate migrator login
+  acting as owner and exit without serving. Seed is idempotent and never resets
+  existing passwords.
 
 **Frontend** (`frontend/`).
 

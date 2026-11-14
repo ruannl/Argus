@@ -129,6 +129,15 @@ deliberately have no live transaction/statement foreign key, so a deleted member
 makes apply stale rather than silently shrinking the frozen scope; the parent
 header cascades.
 
+Migration `0011_customer_row_security` then enables and forces row-level
+security on `transaction_operations` and `transaction_operation_items` (and the
+other protected finance relations), adds the transaction/session authority
+helper, and moves the global expiry work into the owner-only
+`argus_cleanup_transaction_operations()` function. The hosted cleanup service
+calls that narrow function as the restricted runtime login; it no longer runs a
+global `DELETE`/`UPDATE` statement itself. The migration keeps the composite
+operation identity and 1,000-header batch.
+
 Before applying to valuable data, take a database backup with the existing
 recovery process. A populated upgrade from `0006` is covered by
 `TransactionMigrationTests`. Application rollback may leave the additive schema,
@@ -362,8 +371,10 @@ In Transactions, the unconfirmed filter, blue Suggested chip, detail banner, and
 bulk Confirm category only control all operate on the same flag. Confirming
 never changes the category. `SuggestionLoader` counts only confirmed categories,
 so an unconfirmed guess cannot become precedent; confirming it makes it eligible.
-Tags remain explicit and have no provenance flag. The two migrations are applied
-in `0009` then `0010` order on an existing database.
+Tags remain explicit and have no provenance flag. The migrations are applied in
+`0009`, `0010`, then `0011` (row security/cleanup function) order on an existing
+database. Run the explicit `dotnet run -- migrate` maintenance command with the
+migrator credential; normal web startup validates only.
 
 The 50,000-row bulk-commit stress test remains temporarily skipped in the shared
 PR suite, so P3-N5 bulk evidence is **UNVERIFIED** until a dedicated stress run.

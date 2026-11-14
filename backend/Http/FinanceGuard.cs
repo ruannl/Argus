@@ -13,7 +13,7 @@ namespace argus.Server.Http;
 /// </summary>
 public sealed class FinanceGuard(AppSettings settings, Store store, RateLimiter rateLimiter)
 {
-    public async Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(HttpContext context, CancellationToken cancellationToken)
+    public async Task<(FinanceAuthority? Authority, IResult? Failure)> AuthenticateAsync(HttpContext context, CancellationToken cancellationToken)
     {
         if (!Trust.OriginValid(context, settings))
         {
@@ -31,7 +31,8 @@ public sealed class FinanceGuard(AppSettings settings, Store store, RateLimiter 
             return (null, Errors.Unauthorized());
         }
 
-        var customerId = await store.ValidateAndTouchSessionAsync(Tokens.HashToken(rawToken), cancellationToken);
+        string sessionHash = Tokens.HashToken(rawToken);
+        var customerId = await store.ValidateAndTouchSessionAsync(sessionHash, cancellationToken);
         if (customerId is null)
         {
             return (null, Errors.Unauthorized());
@@ -49,7 +50,7 @@ public sealed class FinanceGuard(AppSettings settings, Store store, RateLimiter 
             return (null, Errors.RateLimited());
         }
 
-        return (customerId, null);
+        return (new FinanceAuthority(customerId.Value, sessionHash), null);
     }
 
     /// <summary>
@@ -62,6 +63,10 @@ public sealed class FinanceGuard(AppSettings settings, Store store, RateLimiter 
         try
         {
             return await action();
+        }
+        catch (FinanceAuthorityException)
+        {
+            return Errors.Unauthorized();
         }
         catch (PostgresException exception)
         {

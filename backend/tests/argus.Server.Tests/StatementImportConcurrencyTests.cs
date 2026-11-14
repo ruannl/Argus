@@ -94,7 +94,7 @@ public sealed class StatementImportConcurrencyTests(KitFactory factory) : ApiTes
 
         var secondId = second.GetProperty("summary").GetProperty("id").GetGuid();
         var refresh = await SendAsync(Post($"{ReviewsPath}/{secondId}/refresh", Json(new { expected_review_version = Version(second) }), session: session));
-        Assert.Equal(HttpStatusCode.OK, refresh.StatusCode);
+        Assert.True(refresh.StatusCode == HttpStatusCode.OK, string.Join("\n", Factory.LogCapture.Snapshot()));
         var refreshed = await BodyAsync(refresh);
         Assert.Equal(0, refreshed.GetProperty("imported_count").GetInt32());
         Assert.Equal(3, refreshed.GetProperty("suppressed_count").GetInt32());

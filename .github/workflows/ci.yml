@@ -64,8 +64,35 @@ jobs:
       - name: Persistence performance tests (real PostgreSQL)
         run: dotnet test tests/argus.Server.Tests -warnaserror --filter "Category=Performance"
 
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Bootstrap and restricted-host process integration
+        env:
+          ARGUS_BOOTSTRAP_HOST_INTEGRATION: "1"
+          ARGUS_BOOTSTRAP_DOCKER_CONTAINER: "none"
+        run: dotnet test tests/argus.Server.Tests -warnaserror --filter "FullyQualifiedName~BootstrapHostIntegrationTests"
+
       - name: Release build
         run: dotnet build -c Release -warnaserror
+
+  scripts:
+    name: Node contract scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Contract tests
+        run: >-
+          node --test
+          scripts/provision-db-roles.test.mjs
+          scripts/adopt-db-objects.test.mjs
+          scripts/bootstrap-dev.test.mjs
+          scripts/run-backend-tests.test.mjs
 
   security:
     name: Dependency vulnerability check
