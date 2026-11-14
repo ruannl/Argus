@@ -7,7 +7,6 @@ using argus.Server.Data.Entities;
 using argus.Server.Finance;
 using argus.Server.Transactions;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 
 namespace argus.Server.Data;
@@ -31,11 +30,12 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
 
     // --- Queries -----------------------------------------------------------
 
-    public async Task<TransactionPageResult> QueryAsync(Guid customerId, TransactionQueryPlan plan, CancellationToken cancellationToken = default)
+    public async Task<TransactionPageResult> QueryAsync(FinanceAuthority authority, TransactionQueryPlan plan, CancellationToken cancellationToken = default)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
-        await SetReadOnlyAsync(context, cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenAsync(
+            _contextFactory, authority, IsolationLevel.RepeatableRead, exclusiveCustomerLock: false, workspaceTimeouts: false, cancellationToken);
+        var context = scope.Context;
         await ValidateFilterOwnershipAsync(context, customerId, plan.Filter, cancellationToken);
 
         (long visible, long hidden) = await TransactionQuery.CountsAsync(context, customerId, plan.Filter, cancellationToken);
@@ -58,16 +58,17 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
             ? []
             : await ReadRowsAsync(context, customerId, plan.Filter, plan.SortBy, plan.SortDirection, plan.PageSize, offset, includeVisibility: true, cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return new TransactionPageResult(rows.Select(row => row.Response).ToArray(), inventory, visible, hidden, matchingTotal, filteredTotal, plan.Page, plan.PageSize, plan.SortBy, plan.SortDirection);
     }
 
-    public async Task<TransactionDetailResult> GetAsync(Guid customerId, Guid transactionId, CancellationToken cancellationToken = default)
+    public async Task<TransactionDetailResult> GetAsync(FinanceAuthority authority, Guid transactionId, CancellationToken cancellationToken = default)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
-        await SetReadOnlyAsync(context, cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenAsync(
+            _contextFactory, authority, IsolationLevel.RepeatableRead, exclusiveCustomerLock: false, workspaceTimeouts: false, cancellationToken);
+        var context = scope.Context;
 
         var rows = await ReadRowsByIdsAsync(context, customerId, [transactionId], cancellationToken);
         if (rows.Count == 0)
@@ -95,21 +96,23 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
             ? await ReadCategoryRefAsync(context, customerId, categoryId, cancellationToken)
             : null;
 
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return new TransactionDetailResult(row.Response, suggested, suggestedCategory, hasMore, row.SourcePage, row.SourceRowNumber);
     }
 
     // --- Single metadata edits ---------------------------------------------
 
-    public async Task<TransactionMutationResult> PatchAsync(Guid customerId,
+    public async Task<TransactionMutationResult> PatchAsync(FinanceAuthority authority,
                                                             Guid transactionId,
                                                             int expectedVersion,
                                                             TransactionAction action,
                                                             CancellationToken cancellationToken = default)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await BeginWorkspaceAsync(context, IsolationLevel.ReadCommitted, cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenAsync(
+            _contextFactory, authority, IsolationLevel.ReadCommitted, exclusiveCustomerLock: false, workspaceTimeouts: true, cancellationToken);
+        var context = scope.Context;
 
         var accountId = await TransactionAccountIdAsync(context, customerId, transactionId, cancellationToken);
         if (accountId is null)
@@ -155,14 +158,14 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
         {
             throw new TransactionStoreException(TransactionErrorCodes.NotFound);
         }
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return new TransactionMutationResult(rows[0].Response, 1, changed ? 1 : 0, changed ? 0 : 1);
     }
 
     // --- Bulk preparation --------------------------------------------------
 
-    public async Task<TransactionOperationPrepareResponse> PrepareAsync(Guid customerId,
+    public async Task<TransactionOperationPrepareResponse> PrepareAsync(FinanceAuthority authority,
                                                                         Guid operationId,
                                                                         TransactionSelectionPlan selection,
                                                                         TransactionAction action,
@@ -174,7 +177,7 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
         {
             try
             {
-                return await PrepareOnceAsync(customerId, operationId, selection, action, requestDigest, cancellationToken);
+                return await PrepareOnceAsync(authority, operationId, selection, action, requestDigest, cancellationToken);
             }
             catch (Exception exception) when (
                 PersistenceErrors.FindPostgresException(exception) is { } postgres &&
@@ -190,7 +193,7 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
                 postgres.SqlState == PostgresErrorCodes.UniqueViolation &&
                 string.Equals(postgres.ConstraintName, "transaction_operations_pkey", StringComparison.Ordinal))
             {
-                var raced = await ReadExistingOperationAsync(customerId, operationId, requestDigest, cancellationToken);
+                var raced = await ReadExistingOperationAsync(authority, operationId, requestDigest, cancellationToken);
                 if (raced is not null)
                 {
                     return raced;
@@ -203,17 +206,17 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
         throw new TransactionStoreException(TransactionErrorCodes.OperationBusy);
     }
 
-    private async Task<TransactionOperationPrepareResponse> PrepareOnceAsync(Guid customerId,
+    private async Task<TransactionOperationPrepareResponse> PrepareOnceAsync(FinanceAuthority authority,
                                                                              Guid operationId,
                                                                              TransactionSelectionPlan selection,
                                                                              TransactionAction action,
                                                                              string requestDigest,
                                                                              CancellationToken cancellationToken)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await BeginWorkspaceAsync(context, IsolationLevel.Serializable, cancellationToken);
-
-        await LockCustomerAsync(context, customerId, cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenAsync(
+            _contextFactory, authority, IsolationLevel.Serializable, exclusiveCustomerLock: true, workspaceTimeouts: true, cancellationToken);
+        var context = scope.Context;
 
         var existing = await ReadHeaderAsync(context, customerId, operationId, forUpdate: false, cancellationToken);
         if (existing is not null)
@@ -229,16 +232,16 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
                 {
                     await ExpireHeaderAsync(context, customerId, operationId, cancellationToken);
                     var expired = await ReadHeaderAsync(context, customerId, operationId, forUpdate: false, cancellationToken) ?? throw new TransactionStoreException(TransactionErrorCodes.NotFound);
-                    await transaction.CommitAsync(cancellationToken);
+                    await scope.CommitAsync(cancellationToken);
                     return new TransactionOperationPrepareResponse(TerminalSummary(expired), false);
                 }
 
                 var replay = await BuildPreparedSummaryAsync(context, existing, cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
+                await scope.CommitAsync(cancellationToken);
                 return new TransactionOperationPrepareResponse(replay, false);
             }
 
-            await transaction.CommitAsync(cancellationToken);
+            await scope.CommitAsync(cancellationToken);
             return new TransactionOperationPrepareResponse(TerminalSummary(existing), false);
         }
 
@@ -297,7 +300,7 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
 
         await InsertHeaderAsync(context, customerId, operationId, selection.Mode, requestDigest, filterDigest, confirmationHash, action, targets.Stored, members.Count, changed, unchanged, capturedAt, expiresAt, cancellationToken);
         await InsertManifestAsync(context, customerId, operationId, members, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         var summary = new TransactionOperationSummaryResponse(
             operationId,
@@ -322,22 +325,24 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
         return new TransactionOperationPrepareResponse(summary, true);
     }
 
-    private async Task<TransactionOperationPrepareResponse?> ReadExistingOperationAsync(Guid customerId,
+    private async Task<TransactionOperationPrepareResponse?> ReadExistingOperationAsync(FinanceAuthority authority,
                                                                                          Guid operationId,
                                                                                          string requestDigest,
                                                                                          CancellationToken cancellationToken)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await BeginWorkspaceAsync(context, IsolationLevel.ReadCommitted, cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenAsync(
+            _contextFactory, authority, IsolationLevel.ReadCommitted, exclusiveCustomerLock: false, workspaceTimeouts: true, cancellationToken);
+        var context = scope.Context;
         var header = await ReadHeaderAsync(context, customerId, operationId, forUpdate: true, cancellationToken);
         if (header is null)
         {
-            await transaction.CommitAsync(cancellationToken);
+            await scope.CommitAsync(cancellationToken);
             return null;
         }
         if (!string.Equals(header.RequestDigest, requestDigest, StringComparison.Ordinal))
         {
-            await transaction.CommitAsync(cancellationToken);
+            await scope.CommitAsync(cancellationToken);
             return null;
         }
 
@@ -356,17 +361,19 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
         {
             summary = TerminalSummary(header);
         }
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return new TransactionOperationPrepareResponse(summary, false);
     }
 
     // --- Status, apply and abandon -----------------------------------------
 
-    public async Task<TransactionOperationSummaryResponse> StatusAsync(Guid customerId, Guid operationId, CancellationToken cancellationToken = default)
+    public async Task<TransactionOperationSummaryResponse> StatusAsync(FinanceAuthority authority, Guid operationId, CancellationToken cancellationToken = default)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await BeginWorkspaceAsync(context, IsolationLevel.ReadCommitted, cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenAsync(
+            _contextFactory, authority, IsolationLevel.ReadCommitted, exclusiveCustomerLock: false, workspaceTimeouts: true, cancellationToken);
+        var context = scope.Context;
 
         var header = await ReadHeaderAsync(context, customerId, operationId, forUpdate: true, cancellationToken);
         if (header is null)
@@ -381,19 +388,21 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
         }
 
         var summary = header.Status == "Prepared" ? await BuildPreparedSummaryAsync(context, header, cancellationToken) : TerminalSummary(header);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return summary;
     }
 
-    public async Task<TransactionOperationApplyResponse> ApplyAsync(Guid customerId,
+    public async Task<TransactionOperationApplyResponse> ApplyAsync(FinanceAuthority authority,
                                                                     Guid operationId,
                                                                     string confirmationHash,
                                                                     int expectedSelectedCount,
                                                                     CancellationToken cancellationToken = default)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await BeginWorkspaceAsync(context, IsolationLevel.ReadCommitted, cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenAsync(
+            _contextFactory, authority, IsolationLevel.ReadCommitted, exclusiveCustomerLock: false, workspaceTimeouts: true, cancellationToken);
+        var context = scope.Context;
 
         var header = await ReadHeaderAsync(context, customerId, operationId, forUpdate: false, cancellationToken);
         if (header is null)
@@ -403,7 +412,7 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
 
         if (header.Status == "Applied")
         {
-            await transaction.CommitAsync(cancellationToken);
+            await scope.CommitAsync(cancellationToken);
             return AppliedResponse(header, confirmationHash, expectedSelectedCount, replayed: true);
         }
         if (header.Status != "Prepared")
@@ -427,7 +436,7 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
         }
         if (header.Status == "Applied")
         {
-            await transaction.CommitAsync(cancellationToken);
+            await scope.CommitAsync(cancellationToken);
             return AppliedResponse(header, confirmationHash, expectedSelectedCount, replayed: true);
         }
         if (header.Status != "Prepared")
@@ -437,7 +446,7 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
         if (await IsExpiredAsync(context, header.ExpiresAt, cancellationToken))
         {
             await ExpireHeaderAsync(context, customerId, operationId, cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            await scope.CommitAsync(cancellationToken);
             throw new TransactionStoreException(TransactionErrorCodes.OperationExpired);
         }
 
@@ -496,7 +505,7 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
         if (await IsExpiredAsync(context, header.ExpiresAt, cancellationToken))
         {
             await ExpireHeaderAsync(context, customerId, operationId, cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            await scope.CommitAsync(cancellationToken);
             throw new TransactionStoreException(TransactionErrorCodes.OperationExpired);
         }
 
@@ -515,16 +524,18 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
         _faults.OnStep(TransactionFaultPoints.BeforeReceiptWrite);
         var appliedAt = await MarkAppliedAsync(context, customerId, operationId, cancellationToken);
         _faults.OnStep(TransactionFaultPoints.AfterReceiptWrite);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
         _faults.OnStep(TransactionFaultPoints.AfterCommit);
 
         return new TransactionOperationApplyResponse(operationId, "Applied", header.SelectedCount, header.ChangedCount, header.UnchangedCount, FormatTimestamp(appliedAt), false);
     }
 
-    public async Task<TransactionOperationApplyResponse> AbandonAsync(Guid customerId, Guid operationId, CancellationToken cancellationToken = default)
+    public async Task<TransactionOperationApplyResponse> AbandonAsync(FinanceAuthority authority, Guid operationId, CancellationToken cancellationToken = default)
     {
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await BeginWorkspaceAsync(context, IsolationLevel.ReadCommitted, cancellationToken);
+        Guid customerId = authority.CustomerId;
+        await using var scope = await CustomerDbScope.OpenAsync(
+            _contextFactory, authority, IsolationLevel.ReadCommitted, exclusiveCustomerLock: false, workspaceTimeouts: true, cancellationToken);
+        var context = scope.Context;
 
         var header = await ReadHeaderAsync(context, customerId, operationId, forUpdate: true, cancellationToken);
         if (header is null)
@@ -534,12 +545,12 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
 
         if (header.Status == "Applied")
         {
-            await transaction.CommitAsync(cancellationToken);
+            await scope.CommitAsync(cancellationToken);
             return new TransactionOperationApplyResponse(operationId, header.Status, header.SelectedCount, header.ChangedCount, header.UnchangedCount, header.AppliedAt is null ? null : FormatTimestamp(header.AppliedAt.Value), false);
         }
         if (header.Status == "Abandoned" || header.Status == "Expired")
         {
-            await transaction.CommitAsync(cancellationToken);
+            await scope.CommitAsync(cancellationToken);
             return new TransactionOperationApplyResponse(operationId, header.Status, header.SelectedCount, header.ChangedCount, header.UnchangedCount, null, false);
         }
 
@@ -556,7 +567,7 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
                 updated_at = {{abandonedAt}}
             WHERE customer_id = {{customerId}} AND operation_id = {{operationId}}
             """, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
 
         return new TransactionOperationApplyResponse(operationId, "Abandoned", header.SelectedCount, header.ChangedCount, header.UnchangedCount, null, false);
     }
@@ -567,47 +578,9 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
     {
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-
-        List<ExpiredOperationRow> expiredRows = await context.Database.SqlQueryRaw<ExpiredOperationRow>("""
-            SELECT customer_id AS "CustomerId", operation_id AS "OperationId"
-            FROM transaction_operations
-            WHERE status = 'Prepared' AND expires_at <= clock_timestamp()
-            ORDER BY expires_at
-            LIMIT 1000
-            FOR UPDATE
-            """).ToListAsync(cancellationToken);
-
-        if (expiredRows.Count == 0)
-        {
-            await transaction.CommitAsync(cancellationToken);
-            return;
-        }
-
-        // These arrays are parallel: an operation UUID is only unique within
-        // its customer namespace. Never turn the selected pairs into a
-        // Cartesian product of independently matched IDs.
-        var customerIds = expiredRows.Select(item => item.CustomerId).ToArray();
-        var operationIds = expiredRows.Select(item => item.OperationId).ToArray();
-        await context.Database.ExecuteSqlInterpolatedAsync($"""
-            DELETE FROM transaction_operation_items i
-            USING unnest({customerIds}, {operationIds}) AS expired(customer_id, operation_id)
-            WHERE i.customer_id = expired.customer_id
-              AND i.operation_id = expired.operation_id
-            """, cancellationToken);
-        await context.Database.ExecuteSqlInterpolatedAsync($$"""
-            UPDATE transaction_operations o
-            SET status = 'Expired',
-                terminal_at = clock_timestamp(),
-                action = '{}'::jsonb,
-                target_stamps = '{}'::jsonb,
-                updated_at = clock_timestamp()
-            FROM unnest({{customerIds}}, {{operationIds}}) AS expired(customer_id, operation_id)
-            WHERE o.customer_id = expired.customer_id
-              AND o.operation_id = expired.operation_id
-              AND o.status = 'Prepared'
-              AND o.expires_at <= clock_timestamp()
-            """, cancellationToken);
-
+        await context.Database
+            .SqlQueryRaw<string>("SELECT argus_cleanup_transaction_operations()::text AS \"Value\"")
+            .SingleAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -717,26 +690,6 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
         public string DisplayName { get; set; } = string.Empty;
         public bool IsArchived { get; set; }
         public DateTime UpdatedAt { get; set; }
-    }
-
-    private static async Task<IDbContextTransaction> BeginWorkspaceAsync(ArgusDbContext context, IsolationLevel isolation, CancellationToken cancellationToken)
-    {
-        var transaction = await context.Database.BeginTransactionAsync(isolation, cancellationToken);
-        string settings = $"SET LOCAL lock_timeout = '{TransactionLimits.LockTimeoutSeconds}s'; SET LOCAL statement_timeout = '{TransactionLimits.StatementTimeoutSeconds}s';";
-        await context.Database.ExecuteSqlRawAsync(settings, cancellationToken);
-
-        return transaction;
-    }
-
-    private static async Task LockCustomerAsync(ArgusDbContext context, Guid customerId, CancellationToken cancellationToken)
-    {
-        List<int> found = await context.Database.SqlQuery<int>($"""
-            SELECT 1 AS "Value" FROM customers WHERE id = {customerId} FOR UPDATE
-            """).ToListAsync(cancellationToken);
-        if (found.Count == 0)
-        {
-            throw new TransactionStoreException(TransactionErrorCodes.NotFound);
-        }
     }
 
     private static async Task<Guid?> TransactionAccountIdAsync(ArgusDbContext context,
@@ -1649,11 +1602,6 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
                                   Guid[] TagIds,
                                   int? SourcePage,
                                   int SourceRowNumber);
-
-    private static async Task SetReadOnlyAsync(ArgusDbContext context, CancellationToken cancellationToken)
-    {
-        await context.Database.ExecuteSqlRawAsync("SET TRANSACTION READ ONLY", cancellationToken);
-    }
 
     private static async Task ValidateFilterOwnershipAsync(ArgusDbContext context,
                                                            Guid customerId,

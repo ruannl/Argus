@@ -238,6 +238,18 @@ public sealed class MerchantAliasConfiguration : IEntityTypeConfiguration<Mercha
             .HasForeignKey(alias => alias.CategoryId)
             .HasConstraintName("merchant_aliases_category_id_fkey")
             .OnDelete(DeleteBehavior.SetNull);
+        builder.HasOne<MerchantTag>()
+            .WithMany()
+            .HasForeignKey(alias => new { alias.CustomerId, alias.MerchantTagId })
+            .HasPrincipalKey(tag => new { tag.CustomerId, tag.Id })
+            .HasConstraintName("merchant_aliases_customer_tag_fk")
+            .OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<Category>()
+            .WithMany()
+            .HasForeignKey(alias => new { alias.CustomerId, alias.CategoryId })
+            .HasPrincipalKey(category => new { category.CustomerId, category.Id })
+            .HasConstraintName("merchant_aliases_customer_category_fk")
+            .OnDelete(DeleteBehavior.NoAction);
     }
 }
 

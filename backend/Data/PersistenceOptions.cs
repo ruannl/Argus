@@ -97,6 +97,17 @@ public static class PersistenceOptions
             builder.SearchPath = searchPath;
         }
 
+        string? role = QueryValue(uri.Query, "role");
+        if (role is not null)
+        {
+            if (role.Any(character => !(char.IsAsciiLetterOrDigit(character) || character == '_')))
+            {
+                throw new InvalidOperationException("database URL role must be a simple identifier");
+            }
+
+            builder.Options = $"-c role={role}";
+        }
+
         return builder.ConnectionString;
     }
 

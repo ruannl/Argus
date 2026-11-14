@@ -137,6 +137,8 @@ public static class SchemaValidator
         ["transaction_operation_items_transaction_version_check"] = 7,
         ["transaction_operation_items_ordinal_check"] = 7,
         ["merchant_aliases_alias_check"] = 8,
+        ["merchant_aliases_customer_tag_fk"] = 11,
+        ["merchant_aliases_customer_category_fk"] = 11,
     };
 
     private static readonly Dictionary<string, int> _uniqueConstraintPrefixes = new(StringComparer.Ordinal)
@@ -187,8 +189,8 @@ public static class SchemaValidator
             : [];
 
         legacyNames = OrderLegacyNames(legacyNames);
-        ValidatePrefix(legacyNames, LegacyMigrations.All.Select(migration => migration.LegacyName).ToArray(), "schema_migrations");
-        ValidatePrefix(efIds, LegacyMigrations.All.Select(migration => migration.EfId).ToArray(), "__EFMigrationsHistory");
+        ValidatePrefix(legacyNames, MigrationCatalog.LegacyNames, "schema_migrations");
+        ValidatePrefix(efIds, MigrationCatalog.EfIds, "__EFMigrationsHistory");
 
         foreach (string dataName in dataNames)
         {
@@ -205,6 +207,10 @@ public static class SchemaValidator
         }
 
         await ValidateSchemaAsync(context, effectivePrefix, requireLedgers, cancellationToken);
+        if (effectivePrefix >= MigrationCatalog.LatestPrefix)
+        {
+            await IsolationSchemaValidator.ValidateAsync(context, requireRuntimeLogin: false, cancellationToken);
+        }
 
         return new InitializationState(
             legacyNames,

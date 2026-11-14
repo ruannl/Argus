@@ -1,4 +1,5 @@
 using argus.Server.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
@@ -21,21 +22,91 @@ public static class PersistenceTestSupport
 
     public static async Task CreateSchemaAsync(string databaseUrl, string schema, CancellationToken cancellationToken = default)
     {
+        await DatabaseRoleFixture.EnsureAsync(databaseUrl, cancellationToken);
+        string identifier = DatabaseRoleFixture.ValidateSchemaIdentifier(schema);
         await using var connection = new NpgsqlConnection(PersistenceOptions.BuildConnectionString(databaseUrl));
         await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = $"CREATE SCHEMA {schema}";
+        command.CommandText = $"""
+            CREATE SCHEMA {identifier};
+            GRANT USAGE, CREATE ON SCHEMA {identifier} TO {DatabaseIsolationContract.OwnerRole};
+            GRANT USAGE ON SCHEMA {identifier} TO {DatabaseIsolationContract.RuntimeRole};
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Bounded test-only mirror of the planned legacy SQL-object transfer. It
+    /// inventories only this schema's tables, sequences, views and functions
+    /// and changes their SQL owner to argus_owner. It never touches row data.
+    /// </summary>
+    public static async Task TransferSchemaObjectsToOwnerAsync(string databaseUrl,
+                                                               string schema,
+                                                               CancellationToken cancellationToken = default)
+    {
+        string identifier = DatabaseRoleFixture.ValidateSchemaIdentifier(schema);
+        await using var connection = new NpgsqlConnection(PersistenceOptions.BuildConnectionString(databaseUrl));
+        await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            DO $transfer$
+            DECLARE
+                item record;
+            BEGIN
+                FOR item IN
+                    SELECT c.relname, c.relkind
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE n.nspname = '{identifier}'
+                      AND c.relkind IN ('r', 'S', 'v', 'm', 'p', 'f')
+                LOOP
+                    EXECUTE format('ALTER %s %I.%I OWNER TO {DatabaseIsolationContract.OwnerRole}',
+                        CASE item.relkind
+                            WHEN 'S' THEN 'SEQUENCE'
+                            WHEN 'v' THEN 'VIEW'
+                            WHEN 'm' THEN 'MATERIALIZED VIEW'
+                            WHEN 'p' THEN 'TABLE'
+                            WHEN 'f' THEN 'FOREIGN TABLE'
+                            ELSE 'TABLE'
+                        END,
+                        '{identifier}',
+                        item.relname);
+                END LOOP;
+
+                FOR item IN
+                    SELECT p.oid::regprocedure AS signature
+                    FROM pg_proc p
+                    JOIN pg_namespace n ON n.oid = p.pronamespace
+                    WHERE n.nspname = '{identifier}'
+                LOOP
+                    EXECUTE format('ALTER FUNCTION %s OWNER TO {DatabaseIsolationContract.OwnerRole}', item.signature);
+                END LOOP;
+            END
+            $transfer$;
+            """;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public static async Task DropSchemaAsync(string databaseUrl, string schema, CancellationToken cancellationToken = default)
     {
-        await using var connection = new NpgsqlConnection(PersistenceOptions.BuildConnectionString(databaseUrl));
-        await connection.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"DROP SCHEMA IF EXISTS {schema} CASCADE";
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await using (var connection = new NpgsqlConnection(PersistenceOptions.BuildConnectionString(databaseUrl)))
+        {
+            await connection.OpenAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"DROP SCHEMA IF EXISTS {schema} CASCADE";
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        // Every unique schema URL is a distinct Npgsql pool. Clear its idle
+        // connections before the next fixture, otherwise a long suite exhausts
+        // the server's connection slots.
+        ClearPool(SchemaUrl(databaseUrl, schema));
+        ClearPool(DatabaseRoleFixture.RuntimeSchemaUrl(databaseUrl, schema));
+        ClearPool(DatabaseRoleFixture.MigrationSchemaUrl(databaseUrl, schema));
     }
+
+    private static void ClearPool(string url) =>
+        NpgsqlConnection.ClearPool(new NpgsqlConnection(PersistenceOptions.BuildConnectionString(url)));
 
     public static async Task ApplyLegacyAsync(string schemaUrl,
                                               int migrationCount,
@@ -75,11 +146,72 @@ public static class PersistenceTestSupport
         }
     }
 
-    public static Task RunCoordinatorAsync(string schemaUrl,
-                                           IInitializationFaultInjector? faultInjector = null,
-                                           CancellationToken cancellationToken = default) =>
-        new InitializationCoordinator(schemaUrl, faultInjector ?? NoopInitializationFaultInjector.Instance)
+    /// <summary>
+    /// Prepared public schema for the in-process API host. The fixture owns
+    /// role provisioning, the bounded object-owner transfer and the migration;
+    /// the host itself starts as the restricted runtime login.
+    /// </summary>
+    public static async Task PreparePublicDatabaseAsync(string databaseUrl, CancellationToken cancellationToken = default)
+    {
+        await DatabaseRoleFixture.EnsureAsync(databaseUrl, cancellationToken);
+        await using (var connection = new NpgsqlConnection(PersistenceOptions.BuildConnectionString(databaseUrl)))
+        {
+            await connection.OpenAsync(cancellationToken);
+            await ExecuteAsync(connection, $"""
+                GRANT USAGE, CREATE ON SCHEMA public TO {DatabaseIsolationContract.OwnerRole};
+                GRANT USAGE ON SCHEMA public TO {DatabaseIsolationContract.RuntimeRole};
+                REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+                """, cancellationToken);
+        }
+
+        await TransferSchemaObjectsToOwnerAsync(databaseUrl, "public", cancellationToken);
+        string ownerUrl = DatabaseRoleFixture.MigrationSchemaUrl(databaseUrl, "public");
+        var options = PersistenceOptions.Build(ownerUrl);
+        await using (var context = new ArgusDbContext(options))
+        {
+            bool existing = await context.Database
+                .SqlQueryRaw<bool>("SELECT to_regclass('financial_accounts') IS NOT NULL AS \"Value\"")
+                .SingleAsync(cancellationToken);
+            if (existing)
+            {
+                // The disposable public schema may already be at the latest EF
+                // history from an earlier candidate revision. Reapply the
+                // idempotent isolation SQL before the coordinator validates it,
+                // so the current grant contract is present without re-running EF.
+                // ExecuteSqlRawAsync uses composite formatting; escape the
+                // function-body JSON braces on this test-only path.
+                string sql = CustomerIsolationSql.BuildUpSql().Replace("{", "{{").Replace("}", "}}");
+                await context.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+            }
+        }
+
+        await new InitializationCoordinator(ownerUrl, NoopInitializationFaultInjector.Instance)
             .InitializeAsync(cancellationToken);
+    }
+
+    private static readonly object _transferGate = new();
+    private static readonly HashSet<string> _transferredSchemas = new(StringComparer.Ordinal);
+
+    public static async Task RunCoordinatorAsync(string schemaUrl,
+                                                 IInitializationFaultInjector? faultInjector = null,
+                                                 CancellationToken cancellationToken = default)
+    {
+        string schema = DatabaseRoleFixture.SchemaFromUrl(schemaUrl);
+        string databaseUrl = DatabaseRoleFixture.DatabaseFromSchemaUrl(schemaUrl);
+        await DatabaseRoleFixture.EnsureAsync(databaseUrl, cancellationToken);
+        bool transfer;
+        lock (_transferGate)
+        {
+            transfer = _transferredSchemas.Add(databaseUrl + "|" + schema);
+        }
+        if (transfer)
+        {
+            await TransferSchemaObjectsToOwnerAsync(databaseUrl, schema, cancellationToken);
+        }
+        string ownerUrl = DatabaseRoleFixture.MigrationSchemaUrl(databaseUrl, schema);
+        await new InitializationCoordinator(ownerUrl, faultInjector ?? NoopInitializationFaultInjector.Instance)
+            .InitializeAsync(cancellationToken);
+    }
 
     public static async Task BackfillAsync(string databaseUrl, CancellationToken cancellationToken = default)
     {

@@ -23,12 +23,17 @@ the certificates, and the network boundary.
    incoming request origins are rewritten to it, so a spoofed `Host` header
    cannot change callbacks or cookies. Setting the variable to `false` rejects
    every host and is not the production setting.
-5. **The database requires a password and TLS off-localhost.** A non-local
-   `ARGUS_DATABASE_URL` without a password, or without
-   `sslmode=require`/`verify-full`, is rejected at startup.
+5. **The runtime database URL is restricted and requires TLS off-localhost.**
+   A non-local `ARGUS_DATABASE_URL` without a password, or without
+   `sslmode=require`/`verify-full`, is rejected at startup. The URL must be the
+   `argus_runtime` login; a superuser, owner or migrator URL is rejected even
+   on localhost. Migrator and test-maintenance credentials are separate
+   maintenance-child values and must never be present in the web host.
 6. **Secrets live in the platform's secret store**, not in committed files,
    image layers, or environment defaults. The container reads configuration
-   from environment variables only.
+   from environment variables only. Normal startup performs read-only schema
+   and role validation; migrations run in a separate, explicitly invoked
+   maintenance process with the migrator credential.
 7. **Health checks and non-root runtime.** The backend image runs as uid
    10001 and exposes `GET /health` for the platform's health probe.
 8. **Email is real before launch.** Replace the bootstrap's development

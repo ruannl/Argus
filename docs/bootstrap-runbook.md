@@ -23,15 +23,19 @@ The bootstrap:
 
 1. verifies `openssl`, `dotnet`, and PostgreSQL availability;
 2. creates the development database and the isolation-test database;
-3. writes `backend/.env` and `frontend/.env`, generating the application
-   secret, the billing webhook secret, and the Auth.js secret, and writing the
-   development Resend placeholder;
-4. applies migrations and seeds two verified accounts.
+3. provisions the non-login owner, migrator and restricted-runtime roles;
+4. writes a runtime-only `backend/.env`, an ignored `backend/.env.test` for the
+   test-maintenance URL, and an ignored `backend/.env.maintenance` for the
+   migrator URL, plus `frontend/.env`; it generates the application secret, the
+   billing webhook secret and the Auth.js secret, and writes the development
+   Resend placeholder;
+5. runs `dotnet run -- migrate` and `dotnet run -- seed` in separate maintenance
+   children that receive only the migrator URL.
 
 It is idempotent. Existing keys are never overwritten, and re-running it
-preserves your secrets and accounts. To use pinned seed passwords, set
-`ARGUS_SEED_DEV_PASSWORD` and `ARGUS_SEED_USER_PASSWORD` in
-`backend/.env` (or the shell environment) before the first run.
+preserves your secrets, role passwords and accounts. To use pinned seed
+passwords, set `ARGUS_SEED_DEV_PASSWORD` and `ARGUS_SEED_USER_PASSWORD` before
+the first run; the bootstrap forwards them only to the seed child.
 
 ## Step 2: start the servers
 
@@ -44,8 +48,10 @@ npm ci
 npm run dev
 ```
 
-The backend serves on `http://127.0.0.1:3001`; the frontend on
-`http://127.0.0.1:3000`.
+The backend validates the prepared schema and the restricted runtime role
+before serving; it refuses to start if maintenance is pending or the role
+configuration drifted. The backend serves on `http://127.0.0.1:3001`; the
+frontend on `http://127.0.0.1:3000`.
 
 ## Step 3: sign in and verify
 
@@ -62,17 +68,28 @@ placeholder.
 ## Step 4: verify the installation
 
 ```bash
-cd backend
-dotnet test tests/argus.Server.Tests
-dotnet build -c Release
+node scripts/run-backend-tests.mjs
 
-cd ../frontend
+cd frontend
 npm run lint
 npm run test
 npm run build
 ```
 
-`dotnet test` uses `ARGUS_TEST_DATABASE_URL`, created by the bootstrap.
+`run-backend-tests.mjs` reads the ignored `backend/.env.test` and supplies only
+`ARGUS_TEST_DATABASE_URL` to the test process. An already scoped environment
+value wins. Never place that test-maintenance URL in `backend/.env`.
+
+Maintenance commands are explicit:
+
+```text
+cd backend
+dotnet run -- migrate
+dotnet run -- seed
+```
+
+They read `backend/.env.maintenance` or a process-scoped `ARGUS_DATABASE_URL`
+and never start the web host.
 
 ## Troubleshooting
 

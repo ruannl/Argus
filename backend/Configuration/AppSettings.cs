@@ -150,7 +150,7 @@ public sealed class AppSettings
     /// A non-local database URL must carry a password and require TLS. This
     /// mirrors the frozen Rust kit's fail-closed database configuration.
     /// </summary>
-    private static void ValidateDatabaseUrl(string value)
+    internal static void ValidateDatabaseUrl(string value)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) || (uri.Scheme != "postgres" && uri.Scheme != "postgresql"))
         {

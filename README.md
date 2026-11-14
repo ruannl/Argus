@@ -84,10 +84,12 @@ From the repository root:
 node scripts/bootstrap-dev.mjs
 ```
 
-The bootstrap creates the development and isolation-test databases, writes
-`backend/.env` and `frontend/.env` without overwriting existing values,
-applies the migrations, and seeds the two local accounts. It is idempotent and
-safe to re-run.
+The bootstrap creates the development and isolation-test databases, provisions
+the owner/migrator/restricted-runtime roles, writes a runtime-only `backend/.env`,
+keeps test and maintenance credentials in the ignored `backend/.env.test` and
+`backend/.env.maintenance` files, runs migrations and seed in separate
+maintenance processes, and writes `frontend/.env` without overwriting existing
+values. It is idempotent and safe to re-run.
 
 Start the backend:
 
@@ -96,7 +98,8 @@ cd backend
 dotnet run
 ```
 
-The backend serves on `http://127.0.0.1:3001`.
+The backend validates the prepared schema and runtime role before serving; it
+does not migrate on normal startup. It serves on `http://127.0.0.1:3001`.
 
 Start the frontend in another terminal:
 
@@ -120,6 +123,10 @@ must carry a password and require TLS.
 - `ARGUS_SEED_DEV_PASSWORD` and `ARGUS_SEED_USER_PASSWORD` pin the seeded
   account passwords. Set them before the first bootstrap run. Re-running the
   bootstrap never resets an existing account.
+- `ARGUS_DATABASE_URL` in `backend/.env` is the restricted runtime login only.
+  Test-maintenance credentials live in ignored `backend/.env.test`; migrator
+  credentials live in ignored `backend/.env.maintenance`. The normal host reads
+  neither of those files.
 
 Never commit a real secret. `.env` files are git-ignored; `.env.example`
 templates are committable and carry no secrets. Frontend environment values
@@ -155,12 +162,12 @@ npm run test:e2e
 The default `dotnet test` run excludes tests marked `Category=Performance`,
 which seed up to 50,000 rows. CI runs them separately; run them locally with
 `dotnet test tests/argus.Server.Tests -warnaserror --filter "Category=Performance"`.
-`dotnet test` needs `ARGUS_TEST_DATABASE_URL` for the isolation tests. The
-bootstrap creates that database and writes the value to `backend/.env`; export
-it before running the tests. The suite truncates finance tables and creates its
-own rows, so the URL must name the dedicated `argus_test` database, never the
-development `argus` database or production. `npm run test:e2e` needs chromium
-installed.
+`dotnet test` needs `ARGUS_TEST_DATABASE_URL` for the isolation tests. Run
+`node scripts/run-backend-tests.mjs` to read the ignored `backend/.env.test`
+and deliver only that value to the test process; an already scoped environment
+value wins. The suite truncates finance tables and creates its own rows, so the
+URL must name the dedicated `argus_test` database, never the development
+`argus` database or production. `npm run test:e2e` needs chromium installed.
 
 ## Documentation
 
@@ -174,6 +181,8 @@ installed.
   commands, HTTP surface, and CI
 - [docs/bootstrap-runbook.md](docs/bootstrap-runbook.md) — first run and
   verification
+- [docs/customer-isolation-runbook.md](docs/customer-isolation-runbook.md) —
+  database roles, row-level security, credential cutover and recovery
 - [docs/secret-rotation.md](docs/secret-rotation.md) — secrets inventory and
   rotation procedures
 - [docs/tls-deployment-contract.md](docs/tls-deployment-contract.md) — the

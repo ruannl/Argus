@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using argus.Server.Data;
 using argus.Server.Security;
 
 namespace argus.Server.Tests;
@@ -56,7 +57,7 @@ public sealed class PersistenceModelTests
                   AND table_type = 'BASE TABLE'
                   AND table_name NOT IN ('schema_migrations', 'data_migrations', '__EFMigrationsHistory')
                 """)));
-            Assert.Equal(10L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
+            Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
             Assert.Equal(0L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM schema_migrations")));
             Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM data_migrations WHERE name = '0006_canonical_identity_backfill'")));
 
@@ -148,7 +149,7 @@ public sealed class PersistenceModelTests
                 meRequest.Headers.Add(Brand.ApplicationSecretHeader, TestEnvironment.ApiSecret);
                 meRequest.Headers.Add(Brand.SessionHeader, rawToken);
                 using HttpResponseMessage meResponse = await client.SendAsync(meRequest);
-                Assert.Equal(HttpStatusCode.OK, meResponse.StatusCode);
+                Assert.True(meResponse.StatusCode == HttpStatusCode.OK, string.Join("\n", factory.LogCapture.Snapshot()));
                 using JsonDocument meBody = JsonDocument.Parse(await meResponse.Content.ReadAsStringAsync());
                 Assert.Equal("adopted-api@example.test", meBody.RootElement.GetProperty("email").GetString());
 
@@ -156,7 +157,7 @@ public sealed class PersistenceModelTests
                 accountsRequest.Headers.Add(Brand.ApplicationSecretHeader, TestEnvironment.ApiSecret);
                 accountsRequest.Headers.Add(Brand.SessionHeader, rawToken);
                 using HttpResponseMessage accountsResponse = await client.SendAsync(accountsRequest);
-                Assert.Equal(HttpStatusCode.OK, accountsResponse.StatusCode);
+                Assert.True(accountsResponse.StatusCode == HttpStatusCode.OK, string.Join("\n", factory.LogCapture.Snapshot()));
                 using JsonDocument accountsBody = JsonDocument.Parse(await accountsResponse.Content.ReadAsStringAsync());
                 Assert.Contains("Adopted account", accountsBody.RootElement.GetProperty("accounts").EnumerateArray().Select(item => item.GetProperty("display_name").GetString()));
 

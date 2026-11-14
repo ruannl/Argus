@@ -16,7 +16,7 @@ namespace argus.Server.Data.Migrations
     {
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
-            ArgusPhase2MigrationModel.Build(modelBuilder);
+            ArgusPhase3MigrationModel.Build(modelBuilder);
         }
     }
 }

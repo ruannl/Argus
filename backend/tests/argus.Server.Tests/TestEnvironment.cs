@@ -35,10 +35,35 @@ public static class TestEnvironment
         return url;
     }
 
+    private static readonly object _prepareGate = new();
+    private static bool _publicPrepared;
+
     public static void Configure()
     {
         var url = RequireTestDatabaseUrl();
-        Set("DATABASE_URL", url);
+        string runtimeUrl;
+        if (url.Contains("search_path=", StringComparison.Ordinal))
+        {
+            string schema = DatabaseRoleFixture.SchemaFromUrl(url);
+            string databaseUrl = DatabaseRoleFixture.DatabaseFromSchemaUrl(url);
+            DatabaseRoleFixture.EnsureAsync(databaseUrl).GetAwaiter().GetResult();
+            runtimeUrl = DatabaseRoleFixture.RuntimeSchemaUrl(databaseUrl, schema);
+        }
+        else
+        {
+            lock (_prepareGate)
+            {
+                if (!_publicPrepared)
+                {
+                    PersistenceTestSupport.PreparePublicDatabaseAsync(url).GetAwaiter().GetResult();
+                    _publicPrepared = true;
+                }
+            }
+
+            runtimeUrl = DatabaseRoleFixture.WithSearchPath(DatabaseRoleFixture.RuntimeUrl(url), "public");
+        }
+
+        Set("DATABASE_URL", runtimeUrl);
         Set("API_SECRET", ApiSecret);
         Set("FRONTEND_URL", FrontendUrl);
         Set("RESEND_API_KEY", "test-placeholder-key-not-for-production");

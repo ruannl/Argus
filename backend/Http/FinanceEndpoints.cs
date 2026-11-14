@@ -43,7 +43,7 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
 
     // --- Guard -------------------------------------------------------------
 
-    private Task<(Guid? CustomerId, IResult? Failure)> AuthenticateAsync(HttpContext context, CancellationToken cancellationToken) =>
+    private Task<(FinanceAuthority? Authority, IResult? Failure)> AuthenticateAsync(HttpContext context, CancellationToken cancellationToken) =>
         guard.AuthenticateAsync(context, cancellationToken);
 
     private Task<IResult> GuardedAsync(Func<Task<IResult>> action, string operation) =>
@@ -54,20 +54,20 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
     private Task<IResult> ListAccountsAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
             }
 
-            var accounts = await financeStore.ListAccountsAsync(customerId!.Value, cancellationToken);
+            var accounts = await financeStore.ListAccountsAsync(authority!, cancellationToken);
             return Results.Json(new { accounts = accounts.Select(FinanceAccountResponse.From).ToArray(), });
         }, "accounts_list");
 
     private Task<IResult> CreateAccountAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -79,12 +79,12 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
                 return Errors.InvalidRequest();
             }
 
-            var outcome = await financeStore.CreateAccountAsync(customerId!.Value, parsed.Value!.DisplayName, parsed.Value.Institution, cancellationToken);
+            var outcome = await financeStore.CreateAccountAsync(authority!, parsed.Value!.DisplayName, parsed.Value.Institution, cancellationToken);
 
             switch (outcome)
             {
                 case AccountOutcome.Success success:
-                    _audit.LogInformation("audit.finance_account_created customer_id={CustomerId} account_id={AccountId}", customerId.Value, success.Account.Id);
+                    _audit.LogInformation("audit.finance_account_created customer_id={CustomerId} account_id={AccountId}", authority!.CustomerId, success.Account.Id);
                     return Results.Json(FinanceAccountResponse.From(success.Account), statusCode: 201);
                 case AccountOutcome.InvalidName:
                     return Errors.InvalidRequest();
@@ -98,7 +98,7 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
     private Task<IResult> UpdateAccountAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -116,12 +116,12 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
                 return Errors.InvalidRequest();
             }
 
-            var outcome = await financeStore.UpdateAccountAsync(customerId!.Value, id.Value, parsed.DisplayName, parsed.InstitutionProvided, parsed.Institution, cancellationToken);
+            var outcome = await financeStore.UpdateAccountAsync(authority!, id.Value, parsed.DisplayName, parsed.InstitutionProvided, parsed.Institution, cancellationToken);
 
             switch (outcome)
             {
                 case AccountOutcome.Success success:
-                    _audit.LogInformation("audit.finance_account_updated customer_id={CustomerId} account_id={AccountId}", customerId.Value, success.Account.Id);
+                    _audit.LogInformation("audit.finance_account_updated customer_id={CustomerId} account_id={AccountId}", authority!.CustomerId, success.Account.Id);
                     return Results.Json(FinanceAccountResponse.From(success.Account));
                 case AccountOutcome.InvalidName:
                     return Errors.InvalidRequest();
@@ -141,7 +141,7 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
     private Task<IResult> SetAccountArchivedAsync(HttpContext context, CancellationToken cancellationToken, bool archived) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -153,12 +153,12 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
                 return Errors.NotFound();
             }
 
-            var outcome = await financeStore.SetAccountArchivedAsync(customerId!.Value, id.Value, archived, cancellationToken);
+            var outcome = await financeStore.SetAccountArchivedAsync(authority!, id.Value, archived, cancellationToken);
 
             switch (outcome)
             {
                 case AccountOutcome.Success success:
-                    _audit.LogInformation("audit.finance_account_archived customer_id={CustomerId} account_id={AccountId} archived={Archived}", customerId.Value, success.Account.Id, archived);
+                    _audit.LogInformation("audit.finance_account_archived customer_id={CustomerId} account_id={AccountId} archived={Archived}", authority!.CustomerId, success.Account.Id, archived);
                     return Results.Json(FinanceAccountResponse.From(success.Account));
                 case AccountOutcome.NotFound:
                     return Errors.NotFound();
@@ -174,20 +174,20 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
     private Task<IResult> ListCategoriesAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
             }
 
-            var categories = await financeStore.ListCategoriesAsync(customerId!.Value, cancellationToken);
+            var categories = await financeStore.ListCategoriesAsync(authority!, cancellationToken);
             return Results.Json(new { categories = categories.Select(FinanceCategoryResponse.From).ToArray(), });
         }, "categories_list");
 
     private Task<IResult> CreateCategoryAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -199,15 +199,15 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
                 return Errors.InvalidRequest();
             }
 
-            var outcome = await financeStore.CreateCategoryAsync(customerId!.Value, parsed.Value!.DisplayName, parsed.Value.Kind, cancellationToken);
+            var outcome = await financeStore.CreateCategoryAsync(authority!, parsed.Value!.DisplayName, parsed.Value.Kind, cancellationToken);
 
-            return CategoryResult(outcome, customerId.Value, "audit.finance_category_created", created: true);
+            return CategoryResult(outcome, authority!.CustomerId, "audit.finance_category_created", created: true);
         }, "categories_create");
 
     private Task<IResult> UpdateCategoryAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -225,9 +225,9 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
                 return Errors.InvalidRequest();
             }
 
-            var outcome = await financeStore.UpdateCategoryAsync(customerId!.Value, id.Value, parsed.Value!.DisplayName, parsed.Value.Kind, parsed.Value.ConfirmKindChange ?? false, cancellationToken);
+            var outcome = await financeStore.UpdateCategoryAsync(authority!, id.Value, parsed.Value!.DisplayName, parsed.Value.Kind, parsed.Value.ConfirmKindChange ?? false, cancellationToken);
 
-            return CategoryResult(outcome, customerId.Value, "audit.finance_category_updated", created: false);
+            return CategoryResult(outcome, authority!.CustomerId, "audit.finance_category_updated", created: false);
         }, "categories_update");
 
     private Task<IResult> ArchiveCategoryAsync(HttpContext context, CancellationToken cancellationToken) =>
@@ -239,7 +239,7 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
     private Task<IResult> SetCategoryArchivedAsync(HttpContext context, CancellationToken cancellationToken, bool archived) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -251,15 +251,15 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
                 return Errors.NotFound();
             }
 
-            var outcome = await financeStore.SetCategoryArchivedAsync(customerId!.Value, id.Value, archived, cancellationToken);
+            var outcome = await financeStore.SetCategoryArchivedAsync(authority!, id.Value, archived, cancellationToken);
 
-            return CategoryResult(outcome, customerId.Value, archived ? "audit.finance_category_archived" : "audit.finance_category_restored", created: false);
+            return CategoryResult(outcome, authority!.CustomerId, archived ? "audit.finance_category_archived" : "audit.finance_category_restored", created: false);
         }, archived ? "categories_archive" : "categories_restore");
 
     private Task<IResult> DeleteCategoryAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -271,12 +271,12 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
                 return Errors.NotFound();
             }
 
-            var outcome = await financeStore.DeleteCategoryAsync(customerId!.Value, id.Value, cancellationToken);
+            var outcome = await financeStore.DeleteCategoryAsync(authority!, id.Value, cancellationToken);
 
             switch (outcome)
             {
                 case CategoryDeleteOutcome.Success success:
-                    _audit.LogInformation("audit.finance_category_deleted customer_id={CustomerId} category_id={CategoryId} reassigned_count={ReassignedCount}", customerId.Value, id.Value, success.ReassignedTransactionCount);
+                    _audit.LogInformation("audit.finance_category_deleted customer_id={CustomerId} category_id={CategoryId} reassigned_count={ReassignedCount}", authority!.CustomerId, id.Value, success.ReassignedTransactionCount);
                     return Results.Json(new { deleted = true, reassigned_transaction_count = success.ReassignedTransactionCount, uncategorised_category_id = success.UncategorisedCategoryId, });
                 case CategoryDeleteOutcome.SystemCategoryImmutable:
                     return Errors.SystemCategoryImmutable();
@@ -318,20 +318,20 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
     private Task<IResult> ListMerchantTagsAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
             }
 
-            var tags = await financeStore.ListMerchantTagsAsync(customerId!.Value, cancellationToken);
+            var tags = await financeStore.ListMerchantTagsAsync(authority!, cancellationToken);
             return Results.Json(new { merchant_tags = tags.Select(FinanceMerchantTagResponse.From).ToArray(), });
         }, "merchant_tags_list");
 
     private Task<IResult> CreateMerchantTagAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -343,15 +343,15 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
                 return Errors.InvalidRequest();
             }
 
-            var outcome = await financeStore.CreateMerchantTagAsync(customerId!.Value, parsed.Value!.DisplayName, cancellationToken);
+            var outcome = await financeStore.CreateMerchantTagAsync(authority!, parsed.Value!.DisplayName, cancellationToken);
 
-            return MerchantTagResult(outcome, customerId.Value, "audit.finance_merchant_tag_created", created: true);
+            return MerchantTagResult(outcome, authority!.CustomerId, "audit.finance_merchant_tag_created", created: true);
         }, "merchant_tags_create");
 
     private Task<IResult> UpdateMerchantTagAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -369,9 +369,9 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
                 return Errors.InvalidRequest();
             }
 
-            var outcome = await financeStore.UpdateMerchantTagAsync(customerId!.Value, id.Value, parsed.Value!.DisplayName, cancellationToken);
+            var outcome = await financeStore.UpdateMerchantTagAsync(authority!, id.Value, parsed.Value!.DisplayName, cancellationToken);
 
-            return MerchantTagResult(outcome, customerId.Value, "audit.finance_merchant_tag_updated", created: false);
+            return MerchantTagResult(outcome, authority!.CustomerId, "audit.finance_merchant_tag_updated", created: false);
         }, "merchant_tags_update");
 
     private Task<IResult> ArchiveMerchantTagAsync(HttpContext context, CancellationToken cancellationToken) =>
@@ -383,7 +383,7 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
     private Task<IResult> SetMerchantTagArchivedAsync(HttpContext context, CancellationToken cancellationToken, bool archived) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -395,15 +395,15 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
                 return Errors.NotFound();
             }
 
-            var outcome = await financeStore.SetMerchantTagArchivedAsync(customerId!.Value, id.Value, archived, cancellationToken);
+            var outcome = await financeStore.SetMerchantTagArchivedAsync(authority!, id.Value, archived, cancellationToken);
 
-            return MerchantTagResult(outcome, customerId.Value, archived ? "audit.finance_merchant_tag_archived" : "audit.finance_merchant_tag_restored", created: false);
+            return MerchantTagResult(outcome, authority!.CustomerId, archived ? "audit.finance_merchant_tag_archived" : "audit.finance_merchant_tag_restored", created: false);
         }, archived ? "merchant_tags_archive" : "merchant_tags_restore");
 
     private Task<IResult> DeleteMerchantTagAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -415,12 +415,12 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
                 return Errors.NotFound();
             }
 
-            var outcome = await financeStore.DeleteMerchantTagAsync(customerId!.Value, id.Value, cancellationToken);
+            var outcome = await financeStore.DeleteMerchantTagAsync(authority!, id.Value, cancellationToken);
 
             switch (outcome)
             {
                 case MerchantTagDeleteOutcome.Success success:
-                    _audit.LogInformation("audit.finance_merchant_tag_deleted customer_id={CustomerId} merchant_tag_id={MerchantTagId} unassigned_count={UnassignedCount}", customerId.Value, id.Value, success.UnassignedTransactionCount);
+                    _audit.LogInformation("audit.finance_merchant_tag_deleted customer_id={CustomerId} merchant_tag_id={MerchantTagId} unassigned_count={UnassignedCount}", authority!.CustomerId, id.Value, success.UnassignedTransactionCount);
                     return Results.Json(new { deleted = true, unassigned_transaction_count = success.UnassignedTransactionCount, });
                 case MerchantTagDeleteOutcome.NotFound:
                     return Errors.NotFound();
@@ -434,20 +434,20 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
     private Task<IResult> ListMerchantAliasesAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
             }
 
-            var aliases = await financeStore.ListMerchantAliasesAsync(customerId!.Value, cancellationToken);
+            var aliases = await financeStore.ListMerchantAliasesAsync(authority!, cancellationToken);
             return Results.Json(new { merchant_aliases = aliases.Select(FinanceMerchantAliasResponse.From).ToArray(), });
         }, "merchant_aliases_list");
 
     private Task<IResult> CreateMerchantAliasAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -460,19 +460,19 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
             }
 
             var outcome = await financeStore.CreateMerchantAliasAsync(
-                customerId!.Value,
+                authority!,
                 parsed.Value!.DisplayAlias,
                 parsed.Value.MerchantTagId,
                 parsed.Value.CategoryId,
                 cancellationToken);
 
-            return MerchantAliasResult(outcome, customerId.Value, "audit.finance_merchant_alias_created", created: true);
+            return MerchantAliasResult(outcome, authority!.CustomerId, "audit.finance_merchant_alias_created", created: true);
         }, "merchant_aliases_create");
 
     private Task<IResult> UpdateMerchantAliasAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -491,20 +491,20 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
             }
 
             var outcome = await financeStore.UpdateMerchantAliasAsync(
-                customerId!.Value,
+                authority!,
                 id.Value,
                 parsed.Value!.DisplayAlias,
                 parsed.Value.MerchantTagId,
                 parsed.Value.CategoryId,
                 cancellationToken);
 
-            return MerchantAliasResult(outcome, customerId.Value, "audit.finance_merchant_alias_updated", created: false);
+            return MerchantAliasResult(outcome, authority!.CustomerId, "audit.finance_merchant_alias_updated", created: false);
         }, "merchant_aliases_update");
 
     private Task<IResult> DeleteMerchantAliasAsync(HttpContext context, CancellationToken cancellationToken) =>
         GuardedAsync(async () =>
         {
-            var (customerId, failure) = await AuthenticateAsync(context, cancellationToken);
+            var (authority, failure) = await AuthenticateAsync(context, cancellationToken);
             if (failure is not null)
             {
                 return failure;
@@ -516,13 +516,13 @@ public sealed class FinanceApi(FinanceGuard guard, FinanceStore financeStore, IL
                 return Errors.NotFound();
             }
 
-            bool deleted = await financeStore.DeleteMerchantAliasAsync(customerId!.Value, id.Value, cancellationToken);
+            bool deleted = await financeStore.DeleteMerchantAliasAsync(authority!, id.Value, cancellationToken);
             if (!deleted)
             {
                 return Errors.NotFound();
             }
 
-            _audit.LogInformation("audit.finance_merchant_alias_deleted customer_id={CustomerId} alias_id={AliasId}", customerId.Value, id.Value);
+            _audit.LogInformation("audit.finance_merchant_alias_deleted customer_id={CustomerId} alias_id={AliasId}", authority!.CustomerId, id.Value);
             return Results.Json(new { deleted = true, });
         }, "merchant_aliases_delete");
 
