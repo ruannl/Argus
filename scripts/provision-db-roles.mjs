@@ -78,7 +78,8 @@ export function sanitizeToolError(stderr, fallback) {
 
 export function runAdminSql(spawn, input, options) {
   const connection = parseDatabaseUrl(options.adminUrl);
-  if (options.dockerContainer) {
+  const dockerContainer = options.dockerContainer === "none" ? undefined : options.dockerContainer;
+  if (dockerContainer) {
     const env = toolEnvironment();
     if (connection.password !== undefined) {
       env.PGPASSWORD = connection.password;
@@ -88,7 +89,7 @@ export function runAdminSql(spawn, input, options) {
       args.push("-e", "PGPASSWORD");
     }
     args.push(
-      options.dockerContainer,
+      dockerContainer,
       "psql",
       "-U",
       connection.user ?? "postgres",
@@ -172,7 +173,11 @@ export function provisionRoles(options = {}) {
     migrator: `${slug}_migrator`,
     runtime: `${slug}_runtime`,
   };
-  const sqlOptions = { adminUrl, dockerContainer: options.dockerContainer ?? process.env.ARGUS_DOCKER_CONTAINER };
+  const configuredContainer = options.dockerContainer ?? process.env.ARGUS_DOCKER_CONTAINER;
+  const sqlOptions = {
+    adminUrl,
+    dockerContainer: configuredContainer === "none" ? undefined : configuredContainer,
+  };
 
   const ownerExists = roleExists(spawn, roles.owner, sqlOptions);
   const migratorExists = roleExists(spawn, roles.migrator, sqlOptions);

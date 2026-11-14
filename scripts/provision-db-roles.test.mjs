@@ -204,3 +204,26 @@ test("provisionRoles sends a native psql password only through its environment",
   assert.doesNotMatch(calls[0].args.join(" "), /admin-secret|migrator-password-value|runtime-password-value/);
   assert.doesNotMatch(calls[0].options.input, /admin-secret/);
 });
+
+test("provisionRoles treats an explicit none container as native psql", () => {
+  const calls = [];
+  const spawn = (command, args, options = {}) => {
+    calls.push({ command, args, options });
+    const sql = options.input ?? "";
+    if (sql.includes("SELECT 1 FROM pg_roles WHERE rolname = ")) {
+      return ok("0");
+    }
+    return ok();
+  };
+  provisionRoles({
+    spawnSync: spawn,
+    root,
+    adminUrl: "postgres://postgres:secret@127.0.0.1:5432/argus_test",
+    dockerContainer: "none",
+    migratorPassword: "migrator-password-value",
+    runtimePassword: "runtime-password-value",
+    log: () => {},
+  });
+  assert.equal(calls.every((call) => call.command === "psql"), true);
+  assert.equal(calls.some((call) => call.args.includes("none")), false);
+});
