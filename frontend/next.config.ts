@@ -37,6 +37,12 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // Keep the security upgrade policy for future reminders. Next.js checks
+    // stable releases for published advisories and only recommends a safe
+    // patch within the current major.
+    agentUpgrade: "security",
+  },
   // Privacy: Next.js captures Server Function invocation arguments in
   // development before the action authenticates or validates them, then
   // prints them on success or failure. Private search text must never reach
