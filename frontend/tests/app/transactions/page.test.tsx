@@ -36,6 +36,8 @@ vi.mock("@/lib/server/account-actions", () => ({
 }));
 
 import { redirect } from "next/navigation";
+
+import { encodeOverviewContext } from "@/lib/reporting-state";
 import { testRouter } from "../../../vitest.setup";
 
 import TransactionsPage from "@/app/transactions/page";
@@ -72,6 +74,14 @@ const emptyPage = {
   page_size: 25,
   sort_by: "date",
   sort_direction: "desc",
+  money_totals: {
+    money_in: "0.00",
+    money_out: "0.00",
+    net: "0.00",
+    included_count: 0,
+    transfers: { count: 0, money_in: "0.00", money_out: "0.00", absolute: "0.00" },
+    excluded: { count: 0, money_in: "0.00", money_out: "0.00", absolute: "0.00" },
+  },
 };
 
 function renderPage(searchParams: Record<string, string | string[]> = {}) {
@@ -232,6 +242,79 @@ describe("transactions page", () => {
     expect(screen.getByRole("heading", { name: "Transactions unavailable" })).toBeInTheDocument();
     expect(screen.queryByText(/PRIVATE-CANARY/)).not.toBeInTheDocument();
     expect(endSessionAction).not.toHaveBeenCalled();
+    expect(queryTransactions).not.toHaveBeenCalled();
+  });
+
+  it("passes included scope, sorted exclusions and a bounded Overview return context", async () => {
+    signedIn();
+    const context = encodeOverviewContext({
+      view: "charts",
+      mode: "calendar",
+      preset: "month",
+      month: "2026-02",
+    });
+    const first = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    const second = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    vi.mocked(queryTransactions).mockResolvedValue({
+      ok: true,
+      value: {
+        ...emptyPage,
+        money_totals: {
+          money_in: "1000.00",
+          money_out: "200.00",
+          net: "800.00",
+          included_count: 3,
+          transfers: { count: 1, money_in: "0.00", money_out: "50.00", absolute: "50.00" },
+          excluded: { count: 0, money_in: "0.00", money_out: "0.00", absolute: "0.00" },
+        },
+      },
+    });
+
+    render(
+      await renderPage({
+        calculation_scope: "included",
+        excluded_category_ids: `${first},${second}`,
+        overview_context: context,
+      }),
+    );
+
+    expect(queryTransactions).toHaveBeenCalledWith("backend-token", {
+      filters: {
+        visibility: "visible",
+        calculation_scope: "included",
+        excluded_category_ids: [second, first],
+      },
+      page: 1,
+      page_size: 25,
+      sort_by: "date",
+      sort_direction: "desc",
+    });
+    expect(screen.getByRole("link", { name: "Back to Overview" })).toHaveAttribute(
+      "href",
+      "/home?view=charts&mode=calendar&preset=month&month=2026-02",
+    );
+    expect(screen.getByText("R 1 000.00")).toBeInTheDocument();
+    expect(screen.getByText("R 800.00")).toBeInTheDocument();
+  });
+
+  it("rejects duplicate exclusion IDs instead of broadening the list", async () => {
+    signedIn();
+    const id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+
+    render(
+      await renderPage({ calculation_scope: "included", excluded_category_ids: `${id},${id}` }),
+    );
+
+    expect(screen.getByText(/invalid/)).toBeInTheDocument();
+    expect(queryTransactions).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malformed Overview return context", async () => {
+    signedIn();
+
+    render(await renderPage({ overview_context: "not-base64!" }));
+
+    expect(screen.getByText(/invalid/)).toBeInTheDocument();
     expect(queryTransactions).not.toHaveBeenCalled();
   });
 });

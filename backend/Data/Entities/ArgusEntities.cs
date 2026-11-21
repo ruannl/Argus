@@ -298,3 +298,28 @@ public sealed class TransactionOperationItem
     public Guid StatementImportId { get; set; }
     public int Ordinal { get; set; }
 }
+
+/// <summary>
+/// One row per customer that has ever confirmed a salary-cycle date. The row
+/// remains after all boundaries are removed so an old sequence revision can
+/// never become current again.
+/// </summary>
+public sealed class SalaryCycleState
+{
+    public Guid CustomerId { get; set; }
+    public long Revision { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// A confirmed salary-cycle start stores only its calendar date and owner.
+/// It deliberately keeps no amount, description, account label, transaction
+/// payload, source locator or transaction foreign key.
+/// </summary>
+public sealed class SalaryCycleStart
+{
+    public Guid Id { get; set; }
+    public Guid CustomerId { get; set; }
+    public DateOnly StartDate { get; set; }
+    public DateTime CreatedAt { get; set; }
+}

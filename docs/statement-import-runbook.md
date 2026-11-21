@@ -17,12 +17,12 @@ last independent PDF verdict remains NO-GO
 before PDF is re-enabled. Proposed revision 4 / C-PDF-2 and the pending brief
 amendment are deferred, not approved.
 
-| Source | Accepted shape | Notes |
-| --- | --- | --- |
-| FNB CSV | Six-line preamble, seventh-line `Date,Amount,Balance,Description` header, four fields per row | The balance column is ignored. Preamble and balance never persist or display. |
-| FNB ZIP | Exactly one root-level `.csv` entry | No nested paths, directories, extra entries, traversal, or expansion beyond 10 MB. |
-| Standard Bank PDF | **Deferred to Thread #6 — not accepted in the current release.** | The API rejects this source kind with `pdf_import_deferred`. The parser material below is retained for the deferred fix and is not current operating behaviour. See [Standard Bank PDF extraction](#standard-bank-pdf-extraction). |
-| Generic CSV | Customer-confirmed header line, delimiter, columns, date format, decimal/thousands separators, and sign mode | Columns are addressed by zero-based index. Mapping and coverage changes require a new review. The FNB preamble shape is excluded independently of the selected delimiter, including quoted metadata labels; a header line inside it is rejected. A boundary requires a recognized transaction header or an explicit FNB title, so ordinary description-first data is not misclassified. |
+| Source            | Accepted shape                                                                                               | Notes                                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FNB CSV           | Six-line preamble, seventh-line `Date,Amount,Balance,Description` header, four fields per row                | The balance column is ignored. Preamble and balance never persist or display.                                                                                                                                                                                                                                                                                                           |
+| FNB ZIP           | Exactly one root-level `.csv` entry                                                                          | No nested paths, directories, extra entries, traversal, or expansion beyond 10 MB.                                                                                                                                                                                                                                                                                                      |
+| Standard Bank PDF | **Deferred to Thread #6 — not accepted in the current release.**                                             | The API rejects this source kind with `pdf_import_deferred`. The parser material below is retained for the deferred fix and is not current operating behaviour. See [Standard Bank PDF extraction](#standard-bank-pdf-extraction).                                                                                                                                                      |
+| Generic CSV       | Customer-confirmed header line, delimiter, columns, date format, decimal/thousands separators, and sign mode | Columns are addressed by zero-based index. Mapping and coverage changes require a new review. The FNB preamble shape is excluded independently of the selected delimiter, including quoted metadata labels; a header line inside it is rejected. A boundary requires a recognized transaction header or an explicit FNB title, so ordinary description-first data is not misclassified. |
 
 ### Standard Bank PDF extraction
 
@@ -94,21 +94,21 @@ after preparation.
 
 ## Service bounds
 
-| Bound | Value |
-| --- | --- |
-| File size / decompressed ZIP payload | 10,000,000 bytes each |
-| Multipart envelope | 10,100,000 bytes; options metadata at most 64 KiB |
-| Data rows | 20,000 including invalid rows |
-| PDF pages | 200 |
-| Extracted PDF characters | 2,000,000 |
-| Parser deadline | 30 seconds for CSV and PDF parsing |
-| Concurrent parsers | 2 per backend process, shared by CSV and PDF |
-| Description length | 4,096 Unicode scalars |
-| Open reviews per customer | 5 |
-| Sanitized review payload per customer | 50 MiB |
-| Review lifetime | 24 hours absolute |
-| Abandoned/Expired header retention | 30 days |
-| JSON review mutation body | 256 KiB; at most 200 row decisions per request |
+| Bound                                 | Value                                             |
+| ------------------------------------- | ------------------------------------------------- |
+| File size / decompressed ZIP payload  | 10,000,000 bytes each                             |
+| Multipart envelope                    | 10,100,000 bytes; options metadata at most 64 KiB |
+| Data rows                             | 20,000 including invalid rows                     |
+| PDF pages                             | 200                                               |
+| Extracted PDF characters              | 2,000,000                                         |
+| Parser deadline                       | 30 seconds for CSV and PDF parsing                |
+| Concurrent parsers                    | 2 per backend process, shared by CSV and PDF      |
+| Description length                    | 4,096 Unicode scalars                             |
+| Open reviews per customer             | 5                                                 |
+| Sanitized review payload per customer | 50 MiB                                            |
+| Review lifetime                       | 24 hours absolute                                 |
+| Abandoned/Expired header retention    | 30 days                                           |
+| JSON review mutation body             | 256 KiB; at most 200 row decisions per request    |
 
 A request that exceeds a bound fails with a fixed safe error and no partial
 finance records. Parser exhaustion is a safe failure, not silent truncation of
@@ -137,8 +137,11 @@ only. The original filename is not displayed in the UI.
 2. **Prepare** re-sends the file with confirmed ZAR, coverage dates, and
    mapping. It creates a `Prepared` review with a version, summary hash,
    duplicate snapshot, and 24-hour expiry. No transactions exist yet.
-3. **Review** reads the durable rows. Invalid rows must be skipped. Repeated
-   identical rows require a keep-all, skip-all, or per-row decision. A row
+3. **Review** reads the durable rows, oldest transaction date first by default.
+   The list can be narrowed to repeats in file, possible duplicates, rows
+   excluding possible duplicates, or untagged rows; these filters combine with
+   the date order. Invalid rows must be skipped. Repeated identical rows
+   require a keep-all, skip-all, or per-row decision. A row
    that matches an existing occurrence is suppressed unless explicitly
    overridden. Tag suggestions are unselected and combine the customer's
    active tag names, explicit aliases, and the customer's own historical tag

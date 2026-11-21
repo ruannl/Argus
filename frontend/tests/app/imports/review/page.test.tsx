@@ -382,6 +382,8 @@ describe("import review page", () => {
       "asc",
       true,
       false,
+      false,
+      false,
     );
     expect(screen.getByRole("checkbox", { name: /Possible duplicates only/ })).toBeChecked();
   });
@@ -407,6 +409,8 @@ describe("import review page", () => {
       "asc",
       false,
       true,
+      false,
+      false,
     );
     expect(screen.getByRole("checkbox", { name: "No tags only" })).toBeChecked();
   });
@@ -462,6 +466,7 @@ describe("import review page", () => {
       }),
     );
     expect(screen.getAllByText("Woolworths groceries").length).toBeGreaterThan(0);
+    expect(screen.getByText("Row 1")).toBeInTheDocument();
 
     first.rerender(
       await ReviewPage({
@@ -471,6 +476,7 @@ describe("import review page", () => {
     );
 
     expect(screen.getAllByText("Broken amount").length).toBeGreaterThan(0);
+    expect(screen.getByText("Row 2")).toBeInTheDocument();
     expect(screen.queryByText("Woolworths groceries")).not.toBeInTheDocument();
   });
 
@@ -495,8 +501,166 @@ describe("import review page", () => {
       "asc",
       false,
       false,
+      false,
+      false,
     );
     expect(screen.getByLabelText("Rows per page")).toHaveValue("25");
+  });
+
+  it("offers 150 and 200 rows per page", async () => {
+    vi.mocked(getImportReview).mockResolvedValue({
+      ok: true,
+      value: { summary, page: { rows, total: 4, page: 1, page_size: 200 } },
+    });
+
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({ page_size: "200" }),
+      }),
+    );
+
+    expect(getImportReview).toHaveBeenCalledWith(
+      "backend-token",
+      "review-id",
+      1,
+      200,
+      "asc",
+      false,
+      false,
+      false,
+      false,
+    );
+    const select = screen.getByLabelText("Rows per page");
+    expect(select).toHaveValue("200");
+    expect(within(select).getByRole("option", { name: "150" })).toBeInTheDocument();
+    expect(within(select).getByRole("option", { name: "200" })).toBeInTheDocument();
+  });
+
+  it("defaults to the oldest transaction first", async () => {
+    vi.mocked(getImportReview).mockResolvedValue({
+      ok: true,
+      value: { summary, page: { rows, total: 4, page: 1, page_size: 50 } },
+    });
+
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    expect(getImportReview).toHaveBeenCalledWith(
+      "backend-token",
+      "review-id",
+      1,
+      50,
+      "asc",
+      false,
+      false,
+      false,
+      false,
+    );
+    expect(screen.getByLabelText("Sort by date")).toHaveValue("asc");
+  });
+
+  it("flags rows that block import", async () => {
+    vi.mocked(getImportReview).mockResolvedValue({
+      ok: true,
+      value: { summary, page: { rows, total: 4, page: 1, page_size: 50 } },
+    });
+
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    const flags = screen.getAllByText("Blocks import");
+    expect(flags).toHaveLength(2);
+    expect(flags[0].closest("tr")).toHaveTextContent("Broken amount");
+    expect(flags[1].closest("tr")).toHaveTextContent("Same coffee");
+  });
+
+  it("filters to repeats in file", async () => {
+    vi.mocked(getImportReview).mockResolvedValue({
+      ok: true,
+      value: { summary, page: { rows: [rows[0]], total: 1, page: 1, page_size: 50 } },
+    });
+
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({ repeats: "file" }),
+      }),
+    );
+
+    expect(getImportReview).toHaveBeenCalledWith(
+      "backend-token",
+      "review-id",
+      1,
+      50,
+      "asc",
+      false,
+      false,
+      true,
+      false,
+    );
+    expect(screen.getByRole("checkbox", { name: "Repeats in file only" })).toBeChecked();
+  });
+
+  it("excludes possible duplicates", async () => {
+    vi.mocked(getImportReview).mockResolvedValue({
+      ok: true,
+      value: { summary, page: { rows: [rows[0]], total: 1, page: 1, page_size: 50 } },
+    });
+
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({ duplicates: "exclude" }),
+      }),
+    );
+
+    expect(getImportReview).toHaveBeenCalledWith(
+      "backend-token",
+      "review-id",
+      1,
+      50,
+      "asc",
+      false,
+      false,
+      false,
+      true,
+    );
+    expect(screen.getByRole("checkbox", { name: "Exclude possible duplicates" })).toBeChecked();
+  });
+
+  it("wires repeat and exclusion filters into the review URL", async () => {
+    const user = userEvent.setup();
+    testRouter.push.mockReset();
+    vi.mocked(getImportReview).mockResolvedValue({
+      ok: true,
+      value: { summary, page: { rows, total: 4, page: 1, page_size: 50 } },
+    });
+
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    await user.click(screen.getByRole("checkbox", { name: "Repeats in file only" }));
+    expect(testRouter.push.mock.calls[0][0]).toContain("repeats=file");
+    expect(testRouter.push.mock.calls[0][0]).toContain("sort_direction=asc");
+
+    await user.click(screen.getByRole("checkbox", { name: /Possible duplicates only/ }));
+    await user.click(screen.getByRole("checkbox", { name: "Exclude possible duplicates" }));
+    const lastCall = testRouter.push.mock.calls.at(-1)?.[0] as string;
+    expect(lastCall).toContain("duplicates=exclude");
+    expect(lastCall).not.toContain("duplicates=possible");
   });
 
   it("loads the review in the requested date order", async () => {
@@ -518,6 +682,8 @@ describe("import review page", () => {
       1,
       50,
       "desc",
+      false,
+      false,
       false,
       false,
     );
@@ -543,6 +709,8 @@ describe("import review page", () => {
       1,
       50,
       "asc",
+      false,
+      false,
       false,
       false,
     );
@@ -595,7 +763,8 @@ describe("import review page", () => {
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: "Show details for row 4" }));
+    expect(screen.getByText("Row 1")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show details for row 1" }));
     await user.click(screen.getByRole("button", { name: "Keep all in group" }));
 
     await waitFor(() =>

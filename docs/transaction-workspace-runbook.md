@@ -27,8 +27,10 @@ and the approved product brief.
   confirmation.
 - Every row exposes `category_confirmed`. Imported untouched defaults are
   unconfirmed; existing rows default to confirmed. An unconfirmed non-
-  Uncategorised category shows a blue "Suggested" chip, and the
-  `category_confirmed=false` filter selects suggested or unconfirmed rows.
+  Uncategorised category shows a blue "Unconfirmed" chip; the list no longer
+  labels every unconfirmed category as a live suggestion. The inline editor and
+  detail view expose an explicit confirm action, and the
+  `category_confirmed=false` filter selects unconfirmed rows.
   Category assignment, the explicit `confirm_category` action, and the bulk
   confirm all set the flag without otherwise rewriting the category.
 - Hiding keeps the record and duplicate identity. Parent statement hiding wins;
@@ -43,23 +45,23 @@ and the approved product brief.
 
 ## Limits and bounds
 
-| Concern | Value |
-| --- | --- |
-| Search | one literal substring, at most 200 Unicode scalars |
-| Query body | 16 KiB, checked by actual read length |
-| Edit/prepare/apply body | 256 KiB, checked by actual read length |
-| Page size | 25 (default), 50, 100 |
-| Explicit selection | 1–1,000 unique id/version tuples |
-| All-matching selection | at most 50,000; 50,001 returns `selection_too_large` |
-| Tags per request | at most 100 ids in each add/remove set, disjoint |
-| Tags per transaction | at most 100 after an add; no-add removals may reduce a legacy set |
-| Open prepared operations | 5 per customer |
-| Live manifest entries | 100,000 per customer |
-| Preparation rate | 20 per customer per 15-minute window |
-| Finance IP requests | 1000 per 15-minute window, in-memory per process |
-| Operation expiry | 15 minutes absolute from capture |
-| Workspace statement bound | 30 seconds per statement |
-| Lock wait bound | 5 seconds |
+| Concern                   | Value                                                             |
+| ------------------------- | ----------------------------------------------------------------- |
+| Search                    | one literal substring, at most 200 Unicode scalars                |
+| Query body                | 16 KiB, checked by actual read length                             |
+| Edit/prepare/apply body   | 256 KiB, checked by actual read length                            |
+| Page size                 | 25 (default), 50, 100                                             |
+| Explicit selection        | 1–1,000 unique id/version tuples                                  |
+| All-matching selection    | at most 50,000; 50,001 returns `selection_too_large`              |
+| Tags per request          | at most 100 ids in each add/remove set, disjoint                  |
+| Tags per transaction      | at most 100 after an add; no-add removals may reduce a legacy set |
+| Open prepared operations  | 5 per customer                                                    |
+| Live manifest entries     | 100,000 per customer                                              |
+| Preparation rate          | 20 per customer per 15-minute window                              |
+| Finance IP requests       | 1000 per 15-minute window, in-memory per process                  |
+| Operation expiry          | 15 minutes absolute from capture                                  |
+| Workspace statement bound | 30 seconds per statement                                          |
+| Lock wait bound           | 5 seconds                                                         |
 
 ## Lifecycle and recovery
 
@@ -89,16 +91,16 @@ must be resolved through status/receipt before describing the outcome.
 
 ## Errors
 
-| Status | Codes |
-| --- | --- |
-| 400 | `invalid_request`, `empty_selection`, `category_unavailable`, `tag_unavailable`, `tag_limit_exceeded`, `selection_too_large` |
-| 401 / 403 | `unauthorized` / bodyless origin rejection |
-| 404 | `not_found` for unknown or foreign ids, filters, targets and operations |
-| 409 | `version_conflict`, `selection_stale`, `classification_changed`, `parent_hidden`, `idempotency_conflict`, `operation_busy` |
-| 410 | `operation_expired`, `operation_abandoned` |
-| 413 | `request_too_large` |
-| 429 | `rate_limited`, `operation_quota` |
-| 500 | `internal_server_error`; no internal detail is returned or logged with user data |
+| Status    | Codes                                                                                                                        |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 400       | `invalid_request`, `empty_selection`, `category_unavailable`, `tag_unavailable`, `tag_limit_exceeded`, `selection_too_large` |
+| 401 / 403 | `unauthorized` / bodyless origin rejection                                                                                   |
+| 404       | `not_found` for unknown or foreign ids, filters, targets and operations                                                      |
+| 409       | `version_conflict`, `selection_stale`, `classification_changed`, `parent_hidden`, `idempotency_conflict`, `operation_busy`   |
+| 410       | `operation_expired`, `operation_abandoned`                                                                                   |
+| 413       | `request_too_large`                                                                                                          |
+| 429       | `rate_limited`, `operation_quota`                                                                                            |
+| 500       | `internal_server_error`; no internal detail is returned or logged with user data                                             |
 
 Stale failures may include owned `stale_count`/`missing_count` values and a
 bounded list of owned statement links for parent-hidden restores. They never
@@ -367,7 +369,7 @@ Commit validates every included selected category as owned, active and
 non-system, then writes the selection or the system Uncategorised category plus
 the review row's decision flag.
 
-In Transactions, the unconfirmed filter, blue Suggested chip, detail banner, and
+In Transactions, the unconfirmed filter, blue Unconfirmed chip, inline/detail confirm action, detail banner, and
 bulk Confirm category only control all operate on the same flag. Confirming
 never changes the category. `SuggestionLoader` counts only confirmed categories,
 so an unconfirmed guess cannot become precedent; confirming it makes it eligible.

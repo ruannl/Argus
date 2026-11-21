@@ -86,6 +86,7 @@ function revalidateWorkspace() {
   for (const path of ["/imports", "/home", "/transactions", "/settings"]) {
     revalidatePath(path);
   }
+  revalidatePath("/home", "layout");
 }
 
 async function sessionToken(): Promise<string | null> {

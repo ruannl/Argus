@@ -31,6 +31,7 @@ import {
   patchTransaction,
   prepareImportReview,
   prepareTransactionOperation,
+  queryReport,
   queryTransactions,
   requestPasswordReset,
   registerAccount,
@@ -1287,5 +1288,23 @@ describe("server transaction client", () => {
       kind: "unavailable",
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats only a confirmed unauthorized body as a report session expiry", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "upstream_gateway" }), { status: 401 }),
+    );
+    await expect(queryReport("backend-token", { view: "overview" })).resolves.toEqual({
+      ok: false,
+      kind: "unavailable",
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }),
+    );
+    await expect(queryReport("backend-token", { view: "overview" })).resolves.toEqual({
+      ok: false,
+      kind: "unauthorized",
+    });
   });
 });

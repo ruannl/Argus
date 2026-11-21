@@ -677,3 +677,43 @@ public sealed class TransactionOperationItemConfiguration : IEntityTypeConfigura
             .OnDelete(DeleteBehavior.Cascade);
     }
 }
+
+public sealed class SalaryCycleStateConfiguration : IEntityTypeConfiguration<SalaryCycleState>
+{
+    public void Configure(EntityTypeBuilder<SalaryCycleState> builder)
+    {
+        builder.ToTable("salary_cycle_state", table =>
+            table.HasCheckConstraint("salary_cycle_state_revision_check", "revision > 0"));
+        builder.HasKey(state => state.CustomerId).HasName("salary_cycle_state_pkey");
+        builder.Property(state => state.CustomerId).HasColumnType("uuid").ValueGeneratedNever();
+        builder.Property(state => state.Revision).HasColumnType("bigint").IsRequired();
+        builder.Property(state => state.UpdatedAt).HasColumnType("timestamp with time zone").IsRequired();
+        builder.HasOne<Customer>()
+            .WithMany()
+            .HasForeignKey(state => state.CustomerId)
+            .HasConstraintName("salary_cycle_state_customer_id_fkey")
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class SalaryCycleStartConfiguration : IEntityTypeConfiguration<SalaryCycleStart>
+{
+    public void Configure(EntityTypeBuilder<SalaryCycleStart> builder)
+    {
+        builder.ToTable("salary_cycle_starts");
+        builder.HasKey(start => start.Id).HasName("salary_cycle_starts_pkey");
+        builder.Property(start => start.Id).HasColumnType("uuid").ValueGeneratedNever();
+        builder.Property(start => start.CustomerId).HasColumnType("uuid").IsRequired();
+        builder.Property(start => start.StartDate).HasColumnType("date").IsRequired();
+        builder.Property(start => start.CreatedAt).HasColumnType("timestamp with time zone").IsRequired();
+        builder.HasAlternateKey(start => new { start.CustomerId, start.StartDate })
+            .HasName("salary_cycle_starts_customer_date_key");
+        builder.HasAlternateKey(start => new { start.CustomerId, start.Id })
+            .HasName("salary_cycle_starts_customer_id_id_key");
+        builder.HasOne<Customer>()
+            .WithMany()
+            .HasForeignKey(start => start.CustomerId)
+            .HasConstraintName("salary_cycle_starts_customer_id_fkey")
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}

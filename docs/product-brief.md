@@ -49,6 +49,73 @@
 > advisory and unselected. Detailed authority is Plan 2 revision 9 and Plan 3
 > revision 5; Thread #1 Decision `bfe620fc-0242-4d27-b6d8-777c78c560ce` records
 > approval.
+>
+> **Overview amendment (2026-11-14, operator-approved bounded decisions):**
+> Salary-cycle reporting is the default; calendar periods and custom inclusive
+> start/end dates remain selectable. A workspace has one sequence of explicitly
+> confirmed cycle-start salary receipts, not automatic salary detection, every
+> income payment, a fixed monthly payday, or projected future boundaries. The
+> effective rules are in OVR-1/14, Section 7.3 and AC-OVR-4/7..19 below.
+>
+> **Problem:** Calendar months alone do not provide the requested view of money
+> between the customer's salary receipts. **Desired outcome:** The same
+> reconciled Overview supports receipt-defined salary cycles by default, plus
+> calendar/custom alternatives, in the selected A · Compact dashboard direction.
+> **Constraints:** Only an explicitly chosen owned, visible, positive imported
+> transaction dated today or earlier can confirm a new boundary; no category,
+> tag or source field changes. Confirmed dates remain separate reporting metadata
+> after source hiding/deletion, as the operator explicitly chose. No marker
+> means a setup prompt, never an invented boundary or silent calendar fallback.
+> **Observable success:** Date ranges and comparisons follow Section 7.3, the
+> source remains unchanged, retained dates do not retain deleted transactions or
+> include hidden amounts, and all views still reconcile under the same filters.
+>
+> **Additional confirmed refinements:** Africa/Johannesburg determines today and
+> the current month, without shifting transaction dates. Calendar last-three/six
+> months include the current partial month; month-to-date comparison clamps to
+> the previous month end when shorter. Other merchant tags expand as individual
+> tag bars, with no summed Other-tag amount or combined-tag filter. The selected
+> static layout is direction only, not completed or approved application software.
+> Multiple eligible receipts on one immutable calendar date share one confirmed
+> boundary. Selecting another eligible receipt on that date reports already
+> confirmed, creates no boundary, replaces no source and changes no revision or
+> cycle; no intraday or zero-length cycle is introduced.
+>
+> **Authority and preserved history:** Thread #5 Decision
+> `e0322c9e-6e9a-42d1-9520-27324a4b4da3` first selected salary study only;
+> Correction `27029820-8d58-4aba-92f5-f13e7ea2486f` explicitly superseded that
+> choice with salary-cycle default scope; Decision
+> `7c04116e-5fdf-4f44-9883-722b0bcad5e4` completed eligibility, correction and
+> layout choices. Decision `cc0c9109-ac80-4439-bb5e-2dd175384198` resolved the
+> later same-date question with "One boundary per date (Recommended)". The
+> operator said, "the salary cycle should be default option,
+> i also would like to choose from a couple of examples, when it comes to the
+> look and feel and layout", then selected "Custom dates only", "Keep confirmed
+> date" and "A · Compact dashboard". These decisions replace the original
+> calendar-month default (latest month with data; current month labelled Month
+> to date) and clarify the original generic Other-bucket wording for tags. They
+> do not approve a Plan, implementation, publication or deployment. The
+> conditional fixed-payday month-end/weekend answer is inapplicable to these
+> receipt-defined cycles. Thread #11's wider visual refresh stays separate and
+> nonblocking; programme topology, order, PDF deferral and completion condition
+> are unchanged. Initial current-state descriptions elsewhere remain the
+> 2026-10-30 source-inspection baseline, not claims about today's implementation.
+>
+> **Overview display amendment (2026-11-15, operator-directed):** The Overview
+> category and merchant-tag breakdowns list every category and every tag
+> individually, ordered by directional amount from largest to smallest. There is
+> no additive Other categories row and no Other-tags group or summed remainder;
+> Uncategorised and Untagged remain explicit rows. The backend retains the
+> earlier top-five/Other projection for compatibility, while the Overview,
+> Category Detail, Merchant-Tag Detail and Period Comparison use the complete
+> ordered ranks. Tag amounts still overlap and are never summed, and each tag
+> keeps its own single-tag drill-down. This supersedes CHT-5, AC-CHT-6, the
+> "Many categories or merchant tags" chart table row and the 2026-11-14
+> amendment's "Other merchant tags expand" sentence only where they describe an
+> Other grouping; all other chart, filter, disclosure, accessibility and
+> drill-down requirements remain in force. The operator-directed decision and
+> implementation evidence are recorded in Plan 4's operator-directed display
+> change.
 
 ## 1. Executive summary
 
@@ -80,17 +147,17 @@ The product stops at insight. It does not budget, advise, aggregate bank feeds, 
 > The repository provides authenticated customer accounts, session management, and a starter UI, but has no financial domain model, statement import pipeline, transaction workspace, or spending insights, and its public landing page still describes a generic software starter kit. Users with South African bank statements cannot import their statements, classify transactions by purpose and merchant, or see reconciled period summaries and charts without maintaining manual spreadsheets.
 >
 > **Here is the desired outcome.**  
-> Argus is an authenticated ZAR personal finance insights web application where each customer creates financial accounts, imports FNB CSV/ZIP statements, text-based Standard Bank six-column PDF statements, and generic mapped CSV statements with confirmed statement start and end dates, manages categories and merchant tags individually or in bulk, hides or restores transactions and statements (or deletes a committed statement import to re-import cleanly), and explores reconciled period overviews and bar-first charts that drill down to the exact underlying transactions.
+> Argus is an authenticated ZAR personal finance insights web application where each customer creates financial accounts, imports FNB CSV/ZIP statements, text-based Standard Bank six-column PDF statements, and generic mapped CSV statements with confirmed statement start and end dates, manages categories and merchant tags individually or in bulk, hides or restores transactions and statements (or deletes a committed statement import to re-import cleanly), and explores reconciled salary-cycle, calendar and custom-date overviews and bar-first charts that drill down to the exact underlying transactions. Salary cycles are the default and use explicitly confirmed receipt dates under Section 7.3.
 >
 > **Here are the important constraints.**  
 > - **Customer isolation and boundary:** Every finance API read and write uses the existing trusted frontend-to-backend boundary and opaque session token, scoped strictly to the authenticated customer (`SEC-1`). Foreign identifiers never reveal whether a record exists, and the admin surface (`SEC-5`) never exposes financial data.
 > - **Privacy and logging:** Financial descriptions, amounts, statement contents, user-defined category and tag names, statement preamble metadata, and raw filenames never appear in logs, audit events, or analytics (`SEC-4`), and raw uploaded files are discarded after commit or abandoned review (`SET-6`).
-> - **Immutability and lifecycle:** Source transaction `date`, `description`, and `amount` are immutable both in pre-commit review and after commit; invalid rows in review must be marked to be skipped (`IMP-5`). Post-commit edits may change only `category`, `merchant tags`, and `hidden` state (`TXN-4`). Individual transactions are never deleted (hide and restore only), whereas a committed statement import may be hidden, restored, or permanently deleted with its transactions (`IMP-9`). Hiding and restoring a statement preserves individual transaction hide flags.
+> - **Immutability and lifecycle:** Source transaction `date`, `description`, and `amount` are immutable both in pre-commit review and after commit; invalid rows in review must be marked to be skipped (`IMP-5`). Post-commit transaction edits may change only `category`, `merchant tags`, and `hidden` state (`TXN-4`). A confirmed salary-cycle date is separate reporting metadata, not an edit of its source transaction, and survives source hiding/deletion under Section 7.3. Individual transactions are never deleted (hide and restore only), whereas a committed statement import may be hidden, restored, or permanently deleted with its transactions (`IMP-9`). Hiding and restoring a statement preserves individual transaction hide flags.
 > - **Exact arithmetic and reconciliation:** All monetary values are stored and aggregated as exact ZAR amounts without pre-aggregation rounding. Headline metrics use gross directional flows (`Money in`, `Money out`, and `Net`), excluding `Transfer`, `Excluded`, and `Hidden` transactions. Category breakdowns are mutually exclusive and sum to `Money in` and `Money out`; merchant-tag totals overlap when a transaction carries multiple tags and are never summed to headline totals (`OVR-11`).
 > - **Idempotency and scope boundaries:** Imports are atomic (`IMP-7`) and occurrence-aware idempotent per financial account (`DUP-12`), including hidden transactions unless their parent import was deleted. The MVP excludes OCR for scanned PDFs, multi-currency conversion, balance importing or reconciliation, automatic categorisation or auto-applied merchant tags, split transactions, budgets, financial advice, bank feeds, and whole-customer account deletion.
 >
 > **Here is observable success.**  
-> - **Positive behaviour:** A verified subscriber can create ZAR financial accounts, import the FNB CSV/ZIP and generic mapped CSV structures after confirming ZAR and statement start/end dates (Standard Bank PDF is deferred per the scope amendment), bulk-assign categories and multiple merchant tags across pages (`AC-CAT-2`), and view Overview summary cards, bar-first charts, period comparisons, and coverage warnings that reconcile to the filtered transaction list and drill down with shared filters.
+> - **Positive behaviour:** A verified subscriber can create ZAR financial accounts, import the FNB CSV/ZIP and generic mapped CSV structures after confirming ZAR and statement start/end dates (Standard Bank PDF is deferred per the scope amendment), bulk-assign categories and multiple merchant tags across pages (`AC-CAT-2`), explicitly confirm salary-cycle starts without editing source transactions, and view Overview summary cards, bar-first charts, period comparisons, and coverage warnings that reconcile to the filtered transaction list and drill down with shared filters in salary-cycle, calendar and custom-date modes.
 > - **Negative and failure behaviour:** Archive uploads with zero or multiple CSVs, nested archives, encrypted archives, path traversal, or oversized payloads, as well as scanned, password-protected, or unrecognized-layout PDFs, are rejected before commit with plain-language reasons and zero persisted records (`AC-IMP-10`, `AC-IMP-15`, `AC-IMP-20`). Invalid rows block commit until marked skipped (`AC-IMP-2`). Overlapping imports and retried commits create zero duplicate transactions (`AC-IMP-21`, `AC-IMP-23`). Stale concurrent edits are rejected without silent overwrite, and deleting a committed import removes only that statement's transactions and restores clean re-import eligibility.
 
 ## 2. Product vision and principles
@@ -242,7 +309,7 @@ There is no screen for overview, transactions, imports, categories, financial ac
 | Categorise and tag | There are no transactions, categories, or merchant tags. | No way to turn raw rows into meaningful insight. | Default categories, inline category and merchant-tag assignment, multi-select, "select all matching," and visible uncategorised and untagged queues. |
 | Understand | There is no overview, chart, or summary. | No answer to "where did my money go?" | Period cards, directional category breakdowns, top merchant tags, a trend, and a comparison with honest coverage notes. |
 | Discover | There is no category, merchant tag, account, or period exploration. | Users cannot move from a total to the transactions behind it. | Drill-down from every visual, plus category and merchant-tag detail views with trend and transactions. |
-| Return | Login and session handling exist, but there is no finance data to return to and no app navigation. | The shell feels like an account page, not a product. | Persistent app navigation, a default period based on the latest data, and preserved filters. |
+| Return | Login and session handling exist, but there is no finance data to return to and no app navigation. | The shell feels like an account page, not a product. | Persistent app navigation, the latest confirmed salary cycle as the default period (or an explicit setup prompt), calendar/custom alternatives, and preserved filters. |
 | Trust | The account system is security-conscious, but there are no financial definitions or reconciliation guarantees. | Users cannot tell what a total includes or how category and merchant totals relate. | A visible metric dictionary, category and tag reconciliation, coverage warnings, exact arithmetic, and consistent empty/error states. |
 
 ### 4.5 Identity, navigation, and terminology gaps
@@ -405,14 +472,14 @@ Two Standard Bank PDF statements were provided: one 4-page statement and one 18-
 
 ### 5.4 Understand
 
-1. The user lands on the overview for the latest period with data, or the current month to date.
+1. The user lands on the overview in salary-cycle mode for the latest confirmed cycle through today. Without a confirmed cycle start, the user sees a setup prompt with direct calendar/custom-date alternatives, not an invented period or silent fallback.
 2. They see money in, money out, net, and a prominent uncategorised indicator.
 3. They see where money came from and where it went, plus a trend and a comparison with the previous comparable period. They can switch to the Chart view for bar-first views of categories, merchant tags, and period comparisons.
-4. They select a different period or account and the cards, charts, and coverage notes update together.
+4. They select another confirmed salary cycle, a calendar period, custom inclusive dates, or a different account, and the cards, charts, and coverage notes update together. Account filtering does not redefine the workspace-wide salary-cycle boundaries.
 
 **Success:** the user can describe their financial position for the period without leaving the overview.
 
-**Failure and recovery:** no data in the period produces a clear empty state with a period change or import action, not a wall of zeros. Missing prior-period data produces "No comparison available," not a misleading percentage.
+**Failure and recovery:** no data in the period produces a clear empty state with a period change or import action, not a wall of zeros. Missing prior-period data or insufficient confirmed salary boundaries produces "No comparison available," not a misleading percentage. The customer can explicitly remove or reselect a mistaken cycle start after a warning that affected periods and comparisons will change; the source transaction is unchanged.
 
 ### 5.5 Discover
 
@@ -535,7 +602,7 @@ Category and merchant tag are independent dimensions. A category describes the p
 
 ### 6.6 Financial overview
 
-- **OVR-1:** The overview has a period selector with sensible presets and a custom range. The default is the most recent calendar month with data; if the current month has data, the default is the current month and is labelled "Month to date."
+- **OVR-1:** The overview offers Salary cycle, Calendar and Custom dates. Salary cycle is the default, showing the latest confirmed cycle through today. With no confirmed start, show setup with direct calendar/custom alternatives, never an invented boundary or silent fallback. Calendar presets and custom inclusive start/end dates follow Section 7.3; no rolling N-day or start-plus-duration controls are in this scope.
 - **OVR-2:** The overview shows money in, money out, net, and a prominent needs-categorisation indicator. Money in and money out are gross directional totals excluding transfers and excluded transactions; uncategorised amounts are included but identified.
 - **OVR-3:** The overview shows where money came from and where it went, grouped by category in each direction. Uncategorised is its own row. The two breakdowns reconcile to money in and money out.
 - **OVR-4:** The overview shows money in versus money out over time; this is the product's income-versus-expenditure view. The granularity adapts to the selected range, for example weekly for a single month and monthly for a multi-month range. The granularity is labelled.
@@ -547,7 +614,10 @@ Category and merchant tag are independent dimensions. A category describes the p
 - **OVR-10:** The overview has a distinct empty state for no data at all and a distinct empty state for no data in the selected period.
 - **OVR-11:** The overview shows the largest merchant tags for outflows and, separately, for inflows, with amount, transaction count, and change versus the comparison period. It states that a transaction can have multiple tags, so tag totals overlap.
 - **OVR-12:** The overview shows merchant-tag coverage and the untagged value. Tag views are a secondary lens; category breakdowns remain the additive reconciliation to money in and money out.
-- **OVR-13:** Hidden transactions are excluded from every card, chart, comparison, and coverage denominator. The overview reports the hidden count. If all transactions in the selected period are hidden, it shows the empty state with a restore action rather than zero spending.
+- **OVR-13:** Hidden transactions are excluded from every card, chart, comparison value, and coverage denominator. The overview reports the hidden count. If all transactions in the selected period are hidden, it shows the empty state with a restore action rather than zero spending. Retaining a separately confirmed salary-cycle date after its source is hidden does not include the hidden transaction's amount or count in these metrics.
+- **OVR-14:** The customer can explicitly confirm and manage workspace-wide salary-cycle starts from eligible imported receipts under Section 7.3. These dates define analysis periods independently of account filters, categories and tags; the customer sees the confirmed dates, their retention after source hiding/deletion, and the effect of removing or reselecting a mistaken boundary.
+
+**Selected Overview direction (2026-11-14).** A · Compact dashboard in `docs/prototypes/overview-options.html` (selected Git blob `a6c47bf11a4053b1388a61c3facb5271cf376bbd`) governs the Overview's visual hierarchy and density, using the existing light/dark foundations. It is a static synthetic illustration, not a working feature, exhaustive screen contract, pixel-level mandate or implementation acceptance. Required filters, inflow/outflow breakdowns, accessibility and loading/empty/error/partial states still apply. The broader workspace refresh remains separate Thread #11.
 
 **Chart choices.** Use summary cards for the headline figures; horizontal bars for directional category and merchant-tag breakdowns because labels and amounts remain readable; grouped bars or lines for money in versus money out over time; and a line or bar for category or tag detail. Avoid pie or donut charts with many categories, 3D effects, dual axes, and colour-only encoding. Every chart has a text or table alternative. Tag charts must disclose that a transaction can appear under more than one tag.
 
@@ -557,7 +627,7 @@ Category and merchant tag are independent dimensions. A category describes the p
 - **CHT-2:** Use horizontal bars for category and merchant-tag rankings because the labels stay readable. Use grouped vertical bars for money in versus money out over time. Use bar charts first for category and tag detail trends; line or area charts are optional secondary views, not the default.
 - **CHT-3:** Every chart uses the same period, account, category, merchant-tag, and direction filters as the Overview and transaction list. Changing a filter updates all charts and the summary together.
 - **CHT-4:** Every bar is a drill-down. Selecting a category, tag, or period bar opens the transaction list with the equivalent filters applied.
-- **CHT-5:** Category and tag bars are sorted by amount where ranking applies. Show the top categories or tags plus an Other bucket; show Uncategorised and Untagged explicitly. Every bar shows its label and value.
+- **CHT-5:** Category and tag bars are sorted by amount where ranking applies. List every category individually, with Uncategorised explicit; category rows remain additive. List every merchant tag individually in descending amount order, with Untagged explicit; there is no Other-tags group or summed amount, and each tag retains its own single-tag drill-down. Every actual bar shows its label and value.
 - **CHT-6:** Category bars are additive. Merchant-tag bars overlap when a transaction has multiple tags, and the chart states that tag totals must not be summed. The Chart view never implies that tag bars reconcile to the headline totals.
 - **CHT-7:** Charts have a keyboard-reachable text or table alternative, readable labels, and sufficient contrast in both themes. On narrow screens, bars stack vertically or scroll horizontally without hiding the amount.
 - **CHT-8:** The Chart view has empty, partial-data, and no-comparison states. It does not draw an empty chart or imply that missing statement coverage is zero.
@@ -580,7 +650,7 @@ Category and merchant tag are independent dimensions. A category describes the p
 - **SET-3:** The profile/settings area preserves the existing account details: email, verification status, subscription status, lifetime status, admin link where applicable, theme, and logout.
 - **SET-4:** Individual transactions are never deleted; they are hidden and restored. Committed statement imports can be hidden, restored, or permanently deleted from Imports (removing that statement, its transactions, and its duplicate-protection identity records). There is no whole-customer account-deletion or data-export action in the MVP; account deletion and data export are future. The workspace remains ZAR.
 - **SET-5:** The admin surface does not expose any user's financial data in the MVP. It may continue to show account state only.
-- **SET-6:** The product states whether the original uploaded ZIP/CSV/PDF is retained. The MVP behaviour is to discard the raw file after a successful import or an abandoned review and keep only the parsed transactions and statement metadata.
+- **SET-6:** The product states whether the original uploaded ZIP/CSV/PDF is retained. The MVP behaviour is to discard the raw file after a successful import or an abandoned review and keep the parsed transactions and statement metadata. Separately confirmed salary-cycle dates are small customer reporting metadata retained after source hiding/deletion under Section 7.3; this does not retain the raw file or a deleted transaction payload.
 - **SET-7:** The MVP does not add a pricing page, checkout, or plan management. The existing verified-subscriber gate remains the access model unless a separate product decision changes it.
 
 ### 6.9 Cross-cutting experience
@@ -601,7 +671,7 @@ Category and merchant tag are independent dimensions. A category describes the p
 - **SEC-3:** Uploads are validated for type, size, and content before parsing. Archive uploads reject multiple files, nested archives, encrypted archives, path traversal, and oversized decompression. PDF uploads reject password protection and image-only files in the MVP; no external OCR service is used. Parsed content is never executed. Malformed files produce a safe error, not an internal trace.
 - **SEC-4:** Financial descriptions, amounts, statement contents, user-defined category and merchant-tag names, the FNB preamble's name/account number, Standard Bank PDF account metadata, and raw ZIP/CSV/PDF filenames do not appear in application logs, audit events, or third-party analytics. Operational events may record counts, status, and non-sensitive identifiers.
 - **SEC-5:** The admin surface does not expose financial data. Any future support-access feature requires an explicit, audited product decision.
-- **SEC-6:** Hiding a statement hides its transactions, and restoring it restores any transactions not hidden individually before the statement was hidden; totals recalculate. Deleting a committed statement removes all associated transactions and duplicate-protection identity records with no orphans. Routine transaction management never deletes an individual transaction.
+- **SEC-6:** Hiding a statement hides its transactions, and restoring it restores any transactions not hidden individually before the statement was hidden; totals recalculate. Deleting a committed statement removes all associated transactions and duplicate-protection identity records with no orphans. A separately confirmed salary-cycle date remains reporting metadata under Section 7.3, not an orphan transaction, retained transaction payload or duplicate-protection record. Routine transaction management never deletes an individual transaction.
 - **SEC-7:** Import retries are idempotent. A network failure after a successful commit must not create a second copy on retry.
 - **SEC-8:** Import and expensive read endpoints are rate-limited or otherwise bounded so a single session cannot exhaust the service.
 
@@ -623,6 +693,8 @@ Category and merchant tag are independent dimensions. A category describes the p
 | **Transfer** | Money moving between the user's own accounts. Excluded from money in/out and net. |
 | **Excluded** | A transaction the user has deliberately excluded from all totals. It remains visible in the list. |
 | **Period** | The date range used for analysis. A period is independent of the statement's own date range. |
+| **Salary-cycle start** | A customer-confirmed reporting date selected from an owned, visible, positive imported transaction dated today or earlier. It belongs to the customer's one workspace-wide cycle sequence, independently of the receipt's category, tags and account filters; the confirmed date survives later source hiding/deletion. |
+| **Salary cycle** | A period from a confirmed start date through the day before the next confirmed start, or through today for the latest open cycle. No receipt is detected or projected automatically. |
 
 The conceptual relationships are:
 
@@ -663,22 +735,30 @@ The recommended MVP model uses **gross directional flows** as the headline, with
 
 **Category and merchant tag are different dimensions.** Category rows are mutually exclusive and additive. Merchant-tag rows overlap because a transaction can have several tags. Never sum tag totals to reconcile to money in or money out; tag views reconcile only against the transactions carrying that tag. The UI must state the overlap wherever tag totals appear.
 
-**Hidden transactions are outside every calculation.** They are excluded from money in, money out, net, category and tag totals, coverage, and comparisons. They remain in the data for duplicate prevention and idempotency, and the product reports their count with a restore path.
+**Hidden transactions are outside every financial calculation.** They are excluded from money in, money out, net, category and tag totals, coverage, and comparison values. They remain in the data for duplicate prevention and idempotency, and the product reports their count with a restore path. A separately confirmed salary-cycle date can still define the reporting period after its source is hidden; it is not evidence of included money or statement coverage.
 
 **Balances are ignored in the MVP.** The FNB credit-card sample's `Balance` column is zero for every row, and the cheque sample's running balance is not a trusted transaction value. Do not import, display, or use a balance for money in, money out, net, or coverage. The signed transaction amount is the sole monetary source and is critical. Opening and closing balances are outside the MVP.
 
 ### 7.3 Period and comparison rules
 
-1. Transaction dates are calendar dates. They are not shifted by timezone. A transaction dated 31 October belongs to October regardless of when it was imported.
-2. The default period is the most recent calendar month with at least one included transaction. If the current calendar month has data, the default is the current month, labelled "Month to date."
-3. Presets include the current month to date, the previous month, the last three months, the last six months, and a custom range.
+1. Transaction dates are calendar dates. They are not shifted by timezone. A transaction dated 31 October belongs to October regardless of when it was imported. Africa/Johannesburg determines reporting "today" and the current calendar month; it never shifts an imported transaction date.
+2. Salary cycle is the default period mode, showing the latest confirmed start through today. With no confirmed salary-cycle start, show a setup prompt with direct Calendar and Custom dates alternatives. Do not invent a salary boundary or silently fall back to a calendar period.
+3. Calendar presets include the current month to date, the previous month, the last three months and the last six months. Last three/six months run from the first day two/five months before the current month through today, include the current partial month, and show their exact dates and partial-period label. The Custom dates option accepts inclusive start and end dates only, not rolling N-day or start-plus-duration controls.
 4. A full calendar month compares with the previous calendar month.
-5. A month-to-date period compares with the same day-of-month range in the previous month, labelled "vs same period last month."
+5. A calendar month-to-date period compares with the same day-of-month range in the previous month, capped at that month's last day when shorter. Label it "vs same period last month", show both exact date ranges, and explain when the prior month is shorter.
 6. A multi-month or custom period compares with the immediately preceding period of equal length, ending the day before the selected start. The comparison dates are shown.
-7. If the comparison period has no included transactions, the product shows "No comparison available." It does not show 0%, +100%, or an infinite change.
+7. If a comparison period cannot be defined from the confirmed boundaries, or has no included transactions, the product shows "No comparison available." It does not show 0%, +100%, or an infinite change.
 8. If the comparison period has data but the current period is partial, the comparison is labelled as partial and the date ranges are shown.
 9. If the union of committed, non-hidden statement coverage periods (`start_date` to `end_date`) for the selected account(s) does not cover the full selected period, the overview shows a coverage warning naming the uncovered dates. It does not imply that missing data is zero spending.
 10. Date-range filters are inclusive of the start and end dates.
+11. A customer's workspace has one sequence of explicitly confirmed cycle-start salary receipts. Account, category and tag filters change which transactions are analysed, not the confirmed cycle dates. A Salary-named category is not required; selecting a marker never changes categories, tags or immutable source fields.
+12. A new cycle start must be selected explicitly from an owned, visible, positive imported transaction whose transaction date is today or earlier. Foreign, hidden, zero/negative and future-dated transactions cannot establish a new boundary. The source can have any category. Salary names, category names, description matching and ordinary income payments do not establish boundaries automatically.
+13. A closed salary cycle starts on one confirmed receipt date and ends the day before the next confirmed receipt date. The latest open cycle starts on the latest confirmed receipt date and ends today. There is no fixed monthly payday, month-end/weekend adjustment, future salary projection or automatic close based on an expected payment date.
+14. The customer explicitly retains the confirmed date as separate reporting metadata after the source transaction or statement is hidden or deleted. Source deletion still removes the transaction and duplicate-protection records; hiding still excludes its financial values. Retained cycle dates neither retain the deleted source payload nor count as statement coverage, included income or an imported transaction.
+15. The customer can explicitly unmark or reselect a mistaken cycle start after a warning that affected periods and comparisons will change. This changes reporting metadata only, never the source transaction. With all starts removed, the no-marker setup rule applies again.
+16. A full salary cycle compares with the previous full salary cycle, using each cycle's actual confirmed boundaries rather than forcing equal lengths. Show both exact ranges.
+17. The open salary cycle compares the same number of inclusive elapsed days from the previous confirmed receipt, capped at the previous cycle end. Show both exact ranges and explain when the prior cycle is shorter. Missing earlier boundaries or included comparison data follows rule 7, not an invented comparison.
+18. Multiple eligible receipts on the same immutable calendar date share one workspace-wide confirmed boundary. Selecting another eligible receipt on an already confirmed date reports already confirmed, creates no new boundary, replaces no source and changes no revision or cycle. There is no intraday ordering or zero-length cycle.
 
 ### 7.4 Amount, currency, and date rules
 
@@ -707,7 +787,7 @@ The recommended MVP model uses **gross directional flows** as the headline, with
 23. If a PDF row has no flow amount, treat it as a summary or metadata row and skip it unless it is clearly a transaction with a missing amount, in which case flag it invalid.
 24. Transaction descriptions are unstructured merchant text. Argus may use them for search, explicit aliases and advisory suggestions; tags and categories remain user-assigned and are never recorded as fact until the user explicitly saves them.
 25. Suggested tags and suggested categories are suggestions only. They are never applied automatically. Accepting a tag suggestion writes only that tag; a suggested category is staged and saved only by an explicit category change.
-26. A transaction's date, description, amount, account, and source are strictly read-only both during the pre-commit import review and after commit. Invalid rows in the pre-commit review must be marked to be skipped (or fixed in the source file before re-uploading). After commit, only category, merchant tags, and hidden state can change.
+26. A transaction's date, description, amount, account, and source are strictly read-only both during the pre-commit import review and after commit. Invalid rows in the pre-commit review must be marked to be skipped (or fixed in the source file before re-uploading). After commit, only category, merchant tags, and hidden state can change on the transaction; confirming or correcting a salary-cycle start changes separate reporting metadata under Section 7.3, not these fields.
 
 ### 7.5 Duplicate rules
 
@@ -923,9 +1003,22 @@ These are product-coherence corrections, not finance features:
 - **AC-OVR-1:** Given a selected period and account filter, when the overview is displayed, then money in, money out, net, and the sum of the category breakdowns reconcile to the filtered transaction list within display rounding.
 - **AC-OVR-2:** Given a chart segment or category row, when the user activates it, then the transaction list opens with the same period, account, category, and direction filters, and the list total matches the segment.
 - **AC-OVR-3:** Given a comparison period with no included transactions, when the overview is displayed, then the comparison shows "No comparison available" and no percentage.
-- **AC-OVR-4:** Given a current month with data, when the overview defaults to it, then the heading says "Month to date" and the comparison uses the same day range in the previous month.
+- **AC-OVR-4:** Given Calendar month to date is selected, when its comparison is shown, then the view says "Month to date" and compares the same day-of-month range in the previous month, capped at its month end if shorter, with exact date ranges and a shorter-month explanation.
 - **AC-OVR-5:** Given uncategorised transactions, when the overview is displayed, then the needs-categorisation indicator shows the count and directional amounts, and the category breakdowns show an Uncategorised row.
 - **AC-OVR-6:** Given a selected period that extends beyond the union of committed, non-hidden statement coverage periods (`start_date` to `end_date`) for the selected account(s) or contains an uncovered gap between statements, when the overview is displayed, then a coverage warning names the uncovered dates and does not imply that missing data is zero.
+- **AC-OVR-7:** Given at least one confirmed salary-cycle start, when the default Overview is opened, then it selects Salary cycle for the latest confirmed start through today.
+- **AC-OVR-8:** Given no confirmed salary-cycle start, when the default Overview is opened, then it shows setup with direct calendar/custom alternatives rather than an invented boundary or silent fallback.
+- **AC-OVR-9:** Given a request to confirm a new cycle start, then only an owned, visible, positive imported transaction dated today or earlier is eligible, independently of its category.
+- **AC-OVR-10:** Given a salary-cycle start is confirmed, removed or reselected, then the source transaction's imported fields, category and merchant tags remain unchanged.
+- **AC-OVR-11:** Given successive confirmed salary-cycle start dates, when the earlier full cycle is selected, then its inclusive range ends the day before the next confirmed start.
+- **AC-OVR-12:** Given the latest confirmed salary-cycle start, when its open cycle is selected, then its inclusive range ends today without a projected next payday.
+- **AC-OVR-13:** Given a confirmed cycle date whose source is later hidden or deleted, then that date remains available as reporting metadata without retaining the deleted transaction payload or including hidden financial values.
+- **AC-OVR-14:** Given a mistaken boundary is removed or reselected, then the customer is warned of changed affected periods/comparisons before confirming the correction.
+- **AC-OVR-15:** Given a full salary cycle with a preceding full cycle and included comparison data, then comparison uses the two actual full-cycle date ranges.
+- **AC-OVR-16:** Given an open salary cycle with a preceding confirmed cycle and included comparison data, then comparison uses equal inclusive elapsed days from the prior receipt, capped at that cycle's end, with exact ranges and a shorter-prior-cycle explanation where applicable.
+- **AC-OVR-17:** Given the calendar last-three/six-month preset is selected, then its range starts on the first day two/five months ago and ends today, explicitly including the current partial month.
+- **AC-OVR-18:** Given the reporting date differs between timezones, then today and the current month follow Africa/Johannesburg without shifting any transaction's imported calendar date.
+- **AC-OVR-19:** Given an eligible receipt date is already confirmed, when another eligible receipt on that date is selected, then the result is already confirmed with no new boundary, source replacement, revision change or cycle change.
 
 ### 9.4 Access, isolation, and deletion
 
@@ -933,7 +1026,7 @@ These are product-coherence corrections, not finance features:
 - **AC-SEC-2:** Given no valid session, when a finance screen or finance data request is made, then the user is sent to sign in and the backend rejects the request as unauthorised.
 - **AC-SEC-3:** Given an admin session, when the admin surface is opened, then it shows account state only and no financial data.
 - **AC-SEC-4:** Given a successful or failed import, when logs and audit events are inspected, then they do not contain transaction descriptions, amounts, or file contents.
-- **AC-DEL-1:** Given a statement hide, when it completes, then that statement's transactions are hidden and no transaction is deleted; restoring the statement restores its transactions except those hidden individually before the statement was hidden. Given a committed statement delete, when confirmed, then exactly that statement, its transactions, and its duplicate-protection identity records are removed.
+- **AC-DEL-1:** Given a statement hide, when it completes, then that statement's transactions are hidden and no transaction is deleted; restoring the statement restores its transactions except those hidden individually before the statement was hidden. Given a committed statement delete, when confirmed, then exactly that statement, its transactions, and its duplicate-protection identity records are removed. A previously confirmed salary-cycle date survives separately under Section 7.3 without retaining the deleted source payload.
 - **AC-DEL-2:** Given the MVP, then individual transactions cannot be deleted (hide and restore only), and there is no whole-customer account-deletion or data-export action; whole-account deletion and data export are future.
 
 ### 9.5 Responsive and accessible experience
@@ -941,6 +1034,7 @@ These are product-coherence corrections, not finance features:
 - **AC-UX-1:** Given a 375 px viewport, when the user imports, reviews, categorises, and reads the overview, then the primary controls and amounts are reachable and readable without horizontal page scrolling.
 - **AC-UX-2:** Given keyboard-only operation, when the user reviews an import or bulk-categorises transactions, then selection, assignment, and confirmation are possible without a pointer.
 - **AC-UX-3:** Given a chart, when it is read by a screen reader, then the same information is available as text or a table, and colour is not the only way to distinguish categories.
+- **AC-UX-4:** The Overview follows the operator-selected A · Compact dashboard direction while retaining all required content and the responsive, keyboard, light/dark and accessible-alternative requirements above; omissions in the static illustration do not remove those requirements.
 
 ### 9.6 Chart view
 
@@ -949,6 +1043,7 @@ These are product-coherence corrections, not finance features:
 - **AC-CHT-3:** Given a chart bar, when the user activates it, then the transaction list opens with the matching period, account, category, tag, and direction filters.
 - **AC-CHT-4:** Given merchant-tag bars, when they are displayed, then the view states that tags overlap when a transaction has multiple tags and does not sum tag bars to the headline totals. Category bars remain additive.
 - **AC-CHT-5:** Given keyboard-only use or a narrow viewport, when the user reads the Chart view, then every chart has a text or table alternative and all bar values remain reachable without colour-only encoding.
+- **AC-CHT-6:** Given the merchant-tag breakdown, then every tag with activity appears individually in descending amount order with its own single-tag drill-down, with no Other-tags group, combined Other-tag amount or combined-tag filter.
 
 ### 9.7 Hide and restore
 
@@ -1030,7 +1125,7 @@ These are product-coherence corrections, not finance features:
 | Overview | Net is zero while transactions exist | Show zero and explain that inflows and outflows offset; do not show an empty state. |
 | Overview | Period contains only transfers | Money in/out/net are zero; explain that transfers are excluded and link to the transfers list. |
 | Overview | Period contains only uncategorised transactions | Money in/out show values, coverage is 0%, and the user is prompted to categorise; do not claim category insight. |
-| Chart | Many categories or merchant tags | Show the top N plus an Other bucket; do not use a pie or donut chart to avoid an unreadable legend. |
+| Chart | Many categories or merchant tags | List every category and tag individually in descending amount order; there is no Other grouping or combined amount/filter. Keep Uncategorised and Untagged explicit; do not use a pie or donut chart to avoid an unreadable legend. |
 | Chart | Long category or tag labels | Use horizontal bars, wrapping, or a scrollable list so labels and amounts remain readable. |
 | Chart | No data in the period | Show the chart view's empty state; do not render empty bars. |
 | Chart | Partial statement coverage | Show the coverage warning in the Chart view; do not imply missing data is zero. |
@@ -1142,6 +1237,9 @@ These are initial hypotheses, not commitments. Establish a baseline before setti
 - Individual transactions are never deleted (hide and restore only). Committed statement imports can be hidden, restored (preserving individual transaction hide flags), or permanently deleted (removing that statement, its transactions, and its duplicate-protection identity records so it can be re-imported cleanly). Whole-customer account deletion and data export are future.
 - Merchant tags are user-assigned with advisory suggestions from descriptions, explicit aliases and the customer's own history; suggestions require confirmation and are never auto-applied.
 - The MVP includes a bar-first Chart view over the same data and filters.
+- Salary-cycle reporting is the default. One workspace-wide sequence uses explicitly confirmed eligible salary receipts; calendar/custom inclusive dates remain alternatives. Section 7.3 defines eligibility, retained confirmed dates, explicit correction and full/open-cycle comparisons; no automatic salary detection, fixed payday or N-day custom controls are included.
+- Africa/Johannesburg defines reporting today/current month; calendar last-three/six-month presets include the current partial month, and month-to-date comparison clamps to a shorter previous month.
+- Other merchant tags expands individual remaining tags without a summed amount or combined-tag filter. The Overview follows A · Compact dashboard; Thread #11's wider visual refresh remains separate and nonblocking.
 - Transaction creation is idempotent across overlapping statement imports and retries. Exact overlaps are suppressed by default; occurrence counts preserve legitimate repeats; an explicit override is available.
 - The metric model is gross directional money in, money out, and net, with additive category breakdowns, overlapping merchant-tag views, transfers and excluded separate, and uncategorised and untagged flagged.
 - Duplicate policy: exact overlaps are suppressed, same-date/same-amount near duplicates with similar descriptions are warned, statement repeats are blocked with an explicit override.
@@ -1155,7 +1253,7 @@ These are initial hypotheses, not commitments. Establish a baseline before setti
 | 1 | Is the finance product to be built on this working tree, or is there another branch/instance with finance code? | Build on this tree. No finance module is present or referenced. | The entire scope depends on this premise. |
 | 2 | What are the file and row limits? | Proposed 10 MB and 20,000 data rows per statement, including uncompressed ZIP content. The PDF samples are 4 and 18 pages, with 49 and 297 transactions. Proposed PDF page limit: 200. | Affects UX, performance targets, and abuse controls. |
 | 3 | How are refunds and transfers represented? | Refunds are inflows assigned to categories; transfers use a category kind that is excluded from money in, money out, and net. The credit-card sample uses negative purchases and positive credits; the user decides whether a credit is a payment, refund, or income. | Wrong treatment silently corrupts every total. |
-| 4 | What is the default period and comparison rule? | Latest month with data; current month as month-to-date; prior comparable period; no comparison when prior data is absent. | All comparisons and the first screen depend on it. |
+| 4 | What is the default period and comparison rule? | Operator-selected salary-cycle default under Section 7.3; explicit setup when no marker, with calendar/custom alternatives. Full salary cycles compare prior full cycles; open cycles compare equal elapsed days capped at prior cycle end. No comparison when its boundaries or included data are unavailable. | All comparisons and the first screen depend on it. This replaces the original latest-calendar-month default in the 2026-11-14 amendment. |
 | 5 | Are default categories seeded, and do merchant tags start empty? | Seed categories including Groceries, Home loan, Levies, and School fees; system Uncategorised; tags start empty and are user-created. Kind changes allowed with a warning. | Category and tag behaviour affects every report. |
 | 6 | May admin users see financial data? | No. Admin remains account-state only. | Privacy and isolation are non-negotiable. |
 | 7 | Do we support credit-card sign conventions? | Yes. The FNB credit-card sample uses negative purchases and positive credits; confirm the convention in preview. No separate credit-card accounting model. | Many users' spending is on credit cards. |
@@ -1171,7 +1269,8 @@ These are initial hypotheses, not commitments. Establish a baseline before setti
 - Which user segment is the first target: privacy-conscious manual importers, budgeting-app refugees, or a broader "anyone with a bank account" audience?
 - Are other FNB account types, such as savings or business accounts, needed at launch?
 - Does the first release need a sample/demo dataset, or is a real import the only onboarding path?
-- Is there an existing brand or visual direction beyond the current design tokens?
+- Overview direction is now selected as A · Compact dashboard (2026-11-14); any wider visual direction remains with separate Thread #11.
+- **Resolved 2026-11-14:** The previously open question was whether two eligible receipts on one date share a boundary or whether the second selection is refused/replaces the first. The operator chose one boundary per date; a second eligible receipt reports already confirmed without creating a boundary, replacing a source or changing revision/cycles (Thread #5 Decision `cc0c9109-ac80-4439-bb5e-2dd175384198`; Section 7.3 rule 18). No intraday or zero-length cycle is permitted.
 
 ### 12.6 Readiness for architecture planning
 
@@ -1191,10 +1290,12 @@ Fixed decisions:
 - Occurrence-aware transaction-level idempotency across overlapping imports and retries; exact overlaps suppressed by default, same-date/same-amount near duplicates warned, statement repeats blocked with explicit override.
 - Existing verified-subscriber access gate; admin surface shows account state only and never exposes financial data.
 - Bar-first Chart view tab within Overview with accessible table alternatives.
+- Default salary-cycle reporting from explicitly confirmed workspace-wide receipt dates, calendar/custom alternatives, retained dates and explicit correction under Section 7.3. The same-date receipt question is resolved as one boundary per date with already-confirmed/no-change behaviour; no automatic salary/fixed-payday rules are implied.
+- A · Compact dashboard is the selected Overview direction; the broader refresh remains separate Thread #11. Every category and tag is listed individually, without an Other grouping, summed Other-tag amount or combined-tag filter.
 - Tagline: "See where your money goes".
 - Excluded from MVP: OCR for scanned PDFs, budgets, investments, financial advice, bank feeds, AI chat, split transactions, auto-categorisation, auto-applied merchant tags, combined tag filters, and whole-customer account deletion.
 
-Working defaults for the plan: file and page limits (10 MB, 20,000 rows, 200 PDF pages), refund and transfer representation, default period, default seeded categories and empty initial tags, admin restriction, credit-card sign handling, concurrency warnings on stale metadata edits, the landing-page rewrite, single-tag filter scope, additive/subtractive bulk tag behaviour, and Chart view placement as a tab within Overview. Section 12.4 records each default.
+Working defaults for the plan: file and page limits (10 MB, 20,000 rows, 200 PDF pages), refund and transfer representation, default seeded categories and empty initial tags, admin restriction, credit-card sign handling, concurrency warnings on stale metadata edits, the landing-page rewrite, single-tag filter scope, additive/subtractive bulk tag behaviour, and Chart view placement as a tab within Overview. Section 12.4 records each default; period modes, date ranges/comparisons and the Overview direction are explicit operator decisions under the 2026-11-14 amendment, not unselected planning defaults.
 
 ## 13. Programme structure, documentation, and next step
 
@@ -1214,7 +1315,7 @@ Architecture planning and implementation are divided into four sequential, repos
    - **Scope:** Searchable, filterable, sortable, paginated Transaction List with visible count, hidden count, and filtered total (`MVP-5`, `TXN-1..3`, `TXN-7..9`, `TAG-5`); read-only Transaction Detail with category, multi-tag, advisory tag and category suggestions, and hide/restore controls (`MVP-6`, `TXN-4`, `TAG-2..3`, `TAG-8`); page-level and filter-wide (`select all matching`) bulk category assignment, non-destructive bulk tag add/remove, and bulk hide/restore with stale-edit concurrency protection and an auto-dismissed Applied status (`MVP-8`, `MVP-24` transaction scope, `TXN-5..6`, `TXN-10..12`, `TAG-4`, `AC-CAT-1..7`, `AC-TAG-1..8`, `AC-HIDE-1..5`).
    - **Dependencies:** Requires Plans 1 and 2.
 4. **Plan 4 — Financial Overview, Bar-First Chart View, and Exploration (`docs/plans/04-overview-and-charts.md`)**
-   - **Scope:** Overview Summary tab (`MVP-9`, `MVP-11`, `OVR-1..13`, `AC-OVR-1..6`) with period presets/custom ranges, gross directional `Money in`, `Money out`, `Net`, `Needs categorisation`, additive category breakdowns, overlapping merchant-tag rankings, prior-period comparisons (`7.3`), statement-period coverage/gap warnings (`OVR-7`), and metric dictionary disclosure; Overview Chart tab (`MVP-23`, `CHT-1..8`, `AC-CHT-1..5`) with bar-first horizontal and grouped vertical charts and accessible table alternatives; drill-down from every visual plus Category Detail (`MVP-15`), Merchant-Tag Detail (`MVP-22`, `TAG-6`), and Period Comparison (`MVP-16`) views (`MVP-10`, `EXP-1..8`).
+   - **Scope:** Overview Summary tab (`MVP-9`, `MVP-11`, `OVR-1..14`, `AC-OVR-1..19`) with default receipt-defined salary cycles, eligible start confirmation/retention/correction, calendar presets/custom inclusive dates, gross directional `Money in`, `Money out`, `Net`, `Needs categorisation`, additive category breakdowns, overlapping merchant-tag rankings with individual Other-tag expansion, prior-period comparisons (`7.3`), statement-period coverage/gap warnings (`OVR-7`), and metric dictionary disclosure; Overview Chart tab (`MVP-23`, `CHT-1..8`, `AC-CHT-1..6`) with bar-first horizontal and grouped vertical charts and accessible table alternatives; drill-down from every visual plus Category Detail (`MVP-15`), Merchant-Tag Detail (`MVP-22`, `TAG-6`), and Period Comparison (`MVP-16`) views (`MVP-10`, `EXP-1..8`). A · Compact dashboard guides the Overview presentation (`AC-UX-4`), not the separate Thread #11 workspace refresh.
    - **Dependencies:** Requires Plans 1, 2, and 3.
 
 **Programme completion condition:** All four plans are implemented and verified against the backend battery (`dotnet format`, `dotnet test`, `dotnet build -c Release`) and frontend battery (`npm run lint`, `npm run test`, `npm run build`, `npm run test:e2e`) with customer isolation and reconciliation invariants holding across all views.

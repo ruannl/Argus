@@ -23,6 +23,8 @@ public sealed class PersistenceBoundaryTests
             "Data/SuggestionLoader.cs",
             "Data/StatementImportStore.cs",
             "Data/TransactionStore.cs",
+            "Data/SalaryCycleStore.cs",
+            "Data/ReportStore.cs",
             "Transactions/TransactionQuery.cs",
             "Seed.cs",
         ];

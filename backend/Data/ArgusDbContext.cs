@@ -26,6 +26,8 @@ public sealed class ArgusDbContext(DbContextOptions<ArgusDbContext> options) : D
     public DbSet<ImportCommitReceipt> ImportCommitReceipts => Set<ImportCommitReceipt>();
     public DbSet<TransactionOperation> TransactionOperations => Set<TransactionOperation>();
     public DbSet<TransactionOperationItem> TransactionOperationItems => Set<TransactionOperationItem>();
+    public DbSet<SalaryCycleState> SalaryCycleStates => Set<SalaryCycleState>();
+    public DbSet<SalaryCycleStart> SalaryCycleStarts => Set<SalaryCycleStart>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {

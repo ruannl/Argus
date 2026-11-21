@@ -5,17 +5,19 @@ import { useRouter } from "next/navigation";
 type AccountReadUnavailableProps = {
   kind: "rate_limited" | "unavailable";
   view: "list" | "detail";
+  title?: string;
 };
 
 /** Route-local retry without inventing account authority or clearing a session. */
-export default function AccountReadUnavailable({ kind, view }: AccountReadUnavailableProps) {
+export default function AccountReadUnavailable({ kind, view, title }: AccountReadUnavailableProps) {
   const router = useRouter();
 
   return (
     <main className="min-h-screen px-5 py-8 sm:px-8 lg:px-12">
       <section className="mx-auto max-w-3xl rounded-[2rem] border border-warning-line bg-warning-soft p-6 sm:p-10">
         <h1 className="text-2xl font-semibold text-warning-ink">
-          {view === "list" ? "Transactions unavailable" : "Transaction detail unavailable"}
+          {title ??
+            (view === "list" ? "Transactions unavailable" : "Transaction detail unavailable")}
         </h1>
         <p className="mt-3 text-sm leading-6 text-warning-ink" role="alert">
           {kind === "rate_limited"

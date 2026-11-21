@@ -77,7 +77,7 @@ public sealed class TransactionFaultTests
             "transaction_operation_items, transaction_operations, " +
             "transaction_merchant_tags, transactions, statement_imports, merchant_tags, " +
             "categories, financial_accounts, customers, sessions, email_verification_tokens, " +
-            "password_reset_tokens CASCADE";
+            "password_reset_tokens, salary_cycle_starts, salary_cycle_state CASCADE";
         await command.ExecuteNonQueryAsync();
         factory.Mailer.Clear();
     }

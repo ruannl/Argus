@@ -389,7 +389,13 @@ public sealed class StatementImportStore
             payloadBytes,
             now,
             now);
-        var page = new ImportReviewPage(rows.Take(ImportLimits.MaxPageSize).ToArray(), rows.Length, 1, ImportLimits.MaxPageSize);
+        ImportReviewRowRecord[] ordered = rows
+            .OrderBy(row => row.TransactionDate is null ? 1 : 0)
+            .ThenBy(row => row.TransactionDate)
+            .ThenBy(row => row.SourceRowNumber)
+            .ThenBy(row => row.RowId)
+            .ToArray();
+        var page = new ImportReviewPage(ordered.Take(ImportLimits.DefaultPageSize).ToArray(), ordered.Length, 1, ImportLimits.DefaultPageSize);
 
         return new ImportReviewDetail(summary, page);
     }
@@ -436,6 +442,8 @@ public sealed class StatementImportStore
                                                          string sortDirection = "asc",
                                                          bool possibleDuplicatesOnly = false,
                                                          bool untaggedOnly = false,
+                                                         bool repeatsInFileOnly = false,
+                                                         bool excludePossibleDuplicates = false,
                                                          CancellationToken cancellationToken = default)
     {
         Guid customerId = authority.CustomerId;
@@ -459,8 +467,8 @@ public sealed class StatementImportStore
         }
 
         bool descending = string.Equals(sortDirection, "desc", StringComparison.OrdinalIgnoreCase);
-        var rows = await ReadReviewRowsAsync(context, reviewId, page, pageSize, descending, possibleDuplicatesOnly, untaggedOnly, cancellationToken);
-        int total = await CountReviewRowsAsync(context, reviewId, possibleDuplicatesOnly, untaggedOnly, cancellationToken);
+        var rows = await ReadReviewRowsAsync(context, reviewId, page, pageSize, descending, possibleDuplicatesOnly, untaggedOnly, repeatsInFileOnly, excludePossibleDuplicates, cancellationToken);
+        int total = await CountReviewRowsAsync(context, reviewId, possibleDuplicatesOnly, untaggedOnly, repeatsInFileOnly, excludePossibleDuplicates, cancellationToken);
         await scope.CommitAsync(cancellationToken);
 
         return new ImportReviewDetail(summary, new ImportReviewPage(rows, total, page, pageSize));
@@ -500,7 +508,7 @@ public sealed class StatementImportStore
         }
         EnsureEditable(summary, expectedVersion);
 
-        var rows = (await ReadReviewRowsAsync(context, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, cancellationToken)).ToList();
+        var rows = (await ReadReviewRowsAsync(context, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, repeatsInFileOnly: false, excludePossibleDuplicates: false, cancellationToken)).ToList();
         var byId = rows.ToDictionary(row => row.RowId);
         foreach (var decision in decisions)
         {
@@ -711,7 +719,7 @@ public sealed class StatementImportStore
         }
         EnsureEditable(summary, expectedVersion);
 
-        var existingRows = await ReadReviewRowsAsync(context, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, cancellationToken);
+        var existingRows = await ReadReviewRowsAsync(context, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, repeatsInFileOnly: false, excludePossibleDuplicates: false, cancellationToken);
         var decisionMap = existingRows.ToDictionary(row => row.RowId, row => new RowDecision(row.Skip, row.Override));
         var parsedRows = existingRows.Select(ToParsedRow).ToArray();
         var snapshot = await ComputeDuplicateSnapshotAsync(context, customerId, accountId.Value, parsedRows, decisionMap, cancellationToken);
@@ -1531,6 +1539,8 @@ public sealed class StatementImportStore
                                                                                         bool descending,
                                                                                         bool possibleDuplicatesOnly,
                                                                                         bool untaggedOnly,
+                                                                                        bool repeatsInFileOnly,
+                                                                                        bool excludePossibleDuplicates,
                                                                                         CancellationToken cancellationToken)
     {
         string orderBy = descending
@@ -1572,14 +1582,21 @@ public sealed class StatementImportStore
                     AND (near_candidate_total > 0 OR duplicate_reasons @> '["stable_id_changed"]'::jsonb)
                   ))
               AND ({2} = FALSE OR jsonb_array_length(selected_tag_ids) = 0)
+              AND ({3} = FALSE OR within_file_group IS NOT NULL)
+              AND ({4} = FALSE OR NOT (
+                    skip = FALSE
+                    AND (near_candidate_total > 0 OR duplicate_reasons @> '["stable_id_changed"]'::jsonb)
+                  ))
             ORDER BY
             """;
-        string sql = string.Concat(rowSql, "\n", orderBy, "\nLIMIT {3} OFFSET {4}");
+        string sql = string.Concat(rowSql, "\n", orderBy, "\nLIMIT {5} OFFSET {6}");
         List<ReviewRowText> rows = await context.Database.SqlQueryRaw<ReviewRowText>(
             sql,
             reviewId,
             possibleDuplicatesOnly,
             untaggedOnly,
+            repeatsInFileOnly,
+            excludePossibleDuplicates,
             pageSize == int.MaxValue ? 100_000 : pageSize,
             pageSize == int.MaxValue ? 0 : (page - 1) * pageSize).ToListAsync(cancellationToken);
 
@@ -1621,6 +1638,8 @@ public sealed class StatementImportStore
                                                         Guid reviewId,
                                                         bool possibleDuplicatesOnly,
                                                         bool untaggedOnly,
+                                                        bool repeatsInFileOnly,
+                                                        bool excludePossibleDuplicates,
                                                         CancellationToken cancellationToken)
     {
         long count = await context.Database.SqlQueryRaw<long>("""
@@ -1632,7 +1651,12 @@ public sealed class StatementImportStore
                     AND (near_candidate_total > 0 OR duplicate_reasons @> '["stable_id_changed"]'::jsonb)
                   ))
               AND ({2} = FALSE OR jsonb_array_length(selected_tag_ids) = 0)
-            """, reviewId, possibleDuplicatesOnly, untaggedOnly).SingleAsync(cancellationToken);
+              AND ({3} = FALSE OR within_file_group IS NOT NULL)
+              AND ({4} = FALSE OR NOT (
+                    skip = FALSE
+                    AND (near_candidate_total > 0 OR duplicate_reasons @> '["stable_id_changed"]'::jsonb)
+                  ))
+            """, reviewId, possibleDuplicatesOnly, untaggedOnly, repeatsInFileOnly, excludePossibleDuplicates).SingleAsync(cancellationToken);
 
         return (int)count;
     }
@@ -2284,7 +2308,7 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
 
-        var rows = await ReadReviewRowsAsync(context, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, cancellationToken);
+        var rows = await ReadReviewRowsAsync(context, reviewId, 1, int.MaxValue, descending: false, possibleDuplicatesOnly: false, untaggedOnly: false, repeatsInFileOnly: false, excludePossibleDuplicates: false, cancellationToken);
         if (rows.Any(row => row.ValidationCodes.Length > 0 && !row.Skip))
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRows);

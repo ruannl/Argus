@@ -14,10 +14,17 @@ public static class IsolationSchemaValidator
     private const string RuntimePolicyWithCheck =
         "COALESCE((customer_id = (SELECT argus_current_customer_id() AS argus_current_customer_id)), false)";
 
+    public static Task ValidateAsync(ArgusDbContext context,
+                                     bool requireRuntimeLogin,
+                                     CancellationToken cancellationToken) =>
+        ValidateAsync(context, requireRuntimeLogin, MigrationCatalog.LatestPrefix, cancellationToken);
+
     public static async Task ValidateAsync(ArgusDbContext context,
                                            bool requireRuntimeLogin,
+                                           int contractPrefix,
                                            CancellationToken cancellationToken)
     {
+        IReadOnlyList<string> protectedTables = DatabaseIsolationContract.ProtectedTablesFor(contractPrefix);
         string schema = await RequireCurrentSchemaAsync(context, cancellationToken);
         RoleRow[] roles = await ReadRolesAsync(context, cancellationToken);
         RoleRow owner = RequireRole(roles, DatabaseIsolationContract.OwnerRole);
@@ -68,7 +75,7 @@ public static class IsolationSchemaValidator
         }
 
         RelationRow[] relations = await ReadRelationsAsync(context, cancellationToken);
-        foreach (string table in DatabaseIsolationContract.ProtectedTables)
+        foreach (string table in protectedTables)
         {
             RelationRow relation = relations.SingleOrDefault(item => string.Equals(item.Relation, table, StringComparison.Ordinal))
                 ?? throw new InvalidOperationException($"isolation drift: protected table '{table}' is missing");
@@ -98,7 +105,7 @@ public static class IsolationSchemaValidator
         }
 
         PolicyRow[] policies = await ReadPoliciesAsync(context, cancellationToken);
-        foreach (string table in DatabaseIsolationContract.ProtectedTables)
+        foreach (string table in protectedTables)
         {
             PolicyRow[] tablePolicies = policies.Where(item => string.Equals(item.Table, table, StringComparison.Ordinal)).ToArray();
             Require(tablePolicies.Length == 2, $"isolation drift: '{table}' must have exactly two policies");
@@ -121,7 +128,7 @@ public static class IsolationSchemaValidator
         }
         foreach (PolicyRow policy in policies)
         {
-            Require(DatabaseIsolationContract.ProtectedTables.Contains(policy.Table, StringComparer.Ordinal),
+            Require(protectedTables.Contains(policy.Table, StringComparer.Ordinal),
                 $"isolation drift: unexpected policy '{policy.Policy}' on '{policy.Table}'");
         }
 
@@ -154,7 +161,7 @@ public static class IsolationSchemaValidator
                 $"isolation drift: runtime has a broad grant on control-plane/ledger table '{table}'");
         }
 
-        foreach (string table in DatabaseIsolationContract.ProtectedTables)
+        foreach (string table in protectedTables)
         {
             TablePrivilegeRow privilege = tablePrivileges.Single(item => string.Equals(item.Table, table, StringComparison.Ordinal));
             Require(privilege.Select, $"isolation drift: runtime lacks SELECT on '{table}'");

@@ -17,7 +17,16 @@ public static class RuntimeDatabaseValidator
         {
             throw new InvalidOperationException("database startup refused: canonical backfill is not complete");
         }
+        if (state.EffectivePrefix < MigrationCatalog.LatestPrefix)
+        {
+            throw new InvalidOperationException(
+                $"database startup refused: schema prefix {state.EffectivePrefix} is not the latest supported prefix {MigrationCatalog.LatestPrefix}; run the maintenance migrate first");
+        }
 
-        await IsolationSchemaValidator.ValidateAsync(context, requireRuntimeLogin: true, cancellationToken);
+        await IsolationSchemaValidator.ValidateAsync(
+            context,
+            requireRuntimeLogin: true,
+            contractPrefix: state.EffectivePrefix >= 12 ? 12 : 11,
+            cancellationToken: cancellationToken);
     }
 }

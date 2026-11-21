@@ -2,6 +2,7 @@ using System.Net;
 using argus.Server.Data;
 using argus.Server.Imports;
 using argus.Server.Mail;
+using argus.Server.Reporting;
 using argus.Server.Transactions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -254,24 +255,34 @@ public sealed class KitFactory : WebApplicationFactory<Program>
 
     public CapturingLoggerProvider LogCapture { get; } = new();
 
-    public KitFactory() : this(null, null)
+    public KitFactory() : this(null, null, null)
     {
     }
 
-    internal KitFactory(IImportFaultInjector? faultInjector) : this(faultInjector, null)
+    internal KitFactory(IImportFaultInjector? faultInjector) : this(faultInjector, null, null)
     {
     }
 
     internal KitFactory(IImportFaultInjector? faultInjector, ITransactionFaultInjector? transactionFaultInjector)
+        : this(faultInjector, transactionFaultInjector, null)
+    {
+    }
+
+    internal KitFactory(IImportFaultInjector? faultInjector,
+                        ITransactionFaultInjector? transactionFaultInjector,
+                        IReportFaultInjector? reportFaultInjector)
     {
         FaultInjector = faultInjector;
         TransactionFaultInjector = transactionFaultInjector;
+        ReportFaultInjector = reportFaultInjector;
         TestEnvironment.Configure();
     }
 
     public IImportFaultInjector? FaultInjector { get; }
 
     public ITransactionFaultInjector? TransactionFaultInjector { get; }
+
+    public IReportFaultInjector? ReportFaultInjector { get; }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -284,6 +295,8 @@ public sealed class KitFactory : WebApplicationFactory<Program>
             services.AddSingleton<IImportFaultInjector>(FaultInjector ?? NoopImportFaultInjector.Instance);
             services.RemoveAll<ITransactionFaultInjector>();
             services.AddSingleton<ITransactionFaultInjector>(TransactionFaultInjector ?? NoopTransactionFaultInjector.Instance);
+            services.RemoveAll<IReportFaultInjector>();
+            services.AddSingleton<IReportFaultInjector>(ReportFaultInjector ?? NoopReportFaultInjector.Instance);
 
             // Background cleanup runs immediately on host start. Sharing one
             // database with parallel resets would let it fight a TRUNCATE, so

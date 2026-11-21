@@ -169,8 +169,25 @@ public static class CustomerIsolationSql
         AppendAliasPreflight(builder);
         AppendAliasForeignKeys(builder);
         AppendFunctions(builder);
-        AppendPolicies(builder);
-        AppendGrants(builder);
+        AppendPolicies(builder, DatabaseIsolationContract.ProtectedTablesPrefix11);
+        AppendGrants(builder, DatabaseIsolationContract.ProtectedTablesPrefix11);
+
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// Adds isolation for the two tables introduced by migration 0012. It is
+    /// separate from <see cref="BuildUpSql"/> so replaying 0011 never refers to
+    /// a table created later.
+    /// </summary>
+    public static string BuildSalaryCycleIsolationSql()
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("-- Anchor every unqualified reference on the controlled application schema.");
+        builder.AppendLine("SELECT set_config('search_path', format('%I, pg_catalog, pg_temp', current_schema()), true);");
+        builder.AppendLine();
+        AppendPolicies(builder, DatabaseIsolationContract.SalaryCycleTables);
+        AppendSalaryCycleGrants(builder);
 
         return builder.ToString();
     }
@@ -412,9 +429,9 @@ public static class CustomerIsolationSql
         builder.AppendLine();
     }
 
-    private static void AppendPolicies(StringBuilder builder)
+    private static void AppendPolicies(StringBuilder builder, IReadOnlyList<string> protectedTables)
     {
-        foreach (string table in DatabaseIsolationContract.ProtectedTables)
+        foreach (string table in protectedTables)
         {
             builder.AppendLine($"""
                 ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
@@ -434,7 +451,7 @@ public static class CustomerIsolationSql
         builder.AppendLine();
     }
 
-    private static void AppendGrants(StringBuilder builder)
+    private static void AppendGrants(StringBuilder builder, IReadOnlyList<string> protectedTables)
     {
         builder.AppendLine($"""
             GRANT SELECT ON TABLE customers TO {DatabaseIsolationContract.RuntimeRole};
@@ -455,7 +472,7 @@ public static class CustomerIsolationSql
             """);
         builder.AppendLine();
 
-        foreach (string table in DatabaseIsolationContract.ProtectedTables)
+        foreach (string table in protectedTables)
         {
             builder.Append($"GRANT SELECT, INSERT ON TABLE {table} TO {DatabaseIsolationContract.RuntimeRole};");
             if (DatabaseIsolationContract.RuntimeDeleteTables.Contains(table, StringComparer.Ordinal))
@@ -469,6 +486,15 @@ public static class CustomerIsolationSql
                 builder.AppendLine($"GRANT UPDATE ({string.Join(", ", columns)}) ON TABLE {table} TO {DatabaseIsolationContract.RuntimeRole};");
             }
         }
+        builder.AppendLine();
+    }
+
+    private static void AppendSalaryCycleGrants(StringBuilder builder)
+    {
+        builder.AppendLine($"GRANT SELECT, INSERT ON TABLE salary_cycle_state TO {DatabaseIsolationContract.RuntimeRole};");
+        builder.AppendLine($"GRANT UPDATE (revision, updated_at) ON TABLE salary_cycle_state TO {DatabaseIsolationContract.RuntimeRole};");
+        builder.AppendLine($"GRANT SELECT, INSERT ON TABLE salary_cycle_starts TO {DatabaseIsolationContract.RuntimeRole};");
+        builder.AppendLine($"GRANT DELETE ON TABLE salary_cycle_starts TO {DatabaseIsolationContract.RuntimeRole};");
         builder.AppendLine();
     }
 }

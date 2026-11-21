@@ -5,6 +5,7 @@ using argus.Server.Configuration;
 using argus.Server.Data;
 using argus.Server.Http;
 using argus.Server.Mail;
+using argus.Server.Reporting;
 using argus.Server.Security;
 using argus.Server.Transactions;
 using Microsoft.EntityFrameworkCore;
@@ -84,6 +85,7 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
     .WithHeaders(Brand.ApplicationSecretHeader, Brand.SessionHeader, Brand.FrontendOriginHeader)));
 
 builder.Services.AddSingleton(settings);
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IInitializationFaultInjector>(NoopInitializationFaultInjector.Instance);
 builder.Services.AddPooledDbContextFactory<ArgusDbContext>(options => PersistenceOptions.Configure(options, PersistenceOptions.BuildConnectionString(settings.DatabaseUrl)));
 builder.Services.AddSingleton<Store>();
@@ -102,6 +104,11 @@ builder.Services.AddSingleton<StatementImportStore>();
 builder.Services.AddSingleton<StatementImportApi>();
 builder.Services.AddSingleton<TransactionStore>();
 builder.Services.AddSingleton<TransactionApi>();
+builder.Services.AddSingleton<SalaryCycleStore>();
+builder.Services.AddSingleton<SalaryCycleApi>();
+builder.Services.AddSingleton<IReportFaultInjector>(NoopReportFaultInjector.Instance);
+builder.Services.AddSingleton<ReportStore>();
+builder.Services.AddSingleton<ReportApi>();
 builder.Services.AddSingleton<ITransactionFaultInjector>(NoopTransactionFaultInjector.Instance);
 builder.Services.AddHostedService<TransactionCleanupService>();
 builder.Services.AddHostedService<ImportCleanupService>();
@@ -119,7 +126,10 @@ app.UseCors();
 
 app.Use(async (context, next) =>
 {
-    if (context.Request.Path.StartsWithSegments("/v1/finance/imports") || context.Request.Path.StartsWithSegments("/v1/finance/transactions"))
+    if (context.Request.Path.StartsWithSegments("/v1/finance/imports") ||
+        context.Request.Path.StartsWithSegments("/v1/finance/transactions") ||
+        context.Request.Path.StartsWithSegments("/v1/finance/reports") ||
+        context.Request.Path.StartsWithSegments("/v1/finance/salary-cycles"))
     {
         context.Response.Headers.CacheControl = "no-store";
     }
@@ -146,6 +156,8 @@ app.Services.GetRequiredService<AccountApi>().Map(app);
 app.Services.GetRequiredService<FinanceApi>().Map(app);
 app.Services.GetRequiredService<StatementImportApi>().Map(app);
 app.Services.GetRequiredService<TransactionApi>().Map(app);
+app.Services.GetRequiredService<SalaryCycleApi>().Map(app);
+app.Services.GetRequiredService<ReportApi>().Map(app);
 
 app.Run();
 return 0;

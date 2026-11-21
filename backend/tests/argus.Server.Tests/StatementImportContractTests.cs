@@ -173,6 +173,26 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         Assert.Equal(expectedDescending, newestFirst);
     }
 
+    [Theory]
+    [InlineData(150, 150, 70)]
+    [InlineData(200, 200, 20)]
+    public async Task ReviewHonoursPageSizesAboveOneHundred(int pageSize, int firstPageCount, int secondPageCount)
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var file = StatementFixtureBuilder.BuildFnbCsv(220, chequeAccount: false).Bytes;
+        var review = await PrepareAsync(session, accountId, file, new DateOnly(2024, 1, 1), new DateOnly(2024, 12, 31));
+        var reviewId = review.GetProperty("summary").GetProperty("id").GetGuid();
+
+        var first = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}?page=1&page_size={pageSize}", session: session)));
+        Assert.Equal(firstPageCount, Rows(first).Length);
+        Assert.Equal(pageSize, first.GetProperty("page").GetProperty("page_size").GetInt32());
+
+        var second = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}?page=2&page_size={pageSize}", session: session)));
+        Assert.Equal(secondPageCount, Rows(second).Length);
+        Assert.Equal(2, second.GetProperty("page").GetProperty("page").GetInt32());
+    }
+
     [Fact]
     public async Task CsvCommitPreservesDisplayWhitespaceAndNormalizesMatching()
     {
@@ -196,15 +216,15 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         const string secondDescription = "Multi\nline   note";
         var firstFile = Encoding.UTF8.GetBytes("Date,Description,Amount\n" + $"2025-01-02,\"{firstDescription}\",-10.00\n" + $"2025-01-03,\"{secondDescription}\",-20.00\n");
         var first = await PrepareAsync(session, accountId, firstFile, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), sourceKind: "generic_csv", parserConfig: config);
-        Assert.Equal(firstDescription, Rows(first)[0].GetProperty("description").GetString());
-        Assert.Equal(secondDescription, Rows(first)[1].GetProperty("description").GetString());
+        Assert.Contains(Rows(first), row => row.GetProperty("description").GetString() == firstDescription);
+        Assert.Contains(Rows(first), row => row.GetProperty("description").GetString() == secondDescription);
 
         var commit = await SendAsync(Post($"{ReviewsPath}/{first.GetProperty("summary").GetProperty("id").GetGuid()}/commit", Json(CommitBody(first)), session: session));
         Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
         var statementId = (await BodyAsync(commit)).GetProperty("statement").GetProperty("id").GetGuid();
         var detailRows = (await BodyAsync(await SendAsync(Get($"{ImportsPath}/{statementId}", session: session)))).GetProperty("rows");
-        Assert.Equal(firstDescription, detailRows[0].GetProperty("description").GetString());
-        Assert.Equal(secondDescription, detailRows[1].GetProperty("description").GetString());
+        Assert.Contains(detailRows.EnumerateArray(), row => row.GetProperty("description").GetString() == firstDescription);
+        Assert.Contains(detailRows.EnumerateArray(), row => row.GetProperty("description").GetString() == secondDescription);
 
         var secondFile = Encoding.UTF8.GetBytes("Date,Description,Amount\n" + "2025-01-02,Cafe Corner note,-10.00\n" + "2025-01-03,Multi line note,-20.00\n");
         var second = await PrepareAsync(session, accountId, secondFile, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), sourceKind: "generic_csv", parserConfig: config);
@@ -698,9 +718,11 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var csv = "one\ntwo\nthree\nfour\nfive\nsix\n" + "Date,Amount,Balance,Description\n" + "2024/01/02,-10.00,0.00,Woolworths groceries\n" + "2024/01/03,-11.00,0.00,WoolworthsX groceries\n";
         var review = await PrepareAsync(session, accountId, System.Text.Encoding.UTF8.GetBytes(csv), new DateOnly(2024, 1, 1), new DateOnly(2024, 1, 31));
         var rows = Rows(review);
-        Assert.Contains(tagId.ToString(), rows[0].GetProperty("suggested_tag_ids").EnumerateArray().Select(value => value.GetString()));
-        Assert.DoesNotContain(tagId.ToString(), rows[1].GetProperty("suggested_tag_ids").EnumerateArray().Select(value => value.GetString()));
-        Assert.Empty(rows[0].GetProperty("selected_tag_ids").EnumerateArray());
+        var suggestedRow = rows.Single(row => row.GetProperty("description").GetString() == "Woolworths groceries");
+        var nonMatchingRow = rows.Single(row => row.GetProperty("description").GetString() == "WoolworthsX groceries");
+        Assert.Contains(tagId.ToString(), suggestedRow.GetProperty("suggested_tag_ids").EnumerateArray().Select(value => value.GetString()));
+        Assert.DoesNotContain(tagId.ToString(), nonMatchingRow.GetProperty("suggested_tag_ids").EnumerateArray().Select(value => value.GetString()));
+        Assert.Empty(suggestedRow.GetProperty("selected_tag_ids").EnumerateArray());
     }
 
     [Fact]
@@ -734,7 +756,7 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var csv = "Date,Description,Amount\n2025-01-02,SERENE APTEEK 410586*5387 02 OCT,-100.00\n";
         var review = await PrepareAsync(session, accountId, System.Text.Encoding.UTF8.GetBytes(csv), new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), sourceKind: "generic_csv", parserConfig: config);
 
-        var suggested = Rows(review)[0].GetProperty("suggested_tag_ids").EnumerateArray().Select(value => value.GetString()).ToArray();
+        var suggested = Rows(review).Single().GetProperty("suggested_tag_ids").EnumerateArray().Select(value => value.GetString()).ToArray();
         Assert.Contains(tagId.ToString(), suggested);
     }
 
@@ -752,9 +774,11 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var second = await PrepareAsync(session, accountId, System.Text.Encoding.UTF8.GetBytes(secondCsv), new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31));
         var rows = Rows(second);
         Assert.Equal(1, second.GetProperty("summary").GetProperty("possible_duplicate_count").GetInt32());
-        Assert.Equal("none", rows[0].GetProperty("duplicate_state").GetString());
-        Assert.NotEmpty(rows[0].GetProperty("near_candidates").EnumerateArray());
-        Assert.Empty(rows[1].GetProperty("near_candidates").EnumerateArray());
+        var nearRow = rows.Single(row => row.GetProperty("description").GetString() == "Coffee shop branch");
+        var otherRow = rows.Single(row => row.GetProperty("description").GetString() == "Coffee shop evening");
+        Assert.Equal("none", nearRow.GetProperty("duplicate_state").GetString());
+        Assert.NotEmpty(nearRow.GetProperty("near_candidates").EnumerateArray());
+        Assert.Empty(otherRow.GetProperty("near_candidates").EnumerateArray());
     }
 
     [Fact]
@@ -770,11 +794,12 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var review = await PrepareAsync(session, accountId, System.Text.Encoding.UTF8.GetBytes(header + "2025/01/02,-10.00,0.00,Tagged row\n2025/01/03,-11.00,0.00,Untagged row\n"), new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31));
         var reviewId = review.GetProperty("summary").GetProperty("id").GetGuid();
         var rows = Rows(review);
+        var taggedRow = rows.Single(row => row.GetProperty("description").GetString() == "Tagged row");
 
         var patch = await SendAsync(Patch($"{ReviewsPath}/{reviewId}", Json(new
         {
             expected_review_version = Version(review),
-            decisions = new[] { new { row_id = rows[0].GetProperty("row_id").GetGuid(), selected_tag_ids = new[] { tagId } } },
+            decisions = new[] { new { row_id = taggedRow.GetProperty("row_id").GetGuid(), selected_tag_ids = new[] { tagId } } },
         }), session: session));
         Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
 
@@ -809,6 +834,10 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         Assert.Equal("Coffee shop branch", filteredRows[0].GetProperty("description").GetString());
         Assert.Equal(1, filtered.GetProperty("page").GetProperty("total").GetInt32());
 
+        var excluded = Rows(await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}?duplicates=exclude", session: session))));
+        Assert.Single(excluded);
+        Assert.Equal("Bookstore", excluded[0].GetProperty("description").GetString());
+
         var all = Rows(await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session))));
         Assert.Equal(2, all.Length);
     }
@@ -823,6 +852,11 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var reviewId = review.GetProperty("summary").GetProperty("id").GetGuid();
         var rows = Rows(review);
         Assert.All(rows, row => Assert.Equal("pending", row.GetProperty("within_file_state").GetString()));
+
+        var repeats = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}?repeats=file", session: session)));
+        Assert.Equal(2, Rows(repeats).Length);
+        Assert.Equal(2, repeats.GetProperty("page").GetProperty("total").GetInt32());
+        Assert.All(Rows(repeats), row => Assert.NotNull(row.GetProperty("within_file_group").GetString()));
 
         var blocked = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
         Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
@@ -912,6 +946,7 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         Assert.Equal(1, second.GetProperty("summary").GetProperty("imported_count").GetInt32());
         Assert.Equal(1, second.GetProperty("summary").GetProperty("suppressed_count").GetInt32());
         var rows = Rows(second);
+        var matchedOccurrence = rows.OrderBy(row => row.GetProperty("source_row_number").GetInt32()).First();
         var reviewId = second.GetProperty("summary").GetProperty("id").GetGuid();
 
         var skipped = await SendAsync(Patch(
@@ -923,7 +958,7 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
                 {
                     new
                     {
-                        row_id = rows[0].GetProperty("row_id").GetGuid(),
+                        row_id = matchedOccurrence.GetProperty("row_id").GetGuid(),
                         skip = true,
                         within_file_state = "skip",
                     },
@@ -938,8 +973,9 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
 
         var reread = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session)));
         var rereadRows = Rows(reread);
-        Assert.Equal("suppressed", rereadRows[1].GetProperty("duplicate_state").GetString());
-        Assert.Equal("none", rereadRows[1].GetProperty("within_file_state").GetString());
+        var pairedRow = rereadRows.OrderBy(row => row.GetProperty("source_row_number").GetInt32()).Last();
+        Assert.Equal("suppressed", pairedRow.GetProperty("duplicate_state").GetString());
+        Assert.Equal("none", pairedRow.GetProperty("within_file_state").GetString());
 
         var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(patched)), session: session));
         Assert.Equal(HttpStatusCode.Created, commit.StatusCode);

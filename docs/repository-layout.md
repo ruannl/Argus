@@ -16,8 +16,11 @@ commands with the working directory inside the relevant tree.
 │   ├── Brand.cs              canonical brand/header/env constants
 │   ├── Configuration/        fail-closed prefixed configuration
 │   ├── Data/                 Npgsql connection, migrations, Store, FinanceStore,
-│   │                         StatementImportStore, TransactionStore, CustomerDbScope,
-│   │                         isolation contract/validators, cleanup services
+│   │                         StatementImportStore, TransactionStore, ReportStore,
+│   │                         SalaryCycleStore, CustomerDbScope, isolation
+│   │                         contract/validators, cleanup services
+│   ├── Reporting/            period/comparison/bucket rules, reporting clock,
+│   │                         report DTOs, limits and fault seam
 │   ├── Transactions/         filter/action/limit contracts, fault seam, shared DTOs
 │   ├── Finance/              merchant-key, alias/history and tag-token suggestion helpers shared with imports
 │   ├── Imports/              bounded FNB/generic CSV parsers, identity/fingerprint
@@ -42,6 +45,8 @@ commands with the working directory inside the relevant tree.
 │   ├── src/app/settings/     Accounts, Categories, Merchant tags, Profile
 │   ├── src/app/imports/      upload/confirm workspace, review pages, statement detail
 │   ├── src/app/transactions/ list/filter/bulk workspace, detail drawer/standalone page
+│   ├── src/app/home/         Overview Summary/Charts, category/tag/untagged detail,
+│   │                         Period Comparison and salary-cycle management
 │   ├── src/components/       app shell, account details, session clearing
 │   ├── src/lib/server/       server-only backend client, finance/import/transaction actions
 │   ├── src/lib/brand.ts      canonical brand constants
@@ -81,59 +86,64 @@ npm run test:e2e
 
 ## HTTP surface
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/health` | Liveness; origin-checked, no secret required |
-| GET | `/v1/me` | Current account from the presented session |
-| POST | `/v1/login` | Password sign-in; returns session token + expiry |
-| POST | `/v1/logout` | Revokes the presented session (idempotent) |
-| POST | `/v1/register` | Non-enumerating account creation |
-| POST | `/v1/verify` | Consumes an email-verification token |
-| POST | `/v1/verification/resend` | Non-enumerating verification resend |
-| POST | `/v1/password/reset/request` | Non-enumerating reset request |
-| POST | `/v1/password/reset` | Consumes a reset token and revokes sessions |
-| POST | `/v1/billing/webhook` | Provider HMAC-signed entitlement events |
-| GET | `/v1/finance/accounts` | List the customer's ZAR financial accounts |
-| POST | `/v1/finance/accounts` | Create a ZAR financial account |
-| PATCH | `/v1/finance/accounts/{id}` | Rename or update an account's institution |
-| POST | `/v1/finance/accounts/{id}/archive` | Archive an account (idempotent) |
-| POST | `/v1/finance/accounts/{id}/restore` | Restore an account (idempotent) |
-| GET | `/v1/finance/categories` | List categories; seeds defaults on first use |
-| POST | `/v1/finance/categories` | Create a custom category |
-| PATCH | `/v1/finance/categories/{id}` | Rename or change kind (confirmation required) |
-| POST | `/v1/finance/categories/{id}/archive` | Archive a category |
-| POST | `/v1/finance/categories/{id}/restore` | Restore a category |
-| DELETE | `/v1/finance/categories/{id}` | Delete a category and reassign to Uncategorised |
-| GET | `/v1/finance/merchant-tags` | List merchant tags |
-| POST | `/v1/finance/merchant-tags` | Create a merchant tag |
-| PATCH | `/v1/finance/merchant-tags/{id}` | Rename a merchant tag |
-| POST | `/v1/finance/merchant-tags/{id}/archive` | Archive a merchant tag |
-| POST | `/v1/finance/merchant-tags/{id}/restore` | Restore a merchant tag |
-| DELETE | `/v1/finance/merchant-tags/{id}` | Delete a tag and remove its assignments |
-| GET | `/v1/finance/merchant-aliases` | List the customer's suggestion aliases |
-| POST | `/v1/finance/merchant-aliases` | Create an alias that maps a description to a tag and optional category |
-| PATCH | `/v1/finance/merchant-aliases/{id}` | Update an alias |
-| DELETE | `/v1/finance/merchant-aliases/{id}` | Delete an alias |
-| POST | `/v1/finance/imports/inspect` | Inspect a statement file; stateless preview/mapping |
-| POST | `/v1/finance/imports/reviews` | Prepare a durable, expiring review |
-| GET | `/v1/finance/imports/reviews` | List the customer's open reviews |
-| GET | `/v1/finance/imports/reviews/{id}` | Read a paged review with decisions |
-| PATCH | `/v1/finance/imports/reviews/{id}` | Update skip, override, group, tag, or category decisions |
-| POST | `/v1/finance/imports/reviews/{id}/refresh` | Recompute duplicate state under the account lock |
-| POST | `/v1/finance/imports/reviews/{id}/commit` | Atomically commit or replay the same receipt |
-| POST | `/v1/finance/imports/reviews/{id}/abandon` | Purge a review without importing |
-| GET | `/v1/finance/imports` | Committed-only history, filterable and cursor-paged |
-| GET | `/v1/finance/imports/{id}` | Statement summary and paged owned rows |
-| POST | `/v1/finance/imports/{id}/hide` | Hide the parent statement layer |
-| POST | `/v1/finance/imports/{id}/restore` | Restore the parent statement layer |
-| DELETE | `/v1/finance/imports/{id}` | Delete the statement and exactly its owned transactions |
-| POST | `/v1/finance/transactions/query` | Owned list with filters, counts and pagination |
-| GET | `/v1/finance/transactions/{id}` | Owned detail with unapplied tag and category suggestions and category provenance |
-| PATCH | `/v1/finance/transactions/{id}` | Versioned category/tag/hide/confirm-category metadata edit |
-| POST | `/v1/finance/transactions/operations/prepare` | Freeze an explicit or all-matching bulk scope |
-| GET | `/v1/finance/transactions/operations/{id}` | Safe operation status and receipt recovery |
-| POST | `/v1/finance/transactions/operations/{id}/apply` | Apply a saved scope atomically once |
-| POST | `/v1/finance/transactions/operations/{id}/abandon` | Abandon a prepared operation |
+| Method | Path                                               | Purpose                                                                          |
+| ------ | -------------------------------------------------- | -------------------------------------------------------------------------------- |
+| GET    | `/health`                                          | Liveness; origin-checked, no secret required                                     |
+| GET    | `/v1/me`                                           | Current account from the presented session                                       |
+| POST   | `/v1/login`                                        | Password sign-in; returns session token + expiry                                 |
+| POST   | `/v1/logout`                                       | Revokes the presented session (idempotent)                                       |
+| POST   | `/v1/register`                                     | Non-enumerating account creation                                                 |
+| POST   | `/v1/verify`                                       | Consumes an email-verification token                                             |
+| POST   | `/v1/verification/resend`                          | Non-enumerating verification resend                                              |
+| POST   | `/v1/password/reset/request`                       | Non-enumerating reset request                                                    |
+| POST   | `/v1/password/reset`                               | Consumes a reset token and revokes sessions                                      |
+| POST   | `/v1/billing/webhook`                              | Provider HMAC-signed entitlement events                                          |
+| GET    | `/v1/finance/accounts`                             | List the customer's ZAR financial accounts                                       |
+| POST   | `/v1/finance/accounts`                             | Create a ZAR financial account                                                   |
+| PATCH  | `/v1/finance/accounts/{id}`                        | Rename or update an account's institution                                        |
+| POST   | `/v1/finance/accounts/{id}/archive`                | Archive an account (idempotent)                                                  |
+| POST   | `/v1/finance/accounts/{id}/restore`                | Restore an account (idempotent)                                                  |
+| GET    | `/v1/finance/categories`                           | List categories; seeds defaults on first use                                     |
+| POST   | `/v1/finance/categories`                           | Create a custom category                                                         |
+| PATCH  | `/v1/finance/categories/{id}`                      | Rename or change kind (confirmation required)                                    |
+| POST   | `/v1/finance/categories/{id}/archive`              | Archive a category                                                               |
+| POST   | `/v1/finance/categories/{id}/restore`              | Restore a category                                                               |
+| DELETE | `/v1/finance/categories/{id}`                      | Delete a category and reassign to Uncategorised                                  |
+| GET    | `/v1/finance/merchant-tags`                        | List merchant tags                                                               |
+| POST   | `/v1/finance/merchant-tags`                        | Create a merchant tag                                                            |
+| PATCH  | `/v1/finance/merchant-tags/{id}`                   | Rename a merchant tag                                                            |
+| POST   | `/v1/finance/merchant-tags/{id}/archive`           | Archive a merchant tag                                                           |
+| POST   | `/v1/finance/merchant-tags/{id}/restore`           | Restore a merchant tag                                                           |
+| DELETE | `/v1/finance/merchant-tags/{id}`                   | Delete a tag and remove its assignments                                          |
+| GET    | `/v1/finance/merchant-aliases`                     | List the customer's suggestion aliases                                           |
+| POST   | `/v1/finance/merchant-aliases`                     | Create an alias that maps a description to a tag and optional category           |
+| PATCH  | `/v1/finance/merchant-aliases/{id}`                | Update an alias                                                                  |
+| DELETE | `/v1/finance/merchant-aliases/{id}`                | Delete an alias                                                                  |
+| POST   | `/v1/finance/imports/inspect`                      | Inspect a statement file; stateless preview/mapping                              |
+| POST   | `/v1/finance/imports/reviews`                      | Prepare a durable, expiring review                                               |
+| GET    | `/v1/finance/imports/reviews`                      | List the customer's open reviews                                                 |
+| GET    | `/v1/finance/imports/reviews/{id}`                 | Read a paged review with decisions                                               |
+| PATCH  | `/v1/finance/imports/reviews/{id}`                 | Update skip, override, group, tag, or category decisions                         |
+| POST   | `/v1/finance/imports/reviews/{id}/refresh`         | Recompute duplicate state under the account lock                                 |
+| POST   | `/v1/finance/imports/reviews/{id}/commit`          | Atomically commit or replay the same receipt                                     |
+| POST   | `/v1/finance/imports/reviews/{id}/abandon`         | Purge a review without importing                                                 |
+| GET    | `/v1/finance/imports`                              | Committed-only history, filterable and cursor-paged                              |
+| GET    | `/v1/finance/imports/{id}`                         | Statement summary and paged owned rows                                           |
+| POST   | `/v1/finance/imports/{id}/hide`                    | Hide the parent statement layer                                                  |
+| POST   | `/v1/finance/imports/{id}/restore`                 | Restore the parent statement layer                                               |
+| DELETE | `/v1/finance/imports/{id}`                         | Delete the statement and exactly its owned transactions                          |
+| POST   | `/v1/finance/transactions/query`                   | Owned list with filters, counts and pagination                                   |
+| GET    | `/v1/finance/transactions/{id}`                    | Owned detail with unapplied tag and category suggestions and category provenance |
+| PATCH  | `/v1/finance/transactions/{id}`                    | Versioned category/tag/hide/confirm-category metadata edit                       |
+| POST   | `/v1/finance/transactions/operations/prepare`      | Freeze an explicit or all-matching bulk scope                                    |
+| GET    | `/v1/finance/transactions/operations/{id}`         | Safe operation status and receipt recovery                                       |
+| POST   | `/v1/finance/transactions/operations/{id}/apply`   | Apply a saved scope atomically once                                              |
+| POST   | `/v1/finance/transactions/operations/{id}/abandon` | Abandon a prepared operation                                                     |
+| POST   | `/v1/finance/reports/query`                        | One repeatable-read Overview/detail report snapshot                              |
+| GET    | `/v1/finance/salary-cycles`                        | Confirmed salary-cycle dates and sequence revision                               |
+| POST   | `/v1/finance/salary-cycles/preview`                | Confirm/remove impact preview; no write                                          |
+| POST   | `/v1/finance/salary-cycles`                        | Confirm an eligible receipt date                                                 |
+| DELETE | `/v1/finance/salary-cycles/{id}`                   | Remove one confirmed boundary                                                    |
 
 Account routes require the trusted-frontend application-secret header and
 independently validate the acting user's session. Error bodies are
@@ -162,6 +172,12 @@ carry nonsensitive ids, enums, dates and page choices. Bulk scope is frozen in
 PostgreSQL operation manifests; apply, abandon, expiry and receipts are
 recoverable after reload or restart. See
 `docs/transaction-workspace-runbook.md`.
+
+Reporting reuses the same authority chain and returns one repeatable-read
+snapshot per response. Salary-cycle dates are separate customer-owned reporting
+metadata (migration `0012_salary_cycles`), not edits of source transactions;
+they survive source hiding/deletion and are protected by forced RLS and
+least-privilege grants. See `docs/reporting-runbook.md`.
 
 ## CI
 

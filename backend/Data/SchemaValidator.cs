@@ -62,6 +62,8 @@ public static class SchemaValidator
         ["transaction_operations"] = 7,
         ["transaction_operation_items"] = 7,
         ["merchant_aliases"] = 8,
+        ["salary_cycle_state"] = 12,
+        ["salary_cycle_starts"] = 12,
     };
 
     private static readonly Dictionary<string, int> _columnPrefixes = new(StringComparer.Ordinal)
@@ -207,9 +209,16 @@ public static class SchemaValidator
         }
 
         await ValidateSchemaAsync(context, effectivePrefix, requireLedgers, cancellationToken);
-        if (effectivePrefix >= MigrationCatalog.LatestPrefix)
+        if (effectivePrefix >= 11)
         {
-            await IsolationSchemaValidator.ValidateAsync(context, requireRuntimeLogin: false, cancellationToken);
+            // Prefix 11 is the first forced-RLS gate. Validate it with its own
+            // frozen protected-table inventory; only a prefix-12 catalog may
+            // require the salary tables.
+            await IsolationSchemaValidator.ValidateAsync(
+                context,
+                requireRuntimeLogin: false,
+                contractPrefix: effectivePrefix >= 12 ? 12 : 11,
+                cancellationToken: cancellationToken);
         }
 
         return new InitializationState(

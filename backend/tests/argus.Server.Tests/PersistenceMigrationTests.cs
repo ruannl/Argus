@@ -21,7 +21,7 @@ public sealed class PersistenceMigrationTests
             Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
             Assert.Equal(0L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM schema_migrations")));
             Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM data_migrations WHERE name = '0006_canonical_identity_backfill'")));
-            Assert.Equal(20L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'")));
+            Assert.Equal(22L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'")));
         }
         finally
         {
@@ -949,7 +949,7 @@ public sealed class PersistenceMigrationTests
             Assert.Equal((long)MigrationCatalog.EfIds.Count, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(check, "SELECT COUNT(*) FROM \"__EFMigrationsHistory\"")));
             Assert.Equal(0L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(check, "SELECT COUNT(*) FROM schema_migrations")));
             Assert.Equal(1L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(check, "SELECT COUNT(*) FROM data_migrations WHERE name = '0006_canonical_identity_backfill'")));
-            Assert.Equal(20L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(check, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'")));
+            Assert.Equal(22L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(check, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'")));
         }
         finally
         {

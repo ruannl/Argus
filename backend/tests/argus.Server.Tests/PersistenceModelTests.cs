@@ -51,7 +51,7 @@ public sealed class PersistenceModelTests
             await PersistenceTestSupport.RunCoordinatorAsync(schemaUrl);
             await using var connection = await PersistenceTestSupport.OpenSchemaConnectionAsync(schemaUrl);
 
-            Assert.Equal(17L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, """
+            Assert.Equal(19L, Convert.ToInt64(await PersistenceTestSupport.ScalarAsync(connection, """
                 SELECT COUNT(*) FROM information_schema.tables
                 WHERE table_schema = current_schema()
                   AND table_type = 'BASE TABLE'

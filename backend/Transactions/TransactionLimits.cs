@@ -19,6 +19,8 @@ public static class TransactionLimits
 
     public const int MaxTagIdsPerRequest = 100;
 
+    public const int MaxExcludedCategoryIds = 6;
+
     public const int MaxTagsPerTransaction = 100;
 
     public const int MaxOpenOperations = 5;

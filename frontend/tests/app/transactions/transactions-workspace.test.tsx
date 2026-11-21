@@ -102,6 +102,14 @@ const pageData: TransactionPage = {
   page_size: 25,
   sort_by: "date",
   sort_direction: "desc",
+  money_totals: {
+    money_in: "0.00",
+    money_out: "0.00",
+    net: "0.00",
+    included_count: 0,
+    transfers: { count: 0, money_in: "0.00", money_out: "0.00", absolute: "0.00" },
+    excluded: { count: 0, money_in: "0.00", money_out: "0.00", absolute: "0.00" },
+  },
 };
 
 const prepared: TransactionOperation = {
@@ -299,12 +307,12 @@ describe("transactions workspace", () => {
     expect(screen.getByText("Uncategorised (Uncategorised)")).toHaveClass("border-warning-line");
   });
 
-  it("marks unconfirmed suggested categories and filters to them", async () => {
+  it("marks unconfirmed categories and filters to them", async () => {
     const user = userEvent.setup();
     const unconfirmed = { ...row, category_confirmed: false };
     renderWorkspace({ initialPage: { ...pageData, transactions: [unconfirmed] } });
 
-    expect(screen.getByText("Suggested")).toBeInTheDocument();
+    expect(screen.getByText("Unconfirmed")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Suggested or unconfirmed" }));
 
     await waitFor(() => {
@@ -783,6 +791,36 @@ describe("transactions workspace", () => {
     expect(screen.getByRole("button", { name: "Abandon and prepare again" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Apply change" })).not.toBeInTheDocument();
     expect(applyOperationAction).not.toHaveBeenCalled();
+  });
+
+  it("labels an unconfirmed category and confirms it from the inline editor", async () => {
+    const user = userEvent.setup();
+    const unconfirmed = { ...row, category_confirmed: false };
+    vi.mocked(saveTransactionAction).mockResolvedValue({
+      ok: true,
+      value: {
+        transaction: { ...unconfirmed, category_confirmed: true, version: 2 },
+        selected_count: 1,
+        changed_count: 1,
+        unchanged_count: 0,
+      },
+    });
+    renderWorkspace({
+      initialPage: { ...pageData, transactions: [unconfirmed] },
+    });
+
+    expect(screen.getByText("Unconfirmed")).toBeInTheDocument();
+    expect(screen.queryByText("Suggested")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit inline" }));
+    await user.click(screen.getByRole("button", { name: "Confirm category" }));
+
+    expect(saveTransactionAction).toHaveBeenCalledWith({
+      id: "txn-1",
+      expected_version: 1,
+      changes: { confirm_category: true },
+    });
+    expect(await screen.findByText("Category confirmed.")).toBeInTheDocument();
   });
 
   it("saves an inline category change with the displayed version", async () => {

@@ -423,7 +423,7 @@ All routes use `/v1/finance`, snake_case JSON, the existing trusted-caller and v
 | `POST /imports/inspect` | Multipart options: owned `financial_account_id`, `source_kind`, optional proposed `parser_config`/dates | `200` detected format, limits, sanitized preview, mapping choices/proposed period and required confirmations; no persistence. |
 | `POST /imports/reviews` | Multipart options: account, source kind, confirmed parser config, `currency: "ZAR"`, `confirm_zar: true`, `start_date`, `end_date` | `201` review summary/version/expiry and first page of immutable rows. |
 | `GET /imports/reviews` | Bounded pagination | `200` customer's nonexpired open review summaries, separate from history. |
-| `GET /imports/reviews/{id}` | `page`, `page_size <= 100` | `200` review, counts, row decisions, reasons, suggestions, matching owned-import links. |
+| `GET /imports/reviews/{id}` | `page`, `page_size <= 200` | `200` review, counts, row decisions, reasons, suggestions, matching owned-import links. |
 | `PATCH /imports/reviews/{id}` | `expected_review_version`, bounded row/group decisions, optional statement override confirmation | `200` new version, recomputed counts and summary hash. Source/configuration fields are forbidden. |
 | `POST /imports/reviews/{id}/refresh` | Expected review version | `200` refreshed duplicate snapshot, new version/hash, renewed-confirmation flags. |
 | `POST /imports/reviews/{id}/commit` | `expected_review_version`, `confirmed_summary_hash` | `201` statement/summary on first commit; `200` same receipt with `replayed: true` on identical retry. |
@@ -2254,3 +2254,10 @@ Run the full Section 10 backend and frontend battery on the implementation head,
 - **Evidence:** the focused import tests and the full backend and frontend batteries recorded in the Plan 3 revision-5 execution record. Migration coverage includes `0008`-to-`0009` review preservation and `0006`-to-`0010` transaction preservation.
 - **Publication:** PR #12 merged into `main` at `28fede1` on 2026-11-10 after required checks passed. The operator explicitly authorized merging the post-GO PATCH correction without a third review. No deployment occurred.
 - **Limits:** P3-N5 stress evidence remains UNVERIFIED while the 50,000-row test is skipped. No live development-service walkthrough was performed.
+
+## Direct execution record — review pagination and filters (2026-11-21)
+
+- **Authority:** On 2026-11-21 the operator directed that the import-review page-size and filter change stay in the Plan 4 delivery rather than being split out.
+- **Change:** The review and statement-detail reads default to 100 rows and accept `page_size` up to 200. The review list also accepts `duplicates=exclude` (remove possible duplicates) and `repeats=file` (repeated rows in the file only); the review UI offers 25, 50, 100, 150 and 200 rows. The prepared-review first page remains 100 rows, ordered by transaction date. No parser, duplicate-detection, commit, tag, identity, receipt or expiry semantics changed.
+- **Evidence:** The 2026-11-21 full backend and frontend verification is recorded in Plan 4's reconciliation record; focused import contract and review-page tests cover the new bounds and filters.
+- **State:** Included in the Plan 4 checkpoint on branch `plan/04-overview-and-charts`; no separate Plan review is claimed and publication remains unauthorized.
