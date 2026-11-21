@@ -1,6 +1,5 @@
 using argus.Server.Data;
 using argus.Server.Security;
-using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
 namespace argus.Server.Tests;
