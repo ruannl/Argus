@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 
+import { decodeOverviewContext, reportingHref } from "@/lib/reporting-state";
+
 import { auth } from "@/auth";
 import WorkspaceExpired from "@/components/workspace-expired";
 import {
@@ -44,6 +46,9 @@ const ALLOWED_PARAMS = new Set([
   "page",
   "page_size",
   "operation_id",
+  "calculation_scope",
+  "excluded_category_ids",
+  "overview_context",
 ]);
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -52,6 +57,8 @@ type ParsedState = {
   query: TransactionsInitialQuery;
   operationId: string | null;
   error: string | null;
+  overviewHref: string | null;
+  overviewContext: string | null;
 };
 
 function isUuid(value: string): boolean {
@@ -78,12 +85,16 @@ function invalid(): ParsedState {
     operationId: null,
     error:
       "Some transaction filters in the address were invalid. Clear them to load the default view.",
+    overviewHref: null,
+    overviewContext: null,
   };
 }
 
 function parseState(params: SearchParams): ParsedState {
   const filters: TransactionFilters = { visibility: "visible" };
   let operationId: string | null = null;
+  let overviewHref: string | null = null;
+  let overviewContext: string | null = null;
 
   for (const key of Object.keys(params)) {
     if (!ALLOWED_PARAMS.has(key)) {
@@ -92,6 +103,10 @@ function parseState(params: SearchParams): ParsedState {
     if (Array.isArray(params[key])) {
       return invalid();
     }
+  }
+
+  if (params.excluded_category_ids === "") {
+    return invalid();
   }
 
   const value = (key: string): string | undefined => {
@@ -179,6 +194,37 @@ function parseState(params: SearchParams): ParsedState {
     return invalid();
   }
 
+  const calculationScope = value("calculation_scope");
+  if (calculationScope !== undefined) {
+    if (calculationScope !== "included") {
+      return invalid();
+    }
+    filters.calculation_scope = "included";
+  }
+
+  const excludedRaw = value("excluded_category_ids");
+  if (excludedRaw !== undefined) {
+    const parts = excludedRaw.split(",");
+    if (parts.length === 0 || parts.length > 6 || parts.some((part) => !isUuid(part))) {
+      return invalid();
+    }
+    const unique = new Set(parts);
+    if (unique.size !== parts.length) {
+      return invalid();
+    }
+    filters.excluded_category_ids = [...unique].sort();
+  }
+
+  const rawOverviewContext = value("overview_context");
+  if (rawOverviewContext !== undefined) {
+    const decoded = decodeOverviewContext(rawOverviewContext);
+    if (!decoded) {
+      return invalid();
+    }
+    overviewContext = rawOverviewContext;
+    overviewHref = reportingHref(decoded);
+  }
+
   const sortBy = value("sort_by") ?? "date";
   if (!["date", "amount", "description"].includes(sortBy)) {
     return invalid();
@@ -206,6 +252,8 @@ function parseState(params: SearchParams): ParsedState {
     },
     operationId,
     error: null,
+    overviewHref,
+    overviewContext,
   };
 }
 
@@ -316,6 +364,8 @@ export default async function TransactionsPage({
       initialPage={initialPage}
       initialQuery={parsed.query}
       inventoryFailed={inventoryFailed}
+      overviewContext={parsed.overviewContext}
+      overviewHref={parsed.overviewHref}
       tags={tags}
     />
   );

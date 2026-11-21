@@ -12,11 +12,9 @@ import {
 } from "@/lib/server/backend-client";
 import type { ImportErrorKind } from "@/lib/server/backend-client";
 import ReviewWorkspace from "./review-workspace";
+import { DEFAULT_REVIEW_PAGE_SIZE, REVIEW_PAGE_SIZES } from "./review-page-sizes";
 
 export const dynamic = "force-dynamic";
-
-const REVIEW_PAGE_SIZES = [25, 50, 100] as const;
-const DEFAULT_REVIEW_PAGE_SIZE = 50;
 
 function parsePageSize(value: string | undefined): number {
   const parsed = Number.parseInt(value ?? "", 10);
@@ -56,6 +54,7 @@ export default async function ReviewPage({
     page_size?: string;
     sort_direction?: string;
     duplicates?: string;
+    repeats?: string;
     untagged?: string;
   }>;
 }) {
@@ -80,15 +79,28 @@ export default async function ReviewPage({
     page_size: pageSizeParam,
     sort_direction: sortParam,
     duplicates: duplicatesParam,
+    repeats: repeatsParam,
     untagged: untaggedParam,
   } = await searchParams;
   const page = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
   const pageSize = parsePageSize(pageSizeParam);
   const sortDirection = sortParam === "desc" ? "desc" : "asc";
   const possibleOnly = duplicatesParam === "possible";
+  const excludePossible = duplicatesParam === "exclude";
+  const repeatsInFile = repeatsParam === "file";
   const untaggedOnly = untaggedParam === "true";
   const [review, tags, categories] = await Promise.all([
-    getImportReview(token, id, page, pageSize, sortDirection, possibleOnly, untaggedOnly),
+    getImportReview(
+      token,
+      id,
+      page,
+      pageSize,
+      sortDirection,
+      possibleOnly,
+      untaggedOnly,
+      repeatsInFile,
+      excludePossible,
+    ),
     listMerchantTags(token),
     listCategories(token),
   ]);
@@ -116,9 +128,11 @@ export default async function ReviewPage({
       title="Import review"
     >
       <ReviewWorkspace
-        key={`${review.value.summary.version}:${page}:${pageSize}:${sortDirection}:${possibleOnly}:${untaggedOnly}`}
+        key={`${review.value.summary.version}:${page}:${pageSize}:${sortDirection}:${possibleOnly}:${excludePossible}:${repeatsInFile}:${untaggedOnly}`}
         pageSize={pageSize}
         possibleOnly={possibleOnly}
+        excludePossible={excludePossible}
+        repeatsInFile={repeatsInFile}
         review={review.value}
         untaggedOnly={untaggedOnly}
         categories={categories.ok ? categories.value.categories : []}

@@ -32,6 +32,8 @@ import type {
 
 import { sortByDisplayName } from "@/lib/display-order";
 
+import { REVIEW_PAGE_SIZES } from "./review-page-sizes";
+
 type ReviewWorkspaceProps = {
   review: ImportReviewDetail;
   categories: Category[];
@@ -39,6 +41,8 @@ type ReviewWorkspaceProps = {
   tags: MerchantTag[];
   pageSize: number;
   possibleOnly: boolean;
+  excludePossible: boolean;
+  repeatsInFile: boolean;
   untaggedOnly: boolean;
   sortDirection: "asc" | "desc";
 };
@@ -71,12 +75,27 @@ function possibleDuplicate(row: ImportReviewRow): boolean {
   );
 }
 
+function blockingReason(row: ImportReviewRow): string | null {
+  if (row.validation_codes.length > 0 && !row.skip) {
+    return "Invalid row: mark it skipped or fix the source before importing.";
+  }
+  if (row.within_file_state === "pending") {
+    return "Repeated row: choose keep-all, skip-all, or a per-row decision.";
+  }
+  if (row.skip && row.override) {
+    return "A skipped row cannot also be overridden.";
+  }
+  return null;
+}
+
 function reviewHref(
   reviewId: string,
   page: number,
   pageSize: number,
   sortDirection: "asc" | "desc",
   possibleOnly: boolean,
+  excludePossible: boolean,
+  repeatsInFile: boolean,
   untaggedOnly: boolean,
 ): string {
   const params = new URLSearchParams({
@@ -86,6 +105,11 @@ function reviewHref(
   });
   if (possibleOnly) {
     params.set("duplicates", "possible");
+  } else if (excludePossible) {
+    params.set("duplicates", "exclude");
+  }
+  if (repeatsInFile) {
+    params.set("repeats", "file");
   }
   if (untaggedOnly) {
     params.set("untagged", "true");
@@ -100,6 +124,8 @@ export default function ReviewWorkspace({
   tags,
   pageSize,
   possibleOnly,
+  excludePossible,
+  repeatsInFile,
   untaggedOnly,
   sortDirection,
 }: ReviewWorkspaceProps) {
@@ -462,6 +488,8 @@ export default function ReviewWorkspace({
                       pageSize,
                       sortDirection,
                       event.target.checked,
+                      event.target.checked ? false : excludePossible,
+                      repeatsInFile,
                       untaggedOnly,
                     ),
                   )
@@ -469,6 +497,50 @@ export default function ReviewWorkspace({
                 type="checkbox"
               />
               Possible duplicates only ({summary.possible_duplicate_count})
+            </label>
+            <label className="flex items-center gap-2 text-xs font-semibold text-ink">
+              <input
+                checked={excludePossible}
+                disabled={busy}
+                onChange={(event) =>
+                  router.push(
+                    reviewHref(
+                      summary.id,
+                      1,
+                      pageSize,
+                      sortDirection,
+                      event.target.checked ? false : possibleOnly,
+                      event.target.checked,
+                      repeatsInFile,
+                      untaggedOnly,
+                    ),
+                  )
+                }
+                type="checkbox"
+              />
+              Exclude possible duplicates
+            </label>
+            <label className="flex items-center gap-2 text-xs font-semibold text-ink">
+              <input
+                checked={repeatsInFile}
+                disabled={busy}
+                onChange={(event) =>
+                  router.push(
+                    reviewHref(
+                      summary.id,
+                      1,
+                      pageSize,
+                      sortDirection,
+                      possibleOnly,
+                      excludePossible,
+                      event.target.checked,
+                      untaggedOnly,
+                    ),
+                  )
+                }
+                type="checkbox"
+              />
+              Repeats in file only
             </label>
             <label className="flex items-center gap-2 text-xs font-semibold text-ink">
               <input
@@ -482,6 +554,8 @@ export default function ReviewWorkspace({
                       pageSize,
                       sortDirection,
                       possibleOnly,
+                      excludePossible,
+                      repeatsInFile,
                       event.target.checked,
                     ),
                   )
@@ -541,7 +615,8 @@ export default function ReviewWorkspace({
                   </td>
                 </tr>
               ) : null}
-              {rows.map((row) => {
+              {rows.map((row, index) => {
+                const rowNumber = (review.page.page - 1) * review.page.page_size + index + 1;
                 const suggestions = row.suggested_tag_ids
                   .filter((id) => !row.selected_tag_ids.includes(id))
                   .map((id) => tagsById.get(id))
@@ -558,12 +633,17 @@ export default function ReviewWorkspace({
                   !categoriesUnavailable && row.selected_category_id !== null && !selectedCategory;
                 const isExpanded = expandedRowId === row.row_id;
                 const detailId = `review-row-detail-${row.row_id}`;
+                const blocking = blockingReason(row);
 
                 return (
                   <Fragment key={row.row_id}>
-                    <tr className={TABLE_ROW_CLASS}>
+                    <tr
+                      className={
+                        blocking ? `${TABLE_ROW_CLASS} bg-warning-soft/40` : TABLE_ROW_CLASS
+                      }
+                    >
                       <td className={TD_CLASS}>
-                        <p className="font-semibold text-ink">Row {row.source_row_number}</p>
+                        <p className="font-semibold text-ink">Row {rowNumber}</p>
                         <p className="mt-0.5 text-xs text-muted">
                           {row.source_page !== null ? `Page ${row.source_page} · ` : ""}Line{" "}
                           {row.source_line}
@@ -614,7 +694,7 @@ export default function ReviewWorkspace({
                             ) : null}
                           </div>
                           <select
-                            aria-label={`Category for row ${row.source_row_number}`}
+                            aria-label={`Category for row ${rowNumber}`}
                             className="w-full rounded-lg border border-line bg-page px-2 py-1.5 text-xs font-normal text-ink"
                             disabled={busy || categoriesUnavailable}
                             onChange={(event) => {
@@ -670,6 +750,14 @@ export default function ReviewWorkspace({
                       </td>
                       <td className={TD_CLASS}>
                         <div className="flex flex-wrap gap-1.5 text-xs">
+                          {blocking ? (
+                            <span
+                              className={`${STATUS_PILL_CLASS} border border-warning-line bg-warning-soft font-bold text-warning-ink`}
+                              title={blocking}
+                            >
+                              Blocks import
+                            </span>
+                          ) : null}
                           {row.skip ? (
                             <span className={`${STATUS_PILL_CLASS} bg-elevated text-muted`}>
                               Skipped
@@ -823,7 +911,7 @@ export default function ReviewWorkspace({
                           <label className="grid min-w-0 gap-1 text-xs font-semibold text-ink">
                             New tag
                             <input
-                              aria-label={`New tag name for row ${row.source_row_number}`}
+                              aria-label={`New tag name for row ${rowNumber}`}
                               className="rounded-lg border border-line bg-page px-2 py-1.5 text-sm font-normal text-ink"
                               disabled={busy}
                               name="display_name"
@@ -832,7 +920,7 @@ export default function ReviewWorkspace({
                             />
                           </label>
                           <button
-                            aria-label={`Create and add a tag for row ${row.source_row_number}`}
+                            aria-label={`Create and add a tag for row ${rowNumber}`}
                             className="w-fit rounded-full border border-line px-3 py-1.5 text-xs font-bold text-ink disabled:opacity-60"
                             disabled={busy}
                             type="submit"
@@ -845,7 +933,7 @@ export default function ReviewWorkspace({
                         <div className="flex flex-col items-end gap-2">
                           <label className="inline-flex items-center gap-2 text-xs font-semibold text-ink">
                             <input
-                              aria-label={`Skip row ${row.source_row_number}`}
+                              aria-label={`Skip row ${rowNumber}`}
                               checked={row.skip}
                               disabled={busy}
                               onChange={() => toggleSkip(row)}
@@ -870,7 +958,7 @@ export default function ReviewWorkspace({
                           <button
                             aria-controls={detailId}
                             aria-expanded={isExpanded}
-                            aria-label={`${isExpanded ? "Hide" : "Show"} details for row ${row.source_row_number}`}
+                            aria-label={`${isExpanded ? "Hide" : "Show"} details for row ${rowNumber}`}
                             className="rounded-full border border-line px-3 py-1.5 text-xs font-bold text-ink"
                             onClick={() =>
                               setExpandedRowId((current) =>
@@ -1021,6 +1109,8 @@ export default function ReviewWorkspace({
               pageSize,
               sortDirection,
               possibleOnly,
+              excludePossible,
+              repeatsInFile,
               untaggedOnly,
             )}
             key={pageNumber}
@@ -1044,6 +1134,8 @@ export default function ReviewWorkspace({
                   pageSize,
                   event.target.value as "asc" | "desc",
                   possibleOnly,
+                  excludePossible,
+                  repeatsInFile,
                   untaggedOnly,
                 ),
               )
@@ -1067,13 +1159,15 @@ export default function ReviewWorkspace({
                   Number.parseInt(event.target.value, 10),
                   sortDirection,
                   possibleOnly,
+                  excludePossible,
+                  repeatsInFile,
                   untaggedOnly,
                 ),
               )
             }
             value={pageSize}
           >
-            {[25, 50, 100].map((size) => (
+            {REVIEW_PAGE_SIZES.map((size) => (
               <option key={size} value={size}>
                 {size}
               </option>

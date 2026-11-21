@@ -10,15 +10,19 @@ public static class MigrationCatalog
 {
     public const string CustomerRowSecurityEfId = "20261114000011_0011_customer_row_security";
 
+    public const string SalaryCyclesEfId = "20261114194247_0012_salary_cycles";
+
     public static readonly IReadOnlyList<string> EfIds =
-        [.. LegacyMigrations.All.Select(migration => migration.EfId), CustomerRowSecurityEfId];
+        [.. LegacyMigrations.All.Select(migration => migration.EfId), CustomerRowSecurityEfId, SalaryCyclesEfId];
 
     public static readonly IReadOnlyList<string> LegacyNames =
         LegacyMigrations.All.Select(migration => migration.LegacyName).ToArray();
 
     public const int LegacyCount = 10;
 
-    public const int LatestPrefix = 11;
+    public const int FirstIsolationPrefix = 11;
+
+    public const int LatestPrefix = 12;
 
     public static bool IsLegacyEfId(string id) =>
         LegacyMigrations.OrderForEfId(id) is not null;

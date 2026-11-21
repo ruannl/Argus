@@ -206,11 +206,18 @@ public sealed class StatementImportApi(FinanceGuard guard,
             if (id is null) return Errors.NotFound();
 
             int page = QueryInt(context, "page", 1);
-            int pageSize = QueryInt(context, "page_size", ImportLimits.MaxPageSize);
+            int pageSize = QueryInt(context, "page_size", ImportLimits.DefaultPageSize);
             string sortDirection = context.Request.Query["sort_direction"].ToString();
-            bool possibleDuplicatesOnly = string.Equals(context.Request.Query["duplicates"].ToString(), "possible", StringComparison.OrdinalIgnoreCase);
+            string duplicates = context.Request.Query["duplicates"].ToString();
+            bool possibleDuplicatesOnly = string.Equals(duplicates, "possible", StringComparison.OrdinalIgnoreCase);
+            bool excludePossibleDuplicates = string.Equals(duplicates, "exclude", StringComparison.OrdinalIgnoreCase);
+            if (possibleDuplicatesOnly && excludePossibleDuplicates)
+            {
+                return Errors.InvalidRequest();
+            }
             bool untaggedOnly = string.Equals(context.Request.Query["untagged"].ToString(), "true", StringComparison.OrdinalIgnoreCase);
-            var detail = await store.GetReviewAsync(authority!, id.Value, page, pageSize, sortDirection, possibleDuplicatesOnly, untaggedOnly, cancellationToken);
+            bool repeatsInFileOnly = string.Equals(context.Request.Query["repeats"].ToString(), "file", StringComparison.OrdinalIgnoreCase);
+            var detail = await store.GetReviewAsync(authority!, id.Value, page, pageSize, sortDirection, possibleDuplicatesOnly, untaggedOnly, repeatsInFileOnly, excludePossibleDuplicates, cancellationToken);
             return Results.Json(ReviewResponse.From(detail));
         }, "imports_review_get");
 
@@ -369,7 +376,7 @@ public sealed class StatementImportApi(FinanceGuard guard,
             if (id is null) return Errors.NotFound();
 
             int page = QueryInt(context, "page", 1);
-            int pageSize = QueryInt(context, "page_size", ImportLimits.MaxPageSize);
+            int pageSize = QueryInt(context, "page_size", ImportLimits.DefaultPageSize);
             var detail = await store.GetStatementAsync(authority!, id.Value, page, pageSize, cancellationToken);
             return Results.Json(new
             {

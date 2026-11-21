@@ -123,6 +123,53 @@ export default function TransactionInlineEditor({
     }
   }
 
+  async function confirmCategory() {
+    if (classificationDisabled || draftIsStale || row.category_confirmed) {
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await saveTransactionAction({
+        id: row.id,
+        expected_version: row.version,
+        changes: { confirm_category: true },
+      });
+      if (!result.ok) {
+        if (result.kind === "version_conflict" || result.kind === "not_found") {
+          onStale(
+            result.kind === "not_found"
+              ? "That transaction no longer exists in your workspace. The list refresh was requested."
+              : "This transaction changed while you were editing. The editor was closed; reopen it after the list refreshes.",
+          );
+          return;
+        }
+        if (result.kind === "unavailable" || result.kind === "unauthorized") {
+          onStale(
+            result.kind === "unauthorized"
+              ? "Your session expired. Sign in again before retrying."
+              : "The confirmation outcome is uncertain. The list refresh was requested; check the saved value before retrying.",
+          );
+          return;
+        }
+        setMessage(result.message);
+        return;
+      }
+      setBase({
+        version: result.value.transaction.version,
+        categoryId: result.value.transaction.category.id,
+      });
+      setMessage("Category confirmed.");
+      onSaved(result.value.transaction);
+    } catch {
+      onStale(
+        "The confirmation outcome is uncertain. The list refresh was requested; check the saved value before retrying.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="mt-3 rounded-xl border border-line bg-surface p-3">
       <div className="grid gap-3 sm:grid-cols-2">
@@ -140,6 +187,16 @@ export default function TransactionInlineEditor({
               </option>
             ))}
           </select>
+          {!row.category_confirmed && row.category.kind !== "Uncategorised" ? (
+            <button
+              className="mt-2 rounded-full border border-suggestion-line bg-suggestion-soft px-3 py-1.5 text-xs font-bold text-suggestion-ink disabled:opacity-60"
+              disabled={controlsDisabled}
+              onClick={() => void confirmCategory()}
+              type="button"
+            >
+              Confirm category
+            </button>
+          ) : null}
         </label>
         <label className="text-xs font-semibold text-ink">
           Add tags inline for {row.description || "this transaction"}

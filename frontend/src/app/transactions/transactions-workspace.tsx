@@ -37,6 +37,7 @@ import type {
 } from "@/lib/server/backend-client";
 
 import { sortByDisplayName } from "@/lib/display-order";
+import { formatMoney } from "@/lib/money-format";
 
 import { visibleTags } from "./classification-order";
 import TransactionDetailView from "./transaction-detail";
@@ -60,6 +61,8 @@ type TransactionsWorkspaceProps = {
   initialPage: TransactionPage | null;
   initialError: string | null;
   initialOperationId: string | null;
+  overviewHref?: string | null;
+  overviewContext?: string | null;
 };
 
 type Message = { tone: "status" | "error"; text: string; details?: TransactionErrorDetails };
@@ -85,6 +88,10 @@ function omitEmptyFilters(filters: TransactionFilters): TransactionFilters {
   if (filters.category_kind) next.category_kind = filters.category_kind;
   if (filters.direction) next.direction = filters.direction;
   if (filters.visibility) next.visibility = filters.visibility;
+  if (filters.calculation_scope) next.calculation_scope = filters.calculation_scope;
+  if (filters.excluded_category_ids?.length) {
+    next.excluded_category_ids = [...filters.excluded_category_ids].sort();
+  }
   return next;
 }
 
@@ -134,6 +141,8 @@ export default function TransactionsWorkspace({
   initialPage,
   initialError,
   initialOperationId,
+  overviewHref = null,
+  overviewContext = null,
 }: TransactionsWorkspaceProps) {
   const router = useRouter();
   const [filters, setFilters] = useState<TransactionFilters>(initialQuery.filters);
@@ -246,11 +255,18 @@ export default function TransactionsWorkspace({
         "category_kind",
         "direction",
         "visibility",
+        "calculation_scope",
       ] as const) {
         const value = clean[key];
         if (value !== undefined) {
           params.set(key, String(value));
         }
+      }
+      if (clean.excluded_category_ids?.length) {
+        params.set("excluded_category_ids", [...clean.excluded_category_ids].sort().join(","));
+      }
+      if (overviewContext) {
+        params.set("overview_context", overviewContext);
       }
       params.set("page", String(nextPage));
       params.set("page_size", String(nextPageSize));
@@ -264,7 +280,7 @@ export default function TransactionsWorkspace({
       }
       window.history.replaceState(null, "", `/transactions?${params.toString()}`);
     },
-    [],
+    [overviewContext],
   );
 
   useEffect(() => {
@@ -1038,6 +1054,49 @@ export default function TransactionsWorkspace({
       eyebrow="Workspace"
       title="Transactions"
     >
+      {overviewHref ? (
+        <Link
+          className="mt-4 inline-flex text-sm font-semibold text-accent-text underline underline-offset-4"
+          href={overviewHref}
+        >
+          Back to Overview
+        </Link>
+      ) : null}
+      {data ? (
+        <section
+          className="mt-4 rounded-[1.25rem] border border-line bg-surface p-4 card-shadow"
+          aria-label="Filtered list money summary"
+        >
+          <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2 text-sm">
+            <span className="text-muted">
+              Money in{" "}
+              <strong className="font-semibold text-ink">
+                {formatMoney(data.money_totals.money_in)}
+              </strong>
+            </span>
+            <span className="text-muted">
+              Money out{" "}
+              <strong className="font-semibold text-ink">
+                {formatMoney(data.money_totals.money_out)}
+              </strong>
+            </span>
+            <span className="text-muted">
+              Net{" "}
+              <strong className="font-semibold text-ink">
+                {formatMoney(data.money_totals.net)}
+              </strong>
+            </span>
+            <span className="text-muted">{data.money_totals.included_count} included rows</span>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-muted">
+            Headline money is visible included rows only. Transfers (
+            {data.money_totals.transfers.count}, {formatMoney(data.money_totals.transfers.absolute)}
+            ) and excluded rows ({data.money_totals.excluded.count},{" "}
+            {formatMoney(data.money_totals.excluded.absolute)}) are separate diagnostics and never
+            added to Net. A hidden-only list has zero included money.
+          </p>
+        </section>
+      ) : null}
       {inventoryFailed ? (
         <div
           className="mt-6 rounded-2xl border border-warning-line bg-warning-soft px-5 py-4 text-sm font-semibold text-warning-ink"
@@ -1750,11 +1809,12 @@ export default function TransactionsWorkspace({
                                 {row.category.display_name} ({row.category.kind})
                               </span>
                               {!row.category_confirmed && row.category.kind !== "Uncategorised" ? (
-                                <span className="rounded-full border border-suggestion-line bg-suggestion-soft px-2 py-1 font-semibold text-suggestion-ink">
-                                  <span className="sr-only">
-                                    Suggested category, not yet confirmed:{" "}
-                                  </span>
-                                  Suggested
+                                <span
+                                  className="rounded-full border border-suggestion-line bg-suggestion-soft px-2 py-1 font-semibold text-suggestion-ink"
+                                  title="This category is not confirmed yet. Open Edit inline to confirm it."
+                                >
+                                  <span className="sr-only">Category not confirmed: </span>
+                                  Unconfirmed
                                 </span>
                               ) : null}
                               {row.category.is_archived ? (

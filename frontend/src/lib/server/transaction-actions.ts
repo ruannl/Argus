@@ -104,6 +104,8 @@ function validFilters(value: unknown): value is TransactionFilters {
     "category_kind",
     "direction",
     "visibility",
+    "calculation_scope",
+    "excluded_category_ids",
   ]);
   if (Object.keys(filters).some((key) => !allowed.has(key))) {
     return false;
@@ -165,7 +167,29 @@ function validFilters(value: unknown): value is TransactionFilters {
   ) {
     return false;
   }
+  if (filters.calculation_scope !== undefined && filters.calculation_scope !== "included") {
+    return false;
+  }
+  if (filters.excluded_category_ids !== undefined) {
+    const excluded = filters.excluded_category_ids;
+    if (!Array.isArray(excluded) || excluded.length === 0 || excluded.length > 6) {
+      return false;
+    }
+    if (excluded.some((id) => !isUuid(id)) || new Set(excluded).size !== excluded.length) {
+      return false;
+    }
+  }
   return true;
+}
+
+function normalizedFilters(filters: TransactionFilters): TransactionFilters {
+  if (!filters.excluded_category_ids?.length) {
+    return filters;
+  }
+  return {
+    ...filters,
+    excluded_category_ids: [...filters.excluded_category_ids].sort(),
+  };
 }
 
 function validQuery(value: unknown): value is TransactionQuery {
@@ -279,6 +303,9 @@ function revalidateWorkspace(transactionId?: string) {
   for (const path of ["/transactions", "/imports", "/settings", "/home"]) {
     revalidatePath(path);
   }
+  // Nested Overview detail and cycle pages refresh after transaction/import
+  // changes while the existing top-level paths stay explicit.
+  revalidatePath("/home", "layout");
   if (transactionId) {
     revalidatePath(`/transactions/${transactionId}`);
   }
@@ -297,7 +324,11 @@ export async function queryTransactionsAction(
     return failure("unauthorized");
   }
   try {
-    const result = await queryTransactions(token, query);
+    const normalizedQuery: TransactionQuery = {
+      ...query,
+      ...(query.filters ? { filters: normalizedFilters(query.filters) } : {}),
+    };
+    const result = await queryTransactions(token, normalizedQuery);
     return result.ok ? result : fromFailure(result);
   } catch {
     return failure("unavailable");
@@ -423,7 +454,17 @@ export async function prepareTransactionsAction(
     return failure("unauthorized");
   }
   try {
-    const result = await prepareTransactionOperation(token, input);
+    const normalizedInput: TransactionPrepareInput =
+      input.selection.mode === "all_matching"
+        ? {
+            ...input,
+            selection: {
+              mode: "all_matching",
+              filters: normalizedFilters(input.selection.filters),
+            },
+          }
+        : input;
+    const result = await prepareTransactionOperation(token, normalizedInput);
     return result.ok ? result : fromFailure(result);
   } catch {
     return failure("unavailable");

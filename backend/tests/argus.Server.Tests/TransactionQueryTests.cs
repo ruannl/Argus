@@ -657,4 +657,112 @@ public sealed class TransactionQueryTests(KitFactory factory, ITestOutputHelper 
         Assert.Equal("date", page.GetProperty("sort_by").GetString());
         Assert.Equal("desc", page.GetProperty("sort_direction").GetString());
     }
+
+    [Fact]
+    public void ReportingFilterAppendsOnlyWhenPresentAndKeepsOldCanonicalBytes()
+    {
+        string legacy = TransactionFilter.Default.Canonical();
+        Assert.Equal(
+            (TransactionFilter.Default with { CategoryConfirmed = false }).Canonical(),
+            legacy + "|confirmed=False");
+
+        Guid excludedA = Guid.Parse("00000000-0000-0000-0000-0000000000aa");
+        Guid excludedB = Guid.Parse("00000000-0000-0000-0000-0000000000bb");
+        string included = (TransactionFilter.Default with
+        {
+            CalculationScope = "included",
+            ExcludedCategoryIds = [excludedB, excludedA],
+        }).Canonical();
+
+        Assert.EndsWith(
+            "|calculation_scope=included|excluded_categories=000000000000000000000000000000aa,000000000000000000000000000000bb",
+            included);
+        Assert.DoesNotContain("calculation_scope", legacy);
+        Assert.DoesNotContain("excluded_categories", legacy);
+    }
+
+    [Fact]
+    public void ReportingFilterParserRejectsBroadeningForms()
+    {
+        Assert.False(TransactionRequestParser.TryParseFilter(
+            new TransactionFiltersRequest(null, null, null, null, null, null, null, null, null, null, "visible", "included", []),
+            out _));
+        Assert.False(TransactionRequestParser.TryParseFilter(
+            new TransactionFiltersRequest(null, null, null, null, null, null, null, null, null, null, null, null, []),
+            out _));
+
+        Guid duplicate = Guid.NewGuid();
+        Assert.False(TransactionRequestParser.TryParseFilter(
+            new TransactionFiltersRequest(null, null, null, null, null, null, null, null, null, null, null, "included", [duplicate, duplicate]),
+            out _));
+        Assert.False(TransactionRequestParser.TryParseFilter(
+            new TransactionFiltersRequest(null, null, null, null, null, null, null, null, null, null, null, "all", null),
+            out _));
+        Assert.False(TransactionRequestParser.TryParseFilter(
+            new TransactionFiltersRequest(null, null, null, null, null, null, null, null, null, null, null, null,
+                [Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()]),
+            out _));
+
+        Assert.True(TransactionRequestParser.TryParseFilter(
+            new TransactionFiltersRequest(null, null, null, null, null, null, null, null, null, null, null, "included",
+                [Guid.Parse("00000000-0000-0000-0000-0000000000bb"), Guid.Parse("00000000-0000-0000-0000-0000000000aa")]),
+            out TransactionFilter filter));
+        Assert.Equal(
+            [Guid.Parse("00000000-0000-0000-0000-0000000000aa"), Guid.Parse("00000000-0000-0000-0000-0000000000bb")],
+            filter.NormalizedExcludedCategoryIds);
+        Assert.Equal("included", filter.CalculationScope);
+    }
+
+    [Fact]
+    public async Task IncludedScopeAndCategoryExclusionsFilterTheSharedQuery()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var (systemId, expenseId) = await DefaultCategoriesAsync(session);
+        var transferResponse = await SendAsync(Post(
+            "/v1/finance/categories",
+            Json(new { display_name = "Own transfers", kind = "Transfer" }),
+            session: session));
+        Assert.Equal(HttpStatusCode.Created, transferResponse.StatusCode);
+        Guid transferId = (await BodyAsync(transferResponse)).GetProperty("id").GetGuid();
+        var excludedResponse = await SendAsync(Post(
+            "/v1/finance/categories",
+            Json(new { display_name = "Excluded movements", kind = "Excluded" }),
+            session: session));
+        Assert.Equal(HttpStatusCode.Created, excludedResponse.StatusCode);
+        Guid excludedId = (await BodyAsync(excludedResponse)).GetProperty("id").GetGuid();
+        var statementId = await SeedStatementAsync(customerId, accountId);
+
+        await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2024, 6, 1), "Food", -10m, 1);
+        await SeedTransactionAsync(customerId, accountId, statementId, transferId, new DateOnly(2024, 6, 2), "Own transfer", -20m, 2);
+        await SeedTransactionAsync(customerId, accountId, statementId, excludedId, new DateOnly(2024, 6, 3), "Excluded", -30m, 3);
+        await SeedTransactionAsync(customerId, accountId, statementId, systemId, new DateOnly(2024, 6, 4), "Uncategorised", -40m, 4);
+
+        var includedOnly = await QueryAsync(session, new { filters = new { calculation_scope = "included" }, });
+        Assert.Equal(2, Rows(includedOnly).Length);
+        Assert.All(Rows(includedOnly), row =>
+            Assert.DoesNotContain(row.GetProperty("category").GetProperty("kind").GetString(), new[] { "Transfer", "Excluded" }));
+
+        var excludedOther = await QueryAsync(session, new
+        {
+            filters = new
+            {
+                calculation_scope = "included",
+                excluded_category_ids = new[] { systemId, expenseId },
+            },
+        });
+        Assert.Empty(Rows(excludedOther));
+
+        var hiddenDiagnosticShape = await QueryAsync(session, new
+        {
+            filters = new
+            {
+                visibility = "hidden",
+            },
+        });
+        Assert.Empty(Rows(hiddenDiagnosticShape));
+
+        var allKinds = await QueryAsync(session, new { filters = new { visibility = "all" }, });
+        Assert.Equal(4, Rows(allKinds).Length);
+    }
 }

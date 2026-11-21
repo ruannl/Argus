@@ -17,7 +17,8 @@ public static class ImportLimits
     public const int MaxMultipartOptionsBytes = 64 * 1024;
     public const int MaxJsonBodyBytes = 256 * 1024;
     public const int MaxReviewDecisionsPerRequest = 200;
-    public const int MaxPageSize = 100;
+    public const int DefaultPageSize = 100;
+    public const int MaxPageSize = 200;
     public const int MaxPreviewRows = 20;
     public const int MaxDescriptionScalars = 4_096;
 

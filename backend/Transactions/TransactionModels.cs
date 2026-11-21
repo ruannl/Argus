@@ -46,10 +46,15 @@ public sealed record TransactionFilter(string? Search,
                                        bool? CategoryConfirmed,
                                        string? CategoryKind,
                                        string? Direction,
-                                       TransactionVisibility Visibility)
+                                       TransactionVisibility Visibility,
+                                       string? CalculationScope = null,
+                                       Guid[]? ExcludedCategoryIds = null)
 {
     public static TransactionFilter Default { get; } = new(
         null, null, null, null, null, null, null, false, null, null, null, TransactionVisibility.Visible);
+
+    public Guid[] NormalizedExcludedCategoryIds =>
+        ExcludedCategoryIds is null ? [] : ExcludedCategoryIds.Order().ToArray();
 
     public string Canonical()
     {
@@ -72,6 +77,17 @@ public sealed record TransactionFilter(string? Search,
         if (CategoryConfirmed is not null)
         {
             parts.Add($"confirmed={CategoryConfirmed.Value}");
+        }
+
+        // Only append the reporting fields when present so every pre-existing
+        // filter shape keeps byte-identical canonical bytes and digests.
+        if (CalculationScope is not null)
+        {
+            parts.Add($"calculation_scope={CalculationScope}");
+        }
+        if (NormalizedExcludedCategoryIds.Length > 0)
+        {
+            parts.Add($"excluded_categories={string.Join(',', NormalizedExcludedCategoryIds.Select(id => id.ToString("N")))}");
         }
 
         return string.Join('|', parts);
@@ -140,7 +156,20 @@ public sealed record TransactionPageResult(TransactionResponse[] Transactions,
                                            int Page,
                                            int PageSize,
                                            string SortBy,
-                                           string SortDirection);
+                                           string SortDirection,
+                                           TransactionMoneyTotals MoneyTotals);
+
+public sealed record TransactionMoneyDiagnostic(long Count,
+                                                string MoneyIn,
+                                                string MoneyOut,
+                                                string Absolute);
+
+public sealed record TransactionMoneyTotals(string MoneyIn,
+                                            string MoneyOut,
+                                            string Net,
+                                            long IncludedCount,
+                                            TransactionMoneyDiagnostic Transfers,
+                                            TransactionMoneyDiagnostic Excluded);
 
 public sealed record TransactionDetailResult(TransactionResponse Transaction,
                                              TransactionTagRef[] SuggestedTags,
@@ -294,6 +323,24 @@ public static class TransactionRequestParser
             return false;
         }
 
+        if (request.CalculationScope is not null && request.CalculationScope != "included")
+        {
+            return false;
+        }
+
+        Guid[] excludedCategoryIds = [];
+        if (request.ExcludedCategoryIds is not null)
+        {
+            if (request.ExcludedCategoryIds.Length is 0 or > TransactionLimits.MaxExcludedCategoryIds ||
+                request.ExcludedCategoryIds.Any(id => id == Guid.Empty) ||
+                request.ExcludedCategoryIds.Distinct().Count() != request.ExcludedCategoryIds.Length)
+            {
+                return false;
+            }
+
+            excludedCategoryIds = request.ExcludedCategoryIds.Order().ToArray();
+        }
+
         var visibility = request.Visibility switch
         {
             null or "visible" => TransactionVisibility.Visible,
@@ -311,7 +358,7 @@ public static class TransactionRequestParser
             return false;
         }
 
-        filter = new TransactionFilter(search, startDate, endDate, request.FinancialAccountId, request.StatementImportId, request.CategoryId, merchantTagId, untagged, request.CategoryConfirmed, request.CategoryKind, request.Direction, visibility.Value);
+        filter = new TransactionFilter(search, startDate, endDate, request.FinancialAccountId, request.StatementImportId, request.CategoryId, merchantTagId, untagged, request.CategoryConfirmed, request.CategoryKind, request.Direction, visibility.Value, request.CalculationScope, excludedCategoryIds);
 
         return true;
     }
@@ -454,7 +501,9 @@ public sealed record TransactionFiltersRequest(string? Search,
                                                bool? CategoryConfirmed,
                                                string? CategoryKind,
                                                string? Direction,
-                                               string? Visibility);
+                                               string? Visibility,
+                                               string? CalculationScope = null,
+                                               Guid[]? ExcludedCategoryIds = null);
 
 public sealed record TransactionQueryRequest(TransactionFiltersRequest? Filters,
                                              int? Page,

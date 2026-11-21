@@ -83,6 +83,20 @@ public static class TransactionQuery
                     category.Id == transaction.CategoryId &&
                     category.Kind == filter.CategoryKind));
         }
+        if (filter.CalculationScope == "included")
+        {
+            query = query.Where(transaction =>
+                context.Categories.Any(category =>
+                    category.CustomerId == transaction.CustomerId &&
+                    category.Id == transaction.CategoryId &&
+                    category.Kind != "Transfer" &&
+                    category.Kind != "Excluded"));
+        }
+        if (filter.NormalizedExcludedCategoryIds.Length > 0)
+        {
+            Guid[] excludedCategoryIds = filter.NormalizedExcludedCategoryIds;
+            query = query.Where(transaction => !excludedCategoryIds.Contains(transaction.CategoryId));
+        }
         if (filter.Direction is not null)
         {
             query = filter.Direction switch

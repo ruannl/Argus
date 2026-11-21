@@ -23,7 +23,18 @@ public static class DatabaseIsolationContract
     public const string RuntimePolicy = "argus_runtime_customer";
     public const string OwnerPolicy = "argus_owner_maintenance";
 
-    public static readonly IReadOnlyList<string> ProtectedTables =
+    public static readonly IReadOnlyList<string> SalaryCycleTables =
+    [
+        "salary_cycle_state",
+        "salary_cycle_starts",
+    ];
+
+    /// <summary>
+    /// The frozen prefix-11 protected inventory. Migration 0011 and prefix-11
+    /// validation keep this exact set so a later table cannot make replay of
+    /// the historical migration reference a table it did not create.
+    /// </summary>
+    public static readonly IReadOnlyList<string> ProtectedTablesPrefix11 =
     [
         "financial_accounts",
         "categories",
@@ -39,6 +50,16 @@ public static class DatabaseIsolationContract
         "transaction_operations",
         "transaction_operation_items",
     ];
+
+    /// <summary>The latest protected inventory: prefix 11 plus salary cycles.</summary>
+    public static readonly IReadOnlyList<string> ProtectedTables =
+    [
+        .. ProtectedTablesPrefix11,
+        .. SalaryCycleTables,
+    ];
+
+    public static IReadOnlyList<string> ProtectedTablesFor(int prefix) =>
+        prefix >= 12 ? ProtectedTables : ProtectedTablesPrefix11;
 
     public static readonly IReadOnlyList<string> ControlPlaneTables =
     [
@@ -87,6 +108,7 @@ public static class DatabaseIsolationContract
             ],
             ["import_commit_receipts"] = ["state", "result", "deletion_digest", "deletion_expected_count", "updated_at"],
             ["transaction_operations"] = ["status", "applied_at", "terminal_at", "action", "target_stamps", "updated_at"],
+            ["salary_cycle_state"] = ["revision", "updated_at"],
         };
 
     /// <summary>
@@ -106,6 +128,7 @@ public static class DatabaseIsolationContract
         "import_reviews",
         "import_review_rows",
         "transaction_operation_items",
+        "salary_cycle_starts",
     ];
 
     public static readonly IReadOnlyList<string> RuntimeInsertTables =
@@ -123,6 +146,8 @@ public static class DatabaseIsolationContract
         "import_commit_receipts",
         "transaction_operations",
         "transaction_operation_items",
+        "salary_cycle_state",
+        "salary_cycle_starts",
     ];
 
     public static readonly string[] CustomerInsertColumns =

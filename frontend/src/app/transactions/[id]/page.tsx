@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { decodeOverviewContext, reportingHref } from "@/lib/reporting-state";
+
 import { auth } from "@/auth";
 import AppShell from "@/components/app-shell";
 import WorkspaceExpired from "@/components/workspace-expired";
@@ -69,8 +71,10 @@ function DetailUnavailable({
 
 export default async function TransactionDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const backendToken = (await auth())?.user?.backendToken;
   if (!backendToken) {
@@ -171,6 +175,10 @@ export default async function TransactionDetailPage({
     );
   }
 
+  const rawContext = (await searchParams)?.overview_context;
+  const overviewState = typeof rawContext === "string" ? decodeOverviewContext(rawContext) : null;
+  const overviewHref = overviewState ? reportingHref(overviewState) : null;
+
   return (
     <AppShell
       account={account}
@@ -179,6 +187,14 @@ export default async function TransactionDetailPage({
       eyebrow="Transaction"
       title="Transaction detail"
     >
+      {overviewHref ? (
+        <Link
+          className="mt-4 inline-flex text-sm font-semibold text-accent-text underline underline-offset-4"
+          href={overviewHref}
+        >
+          Back to Overview
+        </Link>
+      ) : null}
       {inventoryFailed ? (
         <p
           className="mt-6 rounded-2xl border border-warning-line bg-warning-soft px-5 py-4 text-sm font-semibold text-warning-ink"

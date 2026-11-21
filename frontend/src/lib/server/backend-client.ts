@@ -726,6 +726,8 @@ export type TransactionFilters = {
   category_kind?: CategoryKind;
   direction?: "in" | "out" | "zero";
   visibility?: TransactionVisibility;
+  calculation_scope?: "included";
+  excluded_category_ids?: string[];
 };
 
 export type TransactionQuery = {
@@ -792,6 +794,23 @@ export type TransactionPage = {
   page_size: number;
   sort_by: string;
   sort_direction: string;
+  money_totals: TransactionMoneyTotals;
+};
+
+export type TransactionMoneyDiagnostic = {
+  count: number;
+  money_in: string;
+  money_out: string;
+  absolute: string;
+};
+
+export type TransactionMoneyTotals = {
+  money_in: string;
+  money_out: string;
+  net: string;
+  included_count: number;
+  transfers: TransactionMoneyDiagnostic;
+  excluded: TransactionMoneyDiagnostic;
 };
 
 export type TransactionDetail = {
@@ -1606,12 +1625,16 @@ export async function getImportReview(
   reviewId: string,
   page = 1,
   pageSize = 100,
-  sortDirection: "asc" | "desc" = "asc",
+  sortDirection: "asc" | "desc" = "desc",
   possibleDuplicatesOnly = false,
   untaggedOnly = false,
+  repeatsInFileOnly = false,
+  excludePossibleDuplicates = false,
 ): Promise<ImportRequestResult<ImportReviewDetail>> {
   const filters = [
     possibleDuplicatesOnly ? "&duplicates=possible" : "",
+    excludePossibleDuplicates ? "&duplicates=exclude" : "",
+    repeatsInFileOnly ? "&repeats=file" : "",
     untaggedOnly ? "&untagged=true" : "",
   ].join("");
   return importRequest<ImportReviewDetail>(
@@ -1755,5 +1778,535 @@ export async function deleteImportStatement(
       expected_transaction_count: expectedTransactionCount,
       confirm: true,
     },
+  );
+}
+
+// --- Reporting and salary cycles -------------------------------------------
+
+export type ReportErrorKind =
+  | "invalid_request"
+  | "not_found"
+  | "request_too_large"
+  | "unauthorized"
+  | "rate_limited"
+  | "receipt_ineligible"
+  | "version_conflict"
+  | "cycle_sequence_changed"
+  | "report_busy"
+  | "unavailable";
+
+export type ReportRequestResult<T> = { ok: true; value: T } | { ok: false; kind: ReportErrorKind };
+
+const REPORT_ERROR_KINDS = new Set<string>([
+  "invalid_request",
+  "not_found",
+  "request_too_large",
+  "unauthorized",
+  "rate_limited",
+  "receipt_ineligible",
+  "version_conflict",
+  "cycle_sequence_changed",
+  "report_busy",
+]);
+
+export type ReportPeriodInput = {
+  mode?: "salary_cycle" | "calendar" | "custom";
+  preset?: "month_to_date" | "previous_month" | "last_three_months" | "last_six_months" | "month";
+  month?: string;
+  start_date?: string;
+  end_date?: string;
+  cycle_start_id?: string;
+};
+
+export type ReportFilters = {
+  financial_account_id?: string;
+  category_id?: string;
+  merchant_tag?: string;
+  direction?: "in" | "out" | "zero";
+};
+
+export type ReportQuery = {
+  view?: "overview" | "category" | "merchant_tag" | "comparison";
+  period?: ReportPeriodInput;
+  filters?: ReportFilters;
+  tag_in_page?: number;
+  tag_out_page?: number;
+  transactions_page?: number;
+  coverage_page?: number;
+  comparison_coverage_page?: number;
+  category_changes_page?: number;
+};
+
+export type ReportFilterDescriptor = {
+  start_date: string;
+  end_date: string;
+  financial_account_id: string | null;
+  category_id: string | null;
+  merchant_tag: string | null;
+  category_kind: string | null;
+  direction: "in" | "out" | "zero" | null;
+  visibility: "visible" | "hidden" | "all";
+  calculation_scope: "included" | null;
+  excluded_category_ids: string[] | null;
+  category_confirmed?: boolean | null;
+};
+
+export type ReportPeriod = {
+  mode: "salary_cycle" | "calendar" | "custom";
+  preset: string | null;
+  label: string;
+  start_date: string;
+  end_date: string;
+  is_partial: boolean;
+  is_future: boolean;
+  is_open_salary_cycle: boolean;
+  cycle_start_id: string | null;
+  note: string | null;
+};
+
+export type ReportComparison = {
+  period: ReportPeriod | null;
+  label: string;
+  shorter_prior: boolean;
+  unavailable_reason: string | null;
+  has_included_data: boolean;
+};
+
+export type ReportMoney = {
+  money_in: string;
+  money_out: string;
+  net: string;
+  included_count: number;
+  zero_count: number;
+};
+
+export type ReportDiagnostic = {
+  count: number;
+  money_in: string;
+  money_out: string;
+  absolute: string;
+};
+
+export type ReportGap = { start_date: string; end_date: string; days: number };
+
+export type ReportGapPage = {
+  items: ReportGap[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_more: boolean;
+  next_page: number | null;
+  gap_days: number;
+};
+
+export type ReportCoverage = {
+  total_days: number;
+  covered_days: number;
+  covered_percentage: string | null;
+  partial: boolean;
+  gaps: ReportGapPage;
+};
+
+export type ReportCoveragePair = {
+  current: ReportCoverage;
+  prior: ReportCoverage | null;
+};
+
+export type ReportCategoryRank = {
+  id: string;
+  display_name: string;
+  kind: CategoryKind;
+  is_archived: boolean;
+  amount: string;
+  count: number;
+  share: string | null;
+  prior_amount: string | null;
+  change_percentage: string | null;
+  descriptor: ReportFilterDescriptor;
+};
+
+export type ReportOtherCategories = {
+  amount: string;
+  count: number;
+  excluded_category_ids: string[];
+  prior_amount: string | null;
+  change_percentage: string | null;
+  descriptor: ReportFilterDescriptor;
+};
+
+export type ReportCategoryDirection = {
+  ranks: ReportCategoryRank[];
+  uncategorised: ReportCategoryRank | null;
+  other: ReportOtherCategories;
+  other_ranks?: ReportCategoryRank[];
+  all_ranks?: ReportCategoryRank[];
+};
+
+export type ReportCategoryBreakdown = {
+  money_in: ReportCategoryDirection;
+  money_out: ReportCategoryDirection;
+};
+
+export type ReportGroupTotals = {
+  kind: string;
+  money_in: string;
+  money_out: string;
+  net: string;
+  count: number;
+};
+
+export type ReportUntagged = {
+  amount: string;
+  count: number;
+  descriptor: ReportFilterDescriptor;
+};
+
+export type ReportTagRank = {
+  id: string;
+  display_name: string;
+  is_archived: boolean;
+  amount: string;
+  count: number;
+  share: string | null;
+  prior_amount: string | null;
+  change_percentage: string | null;
+  descriptor: ReportFilterDescriptor;
+};
+
+export type ReportOtherTags = {
+  direction: "in" | "out";
+  items: ReportTagRank[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_more: boolean;
+  next_page: number | null;
+};
+
+export type ReportTagDirection = {
+  ranks: ReportTagRank[];
+  untagged: ReportUntagged;
+  other: ReportOtherTags;
+  all_ranks?: ReportTagRank[];
+};
+
+export type ReportTagBreakdown = {
+  money_in: ReportTagDirection;
+  money_out: ReportTagDirection;
+  overlap_disclosure: boolean;
+};
+
+export type ReportTotals = {
+  money: ReportMoney;
+  money_in_descriptor: ReportFilterDescriptor;
+  money_out_descriptor: ReportFilterDescriptor;
+  net_descriptor: ReportFilterDescriptor;
+  uncategorised_in_descriptor: ReportFilterDescriptor;
+  uncategorised_out_descriptor: ReportFilterDescriptor;
+  unconfirmed_descriptor: ReportFilterDescriptor;
+  uncategorised_count: number;
+  uncategorised_money_in: string;
+  uncategorised_money_out: string;
+  categorised_coverage_percentage: string | null;
+  unconfirmed_category_count: number;
+  tagged_count: number;
+  untagged_count: number;
+  untagged_money_in: string;
+  untagged_money_out: string;
+  tag_coverage_percentage: string | null;
+  transfers: ReportDiagnostic;
+  excluded: ReportDiagnostic;
+  hidden: ReportDiagnostic;
+  hidden_descriptor: ReportFilterDescriptor;
+  transfers_descriptor: ReportFilterDescriptor;
+  excluded_descriptor: ReportFilterDescriptor;
+};
+
+export type ReportBucket = {
+  start_date: string;
+  end_date: string;
+  label: string;
+  granularity: "week" | "month";
+  money_in: string;
+  money_out: string;
+  money_in_share: string | null;
+  money_out_share: string | null;
+  count: number;
+  coverage: "covered" | "partial" | "uncovered";
+  money_in_descriptor: ReportFilterDescriptor;
+  money_out_descriptor: ReportFilterDescriptor;
+};
+
+export type ReportFocus = {
+  kind: string;
+  category_id: string | null;
+  category_name: string | null;
+  category_kind: string | null;
+  category_archived: boolean | null;
+  merchant_tag_id: string | null;
+  merchant_tag_name: string | null;
+  merchant_tag_archived: boolean | null;
+  untagged: boolean;
+  financial_account_id: string | null;
+  financial_account_name: string | null;
+  financial_account_archived: boolean | null;
+  direction: "in" | "out" | "zero" | null;
+};
+
+export type ReportTransactionPage = {
+  items: TransactionRow[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_more: boolean;
+  next_page: number | null;
+};
+
+export type ReportCategoryChange = {
+  id: string;
+  display_name: string;
+  kind: CategoryKind;
+  is_archived: boolean;
+  current_amount: string;
+  prior_amount: string;
+  delta: string;
+  delta_percentage: string | null;
+  current_descriptor: ReportFilterDescriptor;
+  prior_descriptor: ReportFilterDescriptor;
+};
+
+export type ReportCategoryChangePage = {
+  items: ReportCategoryChange[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_more: boolean;
+  next_page: number | null;
+};
+
+export type ReportCategoryChanges = {
+  money_in: ReportCategoryChangePage;
+  money_out: ReportCategoryChangePage;
+};
+
+export type ReportSetup = {
+  reason: string;
+  inventory_empty: boolean;
+  message: string;
+  alternatives: string[];
+};
+
+export type ReportResponse = {
+  status: "setup_required" | "no_data" | "no_matches" | "all_hidden" | "excluded_only" | "ready";
+  as_of: string;
+  today: string;
+  timezone: string;
+  sequence_revision: string;
+  view: "overview" | "category" | "merchant_tag" | "comparison";
+  period_mode: "salary_cycle" | "calendar" | "custom";
+  period: ReportPeriod | null;
+  comparison: ReportComparison | null;
+  focus: ReportFocus;
+  current: ReportTotals | null;
+  prior: ReportTotals | null;
+  categories: ReportCategoryBreakdown | null;
+  tags: ReportTagBreakdown | null;
+  trend: ReportBucket[] | null;
+  coverage: ReportCoveragePair | null;
+  focus_group: ReportGroupTotals | null;
+  transactions: ReportTransactionPage | null;
+  category_changes: ReportCategoryChanges | null;
+  setup: ReportSetup | null;
+  policy_labels: string[];
+};
+
+export type SalaryCycleBoundary = {
+  id: string;
+  start_date: string;
+  created_at: string;
+};
+
+export type SalaryCycleList = {
+  revision: string;
+  starts: SalaryCycleBoundary[];
+  next_before_date: string | null;
+};
+
+export type SalaryCycleSource = {
+  id: string;
+  version: number;
+  transaction_date: string;
+  description: string;
+  amount: string;
+  currency: "ZAR";
+  financial_account: TransactionAccountRef;
+  category: TransactionCategoryRef;
+  category_confirmed: boolean;
+};
+
+export type SalaryCycleInterval = {
+  start_date: string;
+  end_date: string;
+  label: string;
+};
+
+export type SalaryCyclePreview = {
+  action: "confirm" | "remove";
+  revision: string;
+  date: string | null;
+  source: SalaryCycleSource | null;
+  proposed_interval: SalaryCycleInterval | null;
+  affected_intervals: SalaryCycleInterval[];
+  warnings: string[];
+  retention_disclosure: boolean;
+  already_confirmed: boolean;
+};
+
+export type SalaryCycleConfirm = {
+  id: string;
+  start_date: string;
+  revision: string;
+  status: "created" | "already_confirmed";
+};
+
+export type SalaryCycleRemove = {
+  removed_id: string;
+  removed_date: string;
+  revision: string;
+};
+
+async function reportRequest<T>(
+  sessionToken: string,
+  method: "GET" | "POST" | "DELETE",
+  path: string,
+  body?: Record<string, unknown>,
+): Promise<ReportRequestResult<T>> {
+  if (!sessionToken) {
+    return { ok: false, kind: "unauthorized" };
+  }
+
+  try {
+    const init: RequestInit = {
+      method,
+      headers: financeHeaders(sessionToken, body !== undefined),
+      cache: "no-store",
+    };
+    if (body !== undefined) {
+      init.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(`${backendUrl()}${path}`, init);
+    if (response.ok) {
+      return { ok: true, value: (await response.json()) as T };
+    }
+
+    if (response.status === 401) {
+      try {
+        const denial: unknown = await response.json();
+        if (
+          typeof denial === "object" &&
+          denial !== null &&
+          "error" in denial &&
+          (denial as { error?: unknown }).error === "unauthorized"
+        ) {
+          return { ok: false, kind: "unauthorized" };
+        }
+      } catch {
+        // A malformed upstream 401 does not establish that the session expired.
+      }
+      return { ok: false, kind: "unavailable" };
+    }
+    if (response.status === 413) {
+      return { ok: false, kind: "request_too_large" };
+    }
+    if (response.status === 429) {
+      return { ok: false, kind: "rate_limited" };
+    }
+    if (response.status === 404) {
+      return { ok: false, kind: "not_found" };
+    }
+
+    try {
+      const failure: unknown = await response.json();
+      if (typeof failure === "object" && failure !== null && "error" in failure) {
+        const error = (failure as { error?: unknown }).error;
+        if (typeof error === "string" && REPORT_ERROR_KINDS.has(error)) {
+          return { ok: false, kind: error as ReportErrorKind };
+        }
+      }
+    } catch {
+      // An unreadable failure is indistinguishable from an unavailable backend.
+    }
+
+    return { ok: false, kind: response.status === 422 ? "receipt_ineligible" : "unavailable" };
+  } catch {
+    return { ok: false, kind: "unavailable" };
+  }
+}
+
+export async function queryReport(
+  sessionToken: string,
+  query: ReportQuery,
+): Promise<ReportRequestResult<ReportResponse>> {
+  return reportRequest<ReportResponse>(
+    sessionToken,
+    "POST",
+    "/v1/finance/reports/query",
+    query as Record<string, unknown>,
+  );
+}
+
+export async function listSalaryCycles(
+  sessionToken: string,
+  beforeDate?: string | null,
+): Promise<ReportRequestResult<SalaryCycleList>> {
+  const query = beforeDate ? `?before_date=${encodeURIComponent(beforeDate)}` : "";
+  return reportRequest<SalaryCycleList>(sessionToken, "GET", `/v1/finance/salary-cycles${query}`);
+}
+
+export async function previewSalaryCycle(
+  sessionToken: string,
+  input: {
+    action: "confirm" | "remove";
+    transaction_id?: string;
+    expected_transaction_version?: number;
+    start_id?: string;
+  },
+): Promise<ReportRequestResult<SalaryCyclePreview>> {
+  return reportRequest<SalaryCyclePreview>(
+    sessionToken,
+    "POST",
+    "/v1/finance/salary-cycles/preview",
+    input as unknown as Record<string, unknown>,
+  );
+}
+
+export async function confirmSalaryCycle(
+  sessionToken: string,
+  input: {
+    transaction_id: string;
+    expected_transaction_version: number;
+    expected_revision: string;
+    confirm: true;
+  },
+): Promise<ReportRequestResult<SalaryCycleConfirm>> {
+  return reportRequest<SalaryCycleConfirm>(
+    sessionToken,
+    "POST",
+    "/v1/finance/salary-cycles",
+    input as unknown as Record<string, unknown>,
+  );
+}
+
+export async function removeSalaryCycle(
+  sessionToken: string,
+  id: string,
+  input: { expected_revision: string; confirm: true },
+): Promise<ReportRequestResult<SalaryCycleRemove>> {
+  return reportRequest<SalaryCycleRemove>(
+    sessionToken,
+    "DELETE",
+    `/v1/finance/salary-cycles/${encodeURIComponent(id)}`,
+    input,
   );
 }

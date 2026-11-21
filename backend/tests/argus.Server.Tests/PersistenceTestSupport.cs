@@ -182,6 +182,15 @@ public static class PersistenceTestSupport
                 // function-body JSON braces on this test-only path.
                 string sql = CustomerIsolationSql.BuildUpSql().Replace("{", "{{").Replace("}", "}}");
                 await context.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+                bool salaryExists = await context.Database
+                    .SqlQueryRaw<bool>("SELECT to_regclass('salary_cycle_state') IS NOT NULL AS \"Value\"")
+                    .SingleAsync(cancellationToken);
+                if (salaryExists)
+                {
+                    string salarySql = CustomerIsolationSql.BuildSalaryCycleIsolationSql().Replace("{", "{{").Replace("}", "}}");
+                    await context.Database.ExecuteSqlRawAsync(salarySql, cancellationToken);
+                }
             }
         }
 

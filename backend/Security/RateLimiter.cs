@@ -28,6 +28,14 @@ public sealed class RateLimiter
     public bool CheckTransactionPreparation(Guid customerId) =>
         Check($"transaction_prepare:{customerId:N}", 20);
 
+    /// <summary>Report reads are 120 requests per customer per window.</summary>
+    public bool CheckReportRead(Guid customerId) =>
+        Check($"report_read:{customerId:N}", 120);
+
+    /// <summary>Salary previews and mutations are 30 requests per customer per window.</summary>
+    public bool CheckSalaryMutation(Guid customerId) =>
+        Check($"salary_mutation:{customerId:N}", 30);
+
     /// <summary>Inspect/prepare is ten requests per customer per window.</summary>
     public bool CheckImportCustomer(Guid customerId) =>
         Check($"import_customer:{customerId:N}", 10);

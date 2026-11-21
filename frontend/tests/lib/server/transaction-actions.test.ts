@@ -60,6 +60,14 @@ const page = {
   page_size: 25,
   sort_by: "date",
   sort_direction: "desc",
+  money_totals: {
+    money_in: "0.00",
+    money_out: "0.00",
+    net: "0.00",
+    included_count: 0,
+    transfers: { count: 0, money_in: "0.00", money_out: "0.00", absolute: "0.00" },
+    excluded: { count: 0, money_in: "0.00", money_out: "0.00", absolute: "0.00" },
+  },
 };
 
 const operationId = "11111111-1111-1111-1111-111111111111";
@@ -120,6 +128,78 @@ describe("transaction server actions", () => {
       sort_by: "amount",
       sort_direction: "asc",
     });
+  });
+
+  it("validates and preserves the reporting filter fields through query and all-matching preparation", async () => {
+    signedIn();
+    vi.mocked(queryTransactions).mockResolvedValue({ ok: true, value: page });
+    const first = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    const second = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+
+    await expect(
+      queryTransactionsAction({
+        filters: {
+          calculation_scope: "included",
+          excluded_category_ids: [first, second],
+        },
+      }),
+    ).resolves.toEqual({ ok: true, value: page });
+    expect(queryTransactions).toHaveBeenCalledWith("backend-token", {
+      filters: {
+        calculation_scope: "included",
+        excluded_category_ids: [second, first],
+      },
+    });
+
+    for (const filters of [
+      { calculation_scope: "all" as never },
+      { excluded_category_ids: [] },
+      { excluded_category_ids: [first, first] },
+      {
+        excluded_category_ids: [first, first, second, second, first, second, first],
+      },
+    ]) {
+      await expect(queryTransactionsAction({ filters })).resolves.toMatchObject({
+        ok: false,
+        kind: "invalid_request",
+      });
+    }
+    expect(queryTransactions).toHaveBeenCalledTimes(1);
+
+    vi.mocked(prepareTransactionOperation).mockResolvedValue({
+      ok: true,
+      value: { operation: { operation_id: operationId }, created: true },
+    } as never);
+    await expect(
+      prepareTransactionsAction({
+        operation_id: operationId,
+        selection: {
+          mode: "all_matching",
+          filters: { calculation_scope: "included", excluded_category_ids: [first, second] },
+        },
+        changes: { category_id: "33333333-3333-3333-3333-333333333333" },
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(prepareTransactionOperation).toHaveBeenCalledWith(
+      "backend-token",
+      expect.objectContaining({
+        selection: {
+          mode: "all_matching",
+          filters: {
+            calculation_scope: "included",
+            excluded_category_ids: [second, first],
+          },
+        },
+      }),
+    );
+
+    await expect(
+      prepareTransactionsAction({
+        operation_id: operationId,
+        selection: { mode: "all_matching", filters: { excluded_category_ids: [] } },
+        changes: { category_id: "33333333-3333-3333-3333-333333333333" },
+      }),
+    ).resolves.toMatchObject({ ok: false, kind: "invalid_request" });
   });
 
   it("requires confirmation for hide/restore and revalidates after a save", async () => {

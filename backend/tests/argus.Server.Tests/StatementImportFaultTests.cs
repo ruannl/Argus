@@ -254,7 +254,7 @@ public sealed class StatementImportFaultTests
             "TRUNCATE import_review_rows, import_reviews, import_commit_receipts, import_quota_locks, " +
             "transaction_merchant_tags, transactions, statement_imports, merchant_tags, " +
             "categories, financial_accounts, customers, sessions, email_verification_tokens, " +
-            "password_reset_tokens CASCADE";
+            "password_reset_tokens, salary_cycle_starts, salary_cycle_state CASCADE";
         await command.ExecuteNonQueryAsync();
         factory.Mailer.Clear();
         factory.LogCapture.Clear();

@@ -27,6 +27,8 @@ public sealed class DatabaseCustomerIsolationTests
         "import_commit_receipts",
         "transaction_operations",
         "transaction_operation_items",
+        "salary_cycle_state",
+        "salary_cycle_starts",
     ];
 
     [Fact]
@@ -71,6 +73,8 @@ public sealed class DatabaseCustomerIsolationTests
             ["import_commit_receipts"] = "UPDATE import_commit_receipts SET updated_at = clock_timestamp()",
             ["transaction_operations"] = "UPDATE transaction_operations SET updated_at = clock_timestamp()",
             ["transaction_operation_items"] = "DELETE FROM transaction_operation_items",
+            ["salary_cycle_state"] = "UPDATE salary_cycle_state SET revision = revision + 1",
+            ["salary_cycle_starts"] = "DELETE FROM salary_cycle_starts",
         };
 
         var beforeA = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -121,6 +125,18 @@ public sealed class DatabaseCustomerIsolationTests
 
         string categoryUpdate = $"UPDATE categories SET customer_id = '{fixture.CustomerB}'";
         await AssertRejectedAsync(fixture, fixture.AuthorityA, categoryUpdate, "42501");
+
+        string stateInsert = $"""
+            INSERT INTO salary_cycle_state (customer_id, revision, updated_at)
+            VALUES ('{fixture.CustomerB}', 1, NOW())
+            """;
+        await AssertRejectedAsync(fixture, fixture.AuthorityA, stateInsert, "42501");
+
+        string startInsert = $"""
+            INSERT INTO salary_cycle_starts (id, customer_id, start_date, created_at)
+            VALUES ('{Guid.NewGuid()}', '{fixture.CustomerB}', DATE '2025-02-01', NOW())
+            """;
+        await AssertRejectedAsync(fixture, fixture.AuthorityA, startInsert, "42501");
 
         string aliasCrossTag = $"""
             INSERT INTO merchant_aliases (id, customer_id, display_alias, normalized_alias, merchant_tag_id, category_id, created_at, updated_at)
@@ -532,6 +548,14 @@ public sealed class DatabaseCustomerIsolationTests
                 VALUES
                     ('{customerA}', '{operationA}', '{transactionA}', 1, '{accountA}', '{statementA}', 0),
                     ('{customerB}', '{operationB}', '{transactionB}', 1, '{accountB}', '{statementB}', 0);
+
+                INSERT INTO salary_cycle_state (customer_id, revision, updated_at)
+                VALUES ('{customerA}', 1, NOW()), ('{customerB}', 1, NOW());
+
+                INSERT INTO salary_cycle_starts (id, customer_id, start_date, created_at)
+                VALUES
+                    ('{Guid.NewGuid()}', '{customerA}', DATE '2025-01-05', NOW()),
+                    ('{Guid.NewGuid()}', '{customerB}', DATE '2025-01-05', NOW());
                 """);
 
             string runtimeUrl = DatabaseRoleFixture.RuntimeSchemaUrl(databaseUrl, schema);

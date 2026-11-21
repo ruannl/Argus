@@ -36,6 +36,13 @@ Statements are imported manually.
   individual transactions can be hidden or restored. Bulk edits work on an
   explicit selection or on every row matching one filter snapshot, with a
   saved scope and a durable receipt.
+- **Overview and exploration** — Summary and Charts over one reconciled
+  filtering snapshot. Salary-cycle reporting is the default from explicitly
+  confirmed receipt dates; Calendar and inclusive Custom dates remain
+  selectable. Gross Money in, Money out, Net, individual category and
+  merchant-tag rankings, trend, statement coverage gaps and comparisons drill
+  down to the exact matching transactions, with Category, Merchant-Tag,
+  Untagged and Period Comparison detail pages.
 - **Settings** — manage the profile, financial accounts, categories, merchant
   tags, and aliases.
 
@@ -55,12 +62,12 @@ billing seam is a mock, not a payment integration.
 
 ## Stack
 
-| Layer | Technology |
-| --- | --- |
-| Frontend | Next.js 16 App Router (TypeScript, Tailwind 4, npm) |
-| Backend | ASP.NET Core on .NET 10 (PostgreSQL, structured logging) |
+| Layer           | Technology                                                  |
+| --------------- | ----------------------------------------------------------- |
+| Frontend        | Next.js 16 App Router (TypeScript, Tailwind 4, npm)         |
+| Backend         | ASP.NET Core on .NET 10 (PostgreSQL, structured logging)    |
 | Auth (frontend) | Auth.js v5 (JWT session wrapping the backend session token) |
-| Database | PostgreSQL |
+| Database        | PostgreSQL                                                  |
 
 One git repository, two independently buildable trees. There is no root
 package manifest or solution file; run commands inside `backend/` or
@@ -177,6 +184,8 @@ URL must name the dedicated `argus_test` database, never the development
   import limits, privacy, parser deployment, and recovery
 - [docs/transaction-workspace-runbook.md](docs/transaction-workspace-runbook.md)
   — filters, classification, bulk operations, and receipts
+- [docs/reporting-runbook.md](docs/reporting-runbook.md) — Overview periods,
+  salary-cycle dates, coverage, reconciliation, migration and recovery
 - [docs/repository-layout.md](docs/repository-layout.md) — full tree,
   commands, HTTP surface, and CI
 - [docs/bootstrap-runbook.md](docs/bootstrap-runbook.md) — first run and

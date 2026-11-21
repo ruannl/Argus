@@ -95,10 +95,10 @@ public sealed class DatabaseRoleConfigurationTests
                   AND c.relname IN ({tables})
                   AND c.relrowsecurity AND c.relforcerowsecurity
                 """;
-            Assert.Equal(13L, Convert.ToInt64(await command.ExecuteScalarAsync()));
+            Assert.Equal(15L, Convert.ToInt64(await command.ExecuteScalarAsync()));
 
             command.CommandText = "SELECT COUNT(*) FROM pg_policies WHERE schemaname = current_schema()";
-            Assert.Equal(26L, Convert.ToInt64(await command.ExecuteScalarAsync()));
+            Assert.Equal(30L, Convert.ToInt64(await command.ExecuteScalarAsync()));
         }
         finally
         {
