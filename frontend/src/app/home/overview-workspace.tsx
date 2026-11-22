@@ -5,6 +5,7 @@ import type { ReportingState } from "@/lib/reporting-state";
 import { reportingHref } from "@/lib/reporting-state";
 import { compareMoneyDescending, formatMoney } from "@/lib/money-format";
 
+import CategoryTrendChart from "./category-trend-chart";
 import PeriodControls from "./period-controls";
 import {
   categoryDetailHref,
@@ -73,10 +74,7 @@ function ViewTabs({ state }: { state: ReportingState }) {
   ] as const;
 
   return (
-    <nav
-      aria-label="Overview views"
-      className="mt-6 inline-flex rounded-full border border-line bg-surface p-1"
-    >
+    <nav aria-label="Overview views" className="finance-tabs mt-5">
       {tabs.map(([view, label]) => (
         <Link
           aria-current={state.view === view ? "page" : undefined}
@@ -277,7 +275,7 @@ function MoneyCard({
   href?: string;
 }) {
   return (
-    <div className="rounded-[1.25rem] border border-line bg-surface p-4 card-shadow">
+    <div className="finance-summary rounded-[1.25rem] border border-line bg-surface p-4 card-shadow">
       <p className="text-xs font-bold tracking-[0.12em] text-muted uppercase">{label}</p>
       <p className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-ink">
         {href ? (
@@ -461,15 +459,7 @@ function CoveragePanel({ report, state }: { report: ReportResponse; state: Repor
   );
 }
 
-function CategoryBars({
-  report,
-  state,
-  visual,
-}: {
-  report: ReportResponse;
-  state: ReportingState;
-  visual: boolean;
-}) {
+function CategoryBars({ report, state }: { report: ReportResponse; state: ReportingState }) {
   const breakdown = report.categories;
   if (!breakdown) {
     return null;
@@ -517,11 +507,9 @@ function CategoryBars({
                     <Amount value={rank.amount} />
                   </span>
                 </div>
-                {visual ? (
-                  <div aria-hidden="true" className="mt-1 h-2 rounded-full bg-elevated">
-                    <div className="h-2 rounded-full bg-accent" style={percentStyle(rank.share)} />
-                  </div>
-                ) : null}
+                <div aria-hidden="true" className="category-share-track mt-1">
+                  <div className="category-share-fill" style={percentStyle(rank.share)} />
+                </div>
                 <div className="mt-1 flex flex-wrap justify-between gap-2 text-xs text-muted">
                   <span>
                     {rank.count} {rank.count === 1 ? "transaction" : "transactions"}
@@ -1123,6 +1111,9 @@ export default function OverviewWorkspace({
           {startsError}
         </p>
       ) : null}
+      {report.category_trend ? (
+        <CategoryTrendChart state={state} trend={report.category_trend} />
+      ) : null}
       <PeriodControls
         accounts={accounts}
         categories={categories}
@@ -1138,7 +1129,7 @@ export default function OverviewWorkspace({
           <MoneyCards report={report} state={state} />
           <HiddenAndExcluded report={report} state={state} />
           <ComparisonSummary report={report} state={state} />
-          <CategoryBars report={report} state={state} visual={state.view === "charts"} />
+          <CategoryBars report={report} state={state} />
           <TagBars report={report} state={state} visual={state.view === "charts"} />
           <TrendPanel report={report} state={state} />
         </>

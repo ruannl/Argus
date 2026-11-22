@@ -38,10 +38,10 @@ function MerchantTagRow({ tag }: { tag: MerchantTag }) {
   return (
     <Fragment>
       <tr className={TABLE_ROW_CLASS}>
-        <td className={TD_CLASS}>
+        <td data-label="Tag" className={TD_CLASS}>
           <p className="font-semibold text-ink">{tag.display_name}</p>
         </td>
-        <td className={TD_CLASS}>
+        <td data-label="Status" className={TD_CLASS}>
           <span
             className={`${STATUS_PILL_CLASS} ${
               tag.is_archived
@@ -52,11 +52,11 @@ function MerchantTagRow({ tag }: { tag: MerchantTag }) {
             {tag.is_archived ? "Archived" : "Active"}
           </span>
         </td>
-        <td className={`${TD_CLASS} text-muted tabular-nums`}>
+        <td data-label="Transactions" className={`${TD_CLASS} text-muted tabular-nums`}>
           {tag.transaction_count} {tag.transaction_count === 1 ? "transaction" : "transactions"}{" "}
           assigned
         </td>
-        <td className={TD_CLASS}>
+        <td data-label="Actions" className={TD_CLASS}>
           <div className="flex flex-wrap justify-end gap-2">
             <button
               aria-controls={editorId}
@@ -163,7 +163,7 @@ export default function MerchantTagsSection({ tags }: { tags: MerchantTag[] }) {
         action={async (formData) => {
           setCreateResult(await createMerchantTagAction(formData));
         }}
-        className="mt-5 flex flex-wrap items-end gap-3 rounded-3xl border border-line bg-surface p-4 sm:p-5"
+        className="finance-unboxed mt-5 flex flex-wrap items-end gap-3"
       >
         <div className="min-w-[12rem] flex-1">
           <label className={LABEL_CLASS} htmlFor="new-merchant-tag-name">
@@ -187,7 +187,7 @@ export default function MerchantTagsSection({ tags }: { tags: MerchantTag[] }) {
         <p className={EMPTY_STATE_CLASS}>No tags yet. Add your first tag above.</p>
       ) : (
         <div className={TABLE_WRAPPER_CLASS}>
-          <table className={`${TABLE_CLASS} min-w-[38rem]`}>
+          <table role="table" aria-label="Merchant tags" className={`${TABLE_CLASS} min-w-[38rem]`}>
             <thead className={TABLE_HEAD_CLASS}>
               <tr>
                 <th className={TH_CLASS} scope="col">

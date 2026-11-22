@@ -156,3 +156,6 @@ jobs:
 
       - name: Playwright E2E tests
         run: npm run test:e2e
+
+      - name: Authenticated synthetic finance presentation tests
+        run: npm run test:e2e:finance

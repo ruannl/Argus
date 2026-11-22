@@ -110,6 +110,7 @@ const pageData: TransactionPage = {
     transfers: { count: 0, money_in: "0.00", money_out: "0.00", absolute: "0.00" },
     excluded: { count: 0, money_in: "0.00", money_out: "0.00", absolute: "0.00" },
   },
+  suggestions: [],
 };
 
 const prepared: TransactionOperation = {
@@ -219,7 +220,12 @@ function workspaceElement(overrides: WorkspaceOverrides = {}) {
 }
 
 function renderWorkspace(overrides: WorkspaceOverrides = {}) {
-  return render(workspaceElement(overrides));
+  const view = render(workspaceElement(overrides));
+  const expand = screen.queryByRole("button", { name: "Show bulk edit" });
+  if (expand) {
+    act(() => expand.click());
+  }
+  return view;
 }
 
 describe("transactions workspace", () => {
@@ -238,13 +244,125 @@ describe("transactions workspace", () => {
 
   afterEach(() => vi.restoreAllMocks());
 
+  it("starts with the bulk edit collapsed while matching transactions stay visible", async () => {
+    const user = userEvent.setup();
+    render(workspaceElement());
+
+    expect(screen.getByRole("table", { name: "Matching transactions" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select this page" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show bulk edit" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Select all matching filters" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show bulk edit" }));
+
+    expect(screen.getByRole("button", { name: "Hide bulk edit" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Select all matching filters" })).toBeInTheDocument();
+  });
+
   it("renders truthful counts, exact amounts and hidden-count copy", () => {
     renderWorkspace();
 
     expect(screen.getByText(/1 visible and 0 hidden match these filters/)).toBeInTheDocument();
+    expect(screen.getByText("1 transaction filtered")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Tags" })).toBeInTheDocument();
+    expect(screen.getByText("No tags")).toBeInTheDocument();
     expect(screen.getByText("Row one")).toBeInTheDocument();
     expect(screen.getByText("-10.00 ZAR")).toBeInTheDocument();
     expect(screen.queryByText("No transactions yet")).not.toBeInTheDocument();
+  });
+
+  it("shows a dedicated Tags column with assigned and archived tags", () => {
+    const tagged = {
+      ...row,
+      merchant_tags: [
+        { id: "tag-1", display_name: "Coffee", is_archived: false },
+        { id: "tag-2", display_name: "Old tag", is_archived: true },
+      ],
+    };
+    renderWorkspace({ initialPage: { ...pageData, transactions: [tagged] } });
+
+    const table = screen.getByRole("table", { name: "Matching transactions" });
+    expect(within(table).getByRole("columnheader", { name: "Tags" })).toBeInTheDocument();
+    const tagsCell = within(table).getByText("Coffee").closest("td");
+    expect(tagsCell).toHaveAttribute("data-label", "Tags");
+    expect(within(tagsCell as HTMLElement).getByText("Old tag (archived)")).toBeInTheDocument();
+  });
+
+  it("shows up to three suggested tags and adds one from the row", async () => {
+    const user = userEvent.setup();
+    const suggested = [
+      { id: "tag-3", display_name: "Suggested one", is_archived: false },
+      { id: "tag-4", display_name: "Suggested two", is_archived: false },
+      { id: "tag-5", display_name: "Suggested three", is_archived: false },
+      { id: "tag-6", display_name: "Hidden fourth", is_archived: false },
+    ];
+    vi.mocked(saveTransactionAction).mockResolvedValue({
+      ok: true,
+      value: {
+        transaction: { ...row, version: 2, merchant_tags: [suggested[0]] },
+        selected_count: 1,
+        changed_count: 1,
+        unchanged_count: 0,
+      },
+    });
+    renderWorkspace({
+      initialPage: {
+        ...pageData,
+        suggestions: [
+          { transaction_id: "txn-1", suggested_tags: suggested, has_more_suggestions: true },
+        ],
+      },
+    });
+
+    expect(
+      screen.getByRole("button", { name: /Add suggested tag Suggested one/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Suggested: Suggested two")).toBeInTheDocument();
+    expect(screen.getByText("Suggested: Suggested three")).toBeInTheDocument();
+    expect(screen.queryByText("Suggested: Hidden fourth")).not.toBeInTheDocument();
+    expect(screen.queryByText("No tags")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Add suggested tag Suggested one/ }));
+
+    expect(saveTransactionAction).toHaveBeenCalledWith({
+      id: "txn-1",
+      expected_version: 1,
+      changes: { add_tag_ids: ["tag-3"] },
+    });
+  });
+
+  it("keeps complete monetary and classification labels in reflowable records", () => {
+    renderWorkspace();
+    const table = screen.getByRole("table", { name: "Matching transactions" });
+    expect(within(table).getByText("-10.00 ZAR").closest("td")).toHaveAttribute(
+      "data-label",
+      "Amount",
+    );
+    expect(within(table).getByText("Confirmed")).toBeInTheDocument();
+    expect(within(table).getByText("Groceries (Expense)").closest("td")).toHaveAttribute(
+      "data-label",
+      "Classification",
+    );
+    expect(within(table).getByText("Groceries (Expense)")).not.toHaveClass("border-dashed");
+    const nav = screen.getByRole("navigation", { name: "Workspace" });
+    const links = within(nav).getAllByRole("link");
+    expect(links).toHaveLength(4);
+    expect(links.map((link) => link.textContent)).toEqual([
+      "Overview",
+      "Transactions",
+      "Imports",
+      "Settings",
+    ]);
+    expect(nav.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(4);
+    expect(screen.queryByText("Workspace", { exact: true })).not.toBeInTheDocument();
   });
 
   it("clears the search filter with the clear button", async () => {
@@ -304,7 +422,11 @@ describe("transactions workspace", () => {
       initialPage: { ...pageData, transactions: [uncategorisedRow] },
     });
 
-    expect(screen.getByText("Uncategorised (Uncategorised)")).toHaveClass("border-warning-line");
+    expect(
+      within(screen.getByRole("table", { name: "Matching transactions" })).getByText(
+        "Uncategorised",
+      ),
+    ).toHaveClass("border-warning-line");
   });
 
   it("marks unconfirmed categories and filters to them", async () => {
@@ -313,12 +435,108 @@ describe("transactions workspace", () => {
     renderWorkspace({ initialPage: { ...pageData, transactions: [unconfirmed] } });
 
     expect(screen.getByText("Unconfirmed")).toBeInTheDocument();
+    const table = screen.getByRole("table", { name: "Matching transactions" });
+    const unconfirmedBadge = within(table).getByText("Groceries (Expense)");
+    expect(unconfirmedBadge).toHaveClass("border-dashed");
+    expect(unconfirmedBadge).toHaveClass("border-warning-line");
     await user.click(screen.getByRole("button", { name: "Suggested or unconfirmed" }));
 
     await waitFor(() => {
       const call = vi.mocked(queryTransactionsAction).mock.calls.at(-1)?.[0];
       expect(call?.filters?.category_confirmed).toBe(false);
     });
+  });
+
+  it("confirms an unconfirmed category from its badge and keeps the inline editor", async () => {
+    const user = userEvent.setup();
+    const unconfirmed = { ...row, category_confirmed: false };
+    vi.mocked(saveTransactionAction).mockResolvedValue({
+      ok: true,
+      value: {
+        transaction: { ...unconfirmed, category_confirmed: true, version: 2 },
+        selected_count: 1,
+        changed_count: 1,
+        unchanged_count: 0,
+      },
+    });
+    renderWorkspace({ initialPage: { ...pageData, transactions: [unconfirmed] } });
+
+    await user.click(
+      screen.getByRole("button", { name: "Confirm category Groceries for Row one" }),
+    );
+
+    expect(saveTransactionAction).toHaveBeenCalledWith({
+      id: "txn-1",
+      expected_version: 1,
+      changes: { confirm_category: true },
+    });
+    expect(await screen.findByText("Category confirmed.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit inline" })).toBeInTheDocument();
+  });
+
+  it("offers one-click tag suggestions in the inline editor without pre-applying them", async () => {
+    const user = userEvent.setup();
+    const unconfirmed = { ...row, category_confirmed: false };
+    vi.mocked(loadTransactionAction).mockResolvedValue({
+      ok: true,
+      value: {
+        transaction: unconfirmed,
+        suggested_tags: [
+          { id: "tag-suggested", display_name: "Suggested Cafe", is_archived: false },
+          { id: "tag-coffee", display_name: "Already assigned", is_archived: false },
+        ],
+        has_more_suggestions: false,
+        source_page: null,
+        source_row_number: 1,
+      },
+    });
+    vi.mocked(saveTransactionAction).mockResolvedValue({
+      ok: true,
+      value: {
+        transaction: {
+          ...unconfirmed,
+          version: 2,
+          merchant_tags: [
+            { id: "tag-suggested", display_name: "Suggested Cafe", is_archived: false },
+          ],
+        },
+        selected_count: 1,
+        changed_count: 1,
+        unchanged_count: 0,
+      },
+    });
+    renderWorkspace({
+      initialPage: {
+        ...pageData,
+        transactions: [
+          {
+            ...unconfirmed,
+            merchant_tags: [
+              { id: "tag-coffee", display_name: "Already assigned", is_archived: false },
+            ],
+          },
+        ],
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Edit inline" }));
+
+    const suggestion = await screen.findByRole("button", {
+      name: "Add suggested tag Suggested Cafe",
+    });
+    expect(saveTransactionAction).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: "Add suggested tag Already assigned" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(suggestion);
+
+    expect(saveTransactionAction).toHaveBeenCalledWith({
+      id: "txn-1",
+      expected_version: 1,
+      changes: { add_tag_ids: ["tag-suggested"] },
+    });
+    expect(await screen.findByText(/Suggested tag “Suggested Cafe” added\./)).toBeInTheDocument();
   });
 
   it("prepares a bulk category confirmation without changing categories", async () => {
@@ -839,7 +1057,10 @@ describe("transactions workspace", () => {
     await user.click(screen.getByRole("checkbox", { name: /Select transaction Row one/ }));
     expect(screen.getByText(/1 transaction selected\./)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Edit inline" }));
+    const inlineToggle = screen.getByRole("button", { name: "Edit inline" });
+    expect(inlineToggle).toHaveAttribute("aria-controls", "inline-editor-txn-1");
+    await user.click(inlineToggle);
+    expect(document.getElementById("inline-editor-txn-1")).toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText("Inline category for Row one"), "cat-2");
     await user.click(screen.getByRole("button", { name: "Save inline changes" }));
 
@@ -849,6 +1070,8 @@ describe("transactions workspace", () => {
       changes: { category_id: "cat-2" },
     });
     expect(await screen.findByText("Inline change saved.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Inline category for Row one")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit inline" })).toBeInTheDocument();
     expect(queryTransactionsAction).toHaveBeenCalled();
     expect(await screen.findByText(/0 transactions selected\./)).toBeInTheDocument();
   });
@@ -889,9 +1112,12 @@ describe("transactions workspace", () => {
       version: 2,
       category: { ...row.category, id: "cat-2", display_name: "Travel" },
     };
-    vi.mocked(loadTransactionAction)
-      .mockResolvedValueOnce({ ok: true, value: detailFor(row) })
-      .mockResolvedValue({ ok: true, value: detailFor(rowTwo) });
+    // Suggestions load when the inline editor opens; the drawer read is separate.
+    let drawerOpened = false;
+    vi.mocked(loadTransactionAction).mockImplementation(async (id: string) => ({
+      ok: true,
+      value: id === row.id && !drawerOpened ? detailFor(row) : detailFor(rowTwo),
+    }));
     vi.mocked(saveTransactionAction)
       .mockResolvedValueOnce({
         ok: true,
@@ -919,6 +1145,7 @@ describe("transactions workspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Edit inline" }));
     await user.click(screen.getByRole("button", { name: /Row one/ }));
+    drawerOpened = true;
     const dialog = await screen.findByRole("dialog");
     await user.selectOptions(within(dialog).getByLabelText("Category"), "cat-2");
     await user.click(within(dialog).getByRole("button", { name: "Save classification" }));
@@ -942,6 +1169,7 @@ describe("transactions workspace", () => {
 
     await user.click(within(dialog).getByRole("button", { name: "Close detail" }));
     await user.click(screen.getByRole("button", { name: "Close inline editor" }));
+    drawerOpened = false;
     await user.click(screen.getByRole("button", { name: "Edit inline" }));
 
     const reopenedCategory = screen.getByLabelText(

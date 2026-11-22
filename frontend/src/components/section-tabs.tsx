@@ -7,7 +7,7 @@ export type SectionTab = {
   key: string;
   label: string;
   panel: ReactNode;
-  /** Marks the tab as having pending work, without changing its label. */
+  /** Adds a written pending-work marker alongside the unchanged destination. */
   attention?: boolean;
 };
 
@@ -91,18 +91,14 @@ export default function SectionTabs({
 
   return (
     <div>
-      <div
-        aria-label={label}
-        className="flex flex-wrap gap-1 rounded-2xl border border-line bg-surface p-1"
-        role="tablist"
-      >
+      <div aria-label={label} className="finance-tabs flex flex-wrap gap-1" role="tablist">
         {tabs.map((tab) => {
           const isActive = tab.key === activeTab;
           return (
             <button
               aria-controls={`${idPrefix}-panel-${tab.key}`}
               aria-selected={isActive}
-              className={`${TAB_CLASS} border-2 ${
+              className={`${TAB_CLASS} border ${
                 tab.attention ? "border-warning-line" : "border-transparent"
               } ${isActive ? ACTIVE_TAB_CLASS : INACTIVE_TAB_CLASS}`}
               title={tab.attention ? "There is work waiting in this section." : undefined}
@@ -118,6 +114,12 @@ export default function SectionTabs({
               type="button"
             >
               {tab.label}
+              {tab.attention ? (
+                <>
+                  {" "}
+                  <span className="finance-waiting">Waiting</span>
+                </>
+              ) : null}
             </button>
           );
         })}

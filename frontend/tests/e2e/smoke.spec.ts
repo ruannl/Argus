@@ -218,3 +218,17 @@ test("the theme defaults to dark and the toggle persists light", async ({ page }
   await page.reload();
   await expect(html).not.toHaveClass(/dark/);
 });
+
+test("public pages do not request the finance workspace font", async ({ page }) => {
+  const fontRequests: string[] = [];
+  page.on("request", (request) => {
+    if (/\.woff2($|\?)/.test(request.url())) {
+      fontRequests.push(request.url());
+    }
+  });
+
+  await page.goto("/login");
+  await page.waitForLoadState("networkidle");
+
+  expect(fontRequests).toEqual([]);
+});

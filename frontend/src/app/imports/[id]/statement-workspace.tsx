@@ -192,7 +192,12 @@ export default function StatementWorkspace({ detail }: StatementWorkspaceProps) 
             This permanently deletes {summary.statement_label} and exactly its{" "}
             {detail.expected_transaction_count} owned transaction
             {detail.expected_transaction_count === 1 ? "" : "s"}. Other imports and their
-            transactions are untouched. A clean re-import becomes possible.
+            transactions are untouched. This cannot be undone. Duplicate-protection records for this
+            statement are removed, so a clean re-import becomes possible.
+          </p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-warning-ink">
+            Confirmed salary-cycle dates are independent reporting metadata and remain after source
+            deletion. Manage those dates separately in Overview → Salary cycles.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button

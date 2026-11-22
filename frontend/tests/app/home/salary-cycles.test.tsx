@@ -85,6 +85,7 @@ const page: TransactionPage = {
     transfers: { count: 0, money_in: "0.00", money_out: "0.00", absolute: "0.00" },
     excluded: { count: 0, money_in: "0.00", money_out: "0.00", absolute: "0.00" },
   },
+  suggestions: [],
 };
 
 const confirmPreview: SalaryCyclePreview = {

@@ -124,9 +124,13 @@ describe("import workspace", () => {
     await user.click(screen.getByRole("button", { name: "Inspect statement" }));
     await waitFor(() => {
       expect(
-        screen.getByText("Inspection complete. Confirm the mapping, ZAR, and statement dates."),
+        screen.getByText("Inspection complete. Confirm the mapping and statement dates."),
       ).toBeInTheDocument();
     });
+    expect(screen.queryByLabelText(/South African rand/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText("This workspace accepts ZAR statements only.", { exact: false }),
+    ).toBeInTheDocument();
 
     const headerLine = screen.getByLabelText("Header line");
     await user.clear(headerLine);
@@ -142,15 +146,16 @@ describe("import workspace", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("Header line")).toHaveValue("2");
     });
-    await user.click(screen.getByLabelText(/South African rand/));
     await user.click(screen.getByRole("button", { name: "Prepare review" }));
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/imports/review/review-id"));
     expect(prepareBodies).toHaveLength(1);
+    expect(prepareBodies[0].confirm_zar).toBe(true);
     const config = prepareBodies[0].parser_config as Record<string, unknown>;
     expect(config.header_line).toBe(2);
     expect(config.negative_style).toBe("parentheses");
     expect(inspectBodies).toHaveLength(2);
+    expect(inspectBodies.every((body) => body.confirm_zar === true)).toBe(true);
   });
 
   it("does not offer PDF import and rejects a selected PDF", () => {

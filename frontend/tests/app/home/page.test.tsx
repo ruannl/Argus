@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/auth", () => ({
@@ -73,6 +74,85 @@ function descriptor(overrides: Partial<ReportFilterDescriptor> = {}): ReportFilt
     excluded_category_ids: null,
     ...overrides,
   } as ReportFilterDescriptor;
+}
+
+const TREND_MONTHS = [
+  ["2026-06-01", "2026-06-30", "Jun 2026", false, "covered"],
+  ["2026-07-01", "2026-07-31", "Jul 2026", false, "covered"],
+  ["2026-08-01", "2026-08-31", "Aug 2026", false, "covered"],
+  ["2026-09-01", "2026-09-30", "Sep 2026", false, "covered"],
+  ["2026-10-01", "2026-10-31", "Oct 2026", false, "covered"],
+  ["2026-11-01", "2026-11-15", "Nov 2026", true, "partial"],
+] as const;
+
+const trendAccountId = "99999999-9999-4999-8999-999999999999";
+
+function trendCell(
+  categoryId: string,
+  startDate: string,
+  endDate: string,
+  amount: string,
+  count: number,
+) {
+  return {
+    amount,
+    count,
+    descriptor: descriptor({
+      start_date: startDate,
+      end_date: endDate,
+      financial_account_id: trendAccountId,
+      category_id: categoryId,
+      direction: "out",
+    }),
+  };
+}
+
+function categoryTrendFixture(): NonNullable<ReportResponse["category_trend"]> {
+  const months = TREND_MONTHS.map(([startDate, endDate, label, isPartial, coverage]) => ({
+    start_date: startDate,
+    end_date: endDate,
+    label,
+    is_partial: isPartial,
+    coverage,
+  }));
+  const groceries = "44444444-4444-4444-4444-444444444444";
+  const transport = "88888888-8888-4888-8888-888888888888";
+  const groceryAmounts = ["600.00", "700.00", "800.00", "900.00", "1000.00", "175.00"];
+  const transportAmounts = ["100.00", "0.00", "200.00", "0.00", "50.00", "0.00"];
+
+  return {
+    months,
+    categories: [
+      {
+        id: groceries,
+        display_name: "Groceries",
+        kind: "Expense",
+        is_archived: false,
+        money_out: "4175.00",
+        count: 6,
+        months: TREND_MONTHS.map(([startDate, endDate], index) =>
+          trendCell(groceries, startDate, endDate, groceryAmounts[index], 1),
+        ),
+      },
+      {
+        id: transport,
+        display_name: "Transport",
+        kind: "Expense",
+        is_archived: false,
+        money_out: "350.00",
+        count: 3,
+        months: TREND_MONTHS.map(([startDate, endDate], index) =>
+          trendCell(
+            transport,
+            startDate,
+            endDate,
+            transportAmounts[index],
+            transportAmounts[index] === "0.00" ? 0 : 1,
+          ),
+        ),
+      },
+    ],
+  };
 }
 
 function readyReport(overrides: Partial<ReportResponse> = {}): ReportResponse {
@@ -330,6 +410,7 @@ function readyReport(overrides: Partial<ReportResponse> = {}): ReportResponse {
         money_out_descriptor: descriptor({ direction: "out" }),
       },
     ],
+    category_trend: categoryTrendFixture(),
     coverage: {
       current: {
         total_days: 15,
@@ -367,6 +448,7 @@ function setupReport(): ReportResponse {
     categories: null,
     tags: null,
     trend: null,
+    category_trend: null,
     coverage: null,
     setup: {
       reason: "no_salary_boundaries",
@@ -447,6 +529,22 @@ describe("home page", () => {
     expect(screen.getAllByText("Corner shop").length).toBeGreaterThan(0);
   });
 
+  it("draws a proportional bar for every category in the breakdown on Summary", async () => {
+    signedIn();
+    vi.mocked(loadReportPage).mockResolvedValue({
+      ok: true,
+      account,
+      inventory: { accounts: [], categories: [], tags: [] },
+      report: readyReport(),
+    });
+
+    render(await HomePage());
+
+    const breakdown = screen.getByRole("region", { name: "Category breakdown" });
+    expect(breakdown.querySelectorAll(".category-share-track")).toHaveLength(4);
+    expect(breakdown.querySelectorAll(".category-share-fill")).toHaveLength(4);
+  });
+
   it("explains the shared trend scale and the real length of each bucket", async () => {
     signedIn();
     vi.mocked(loadReportPage).mockResolvedValue({
@@ -464,6 +562,110 @@ describe("home page", () => {
     expect(within(trend).getByText("2026-11-01 – 2026-11-07 · 7 days")).toBeInTheDocument();
     expect(within(trend).getByText("R 0.00")).toBeInTheDocument();
     expect(within(trend).getAllByText("Money out").length).toBeGreaterThan(0);
+  });
+
+  it("defaults the category trend to the latest three months and keeps each category separate", async () => {
+    signedIn();
+    vi.mocked(loadReportPage).mockResolvedValue({
+      ok: true,
+      account,
+      inventory: { accounts: [], categories: [], tags: [] },
+      report: readyReport(),
+    });
+
+    render(await HomePage());
+
+    const trend = screen.getByRole("region", { name: "Category spending trend" });
+    expect(within(trend).getByRole("button", { name: "3 months" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(trend).getByRole("button", { name: "2 months" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+
+    const table = within(trend).getByRole("table", {
+      name: /Included Money out by category and month/,
+    });
+    expect(within(table).getByRole("columnheader", { name: /Sep 2026/ })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: /Oct 2026/ })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: /Nov 2026/ })).toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: /Aug 2026/ })).not.toBeInTheDocument();
+    expect(within(table).getByRole("rowheader", { name: "Groceries" })).toBeInTheDocument();
+    expect(within(table).getByRole("rowheader", { name: "Transport" })).toBeInTheDocument();
+    expect(within(table).getByRole("cell", { name: "R 2 075.00" })).toBeInTheDocument();
+  });
+
+  it("switches the category trend between two, three and six months with exact drill-down values", async () => {
+    signedIn();
+    vi.mocked(loadReportPage).mockResolvedValue({
+      ok: true,
+      account,
+      inventory: { accounts: [], categories: [], tags: [] },
+      report: readyReport(),
+    });
+
+    const user = userEvent.setup();
+    render(await HomePage());
+
+    const trend = screen.getByRole("region", { name: "Category spending trend" });
+    const table = within(trend).getByRole("table", {
+      name: /Included Money out by category and month/,
+    });
+
+    await user.click(within(trend).getByRole("button", { name: "2 months" }));
+    expect(within(trend).getByRole("button", { name: "2 months" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(table).queryByRole("columnheader", { name: /Sep 2026/ })).not.toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: /Oct 2026/ })).toBeInTheDocument();
+    expect(within(table).getByRole("rowheader", { name: "Transport" })).toBeInTheDocument();
+
+    const groceriesRow = within(table).getByRole("row", { name: /Groceries/ });
+    const octoberLink = within(groceriesRow).getByRole("link", { name: "R 1 000.00" });
+    const href = octoberLink.getAttribute("href") ?? "";
+    expect(href).toContain("start_date=2026-10-01");
+    expect(href).toContain("end_date=2026-10-31");
+    expect(href).toContain("financial_account_id=99999999-9999-4999-8999-999999999999");
+    expect(href).toContain("category_id=44444444-4444-4444-4444-444444444444");
+    expect(href).toContain("direction=out");
+    expect(href).toContain("calculation_scope=included");
+
+    await user.click(within(trend).getByRole("button", { name: "6 months" }));
+    expect(within(trend).getByRole("button", { name: "6 months" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(table).getByRole("columnheader", { name: /Jun 2026/ })).toBeInTheDocument();
+    expect(within(table).getByRole("cell", { name: "R 4 175.00" })).toBeInTheDocument();
+  });
+
+  it("keeps the category trend honest when the selected range has no recorded spending", async () => {
+    const fixture = categoryTrendFixture();
+    signedIn();
+    vi.mocked(loadReportPage).mockResolvedValue({
+      ok: true,
+      account,
+      inventory: { accounts: [], categories: [], tags: [] },
+      report: readyReport({
+        category_trend: { months: fixture.months, categories: [] },
+      }),
+    });
+
+    render(await HomePage());
+
+    const trend = screen.getByRole("region", { name: "Category spending trend" });
+    expect(within(trend).getByText("Nov 2026: Partial coverage")).toBeInTheDocument();
+    expect(
+      within(trend).getByText(/No recorded included Money out in the last 3 months/),
+    ).toBeInTheDocument();
+    expect(
+      within(trend).getByText(
+        /An absent bar is not a claim of zero spending where statement coverage is missing/,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("shows salary setup with Calendar and Custom alternatives, never invented dates", async () => {

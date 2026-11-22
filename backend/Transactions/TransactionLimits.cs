@@ -33,6 +33,8 @@ public static class TransactionLimits
 
     public const int MaxSuggestions = 20;
 
+    public const int MaxRowSuggestions = 3;
+
     public const int QueryBodyBytes = 16 * 1024;
 
     public const int MutationBodyBytes = 256 * 1024;

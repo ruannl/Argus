@@ -235,6 +235,27 @@ public sealed record ReportBucketResponse(string StartDate,
                                           ReportFilterDescriptor MoneyInDescriptor,
                                           ReportFilterDescriptor MoneyOutDescriptor);
 
+public sealed record ReportCategoryTrendMonthResponse(string StartDate,
+                                                       string EndDate,
+                                                       string Label,
+                                                       bool IsPartial,
+                                                       string Coverage);
+
+public sealed record ReportCategoryTrendCellResponse(string Amount,
+                                                      long Count,
+                                                      ReportFilterDescriptor Descriptor);
+
+public sealed record ReportCategoryTrendCategoryResponse(Guid Id,
+                                                          string DisplayName,
+                                                          string Kind,
+                                                          bool IsArchived,
+                                                          string MoneyOut,
+                                                          long Count,
+                                                          ReportCategoryTrendCellResponse[] Months);
+
+public sealed record ReportCategoryTrendResponse(ReportCategoryTrendMonthResponse[] Months,
+                                                  ReportCategoryTrendCategoryResponse[] Categories);
+
 public sealed record ReportTotalsResponse(ReportMoneyResponse Money,
                                           ReportFilterDescriptor MoneyInDescriptor,
                                           ReportFilterDescriptor MoneyOutDescriptor,
@@ -321,6 +342,7 @@ public sealed record ReportResponse(string Status,
                                     ReportCategoryBreakdownResponse? Categories,
                                     ReportTagBreakdownResponse? Tags,
                                     ReportBucketResponse[]? Trend,
+                                    ReportCategoryTrendResponse? CategoryTrend,
                                     ReportCoveragePairResponse? Coverage,
                                     ReportGroupTotalsResponse? FocusGroup,
                                     ReportTransactionPageResponse? Transactions,

@@ -40,7 +40,7 @@ export function TrendLegend() {
   return (
     <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-muted">
       <span className="inline-flex items-center gap-1.5">
-        <span aria-hidden="true" className="h-2.5 w-2.5 rounded-sm bg-accent" />
+        <span aria-hidden="true" className="h-2.5 w-2.5 rounded-sm bg-chart-in" />
         Money in
       </span>
       <span className="inline-flex items-center gap-1.5">
@@ -79,7 +79,7 @@ export function TrendBarPlot({
         <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-line" />
         <div className="absolute inset-x-0 bottom-0 border-t border-line" />
         <div className="absolute inset-0 flex items-end gap-2">
-          <div className="w-1/2 rounded-t bg-accent" style={heightStyle(bucket.money_in_share)} />
+          <div className="w-1/2 rounded-t bg-chart-in" style={heightStyle(bucket.money_in_share)} />
           <div
             className="w-1/2 rounded-t bg-chart-out"
             style={heightStyle(bucket.money_out_share)}

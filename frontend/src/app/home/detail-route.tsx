@@ -61,7 +61,6 @@ export default async function DetailRoute({ kind, id, path, searchParams }: Deta
         account={account}
         activeNav="overview"
         description="A focused view of the money behind the Overview."
-        eyebrow="Overview"
         title="Invalid Overview options"
       >
         <section className="mt-8 rounded-[2rem] border border-warning-line bg-warning-soft p-6">
@@ -111,7 +110,6 @@ export default async function DetailRoute({ kind, id, path, searchParams }: Deta
         account={account}
         activeNav="overview"
         description="A focused view of the money behind the Overview."
-        eyebrow="Overview"
         title="Report unavailable"
       >
         <section className="mt-8 rounded-[2rem] border border-warning-line bg-warning-soft p-6">
@@ -147,7 +145,6 @@ export default async function DetailRoute({ kind, id, path, searchParams }: Deta
       account={data.account}
       activeNav="overview"
       description="A focused view of the money behind the Overview, with the same filtered transactions."
-      eyebrow="Overview"
       title={kind === "comparison" ? "Period Comparison" : "Overview detail"}
     >
       <ReportDetail

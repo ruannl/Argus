@@ -21,6 +21,7 @@ import {
   loadTransactionAction,
   prepareTransactionsAction,
   queryTransactionsAction,
+  saveTransactionAction,
 } from "@/lib/server/transaction-actions";
 import type {
   Category,
@@ -34,14 +35,17 @@ import type {
   TransactionPage,
   TransactionPrepareInput,
   TransactionRow,
+  TransactionTagRef,
 } from "@/lib/server/backend-client";
 
+import { formatCategoryLabel } from "@/lib/category-label";
 import { sortByDisplayName } from "@/lib/display-order";
 import { formatMoney } from "@/lib/money-format";
 
 import { visibleTags } from "./classification-order";
 import TransactionDetailView from "./transaction-detail";
 import TransactionInlineEditor from "./transaction-inline-editor";
+import type { TransactionTagSuggestions } from "./transaction-inline-editor";
 
 export type TransactionsInitialQuery = {
   filters: TransactionFilters;
@@ -179,8 +183,25 @@ export default function TransactionsWorkspace({
     filters: TransactionFilters;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [bulkExpanded, setBulkExpanded] = useState(false);
 
   const [inlineEditorId, setInlineEditorId] = useState<string | null>(null);
+  // Mirrors `inlineEditorId` so the toggle can decide and load suggestions in
+  // the event handler. Side effects inside a state updater run during render,
+  // which makes Next's router update while React is rendering.
+  const inlineEditorIdRef = useRef<string | null>(null);
+  const [inlineSuggestions, setInlineSuggestions] = useState<{
+    id: string | null;
+    value: TransactionTagSuggestions | null;
+    failed: boolean;
+  }>({ id: null, value: null, failed: false });
+  const inlineSuggestionsRef = useRef<{
+    id: string | null;
+    value: TransactionTagSuggestions | null;
+    failed: boolean;
+  }>({ id: null, value: null, failed: false });
+  const [confirmingRowId, setConfirmingRowId] = useState<string | null>(null);
+  const [addingSuggestionKey, setAddingSuggestionKey] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detail, setDetail] = useState<TransactionDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -954,6 +975,46 @@ export default function TransactionsWorkspace({
     }
   }, []);
 
+  // Loads one row's tag suggestions for the inline editor without opening the
+  // detail drawer. A failed read is reported so the editor shows an honest
+  // message instead of claiming there are no suggestions.
+  const loadRowSuggestions = useCallback(async (id: string) => {
+    let failed = false;
+    let value: TransactionTagSuggestions | null = null;
+    try {
+      const result = await loadTransactionAction(id);
+      if (result.ok) {
+        value = { tags: result.value.suggested_tags, hasMore: result.value.has_more_suggestions };
+      } else {
+        failed = true;
+      }
+    } catch {
+      failed = true;
+    }
+    // A late answer for a row whose editor was closed or replaced is dropped.
+    if (inlineSuggestionsRef.current.id !== id) {
+      return;
+    }
+    setInlineSuggestions({ id, value, failed });
+  }, []);
+
+  const toggleInlineEditor = useCallback(
+    (id: string) => {
+      const isOpen = inlineEditorIdRef.current === id;
+      inlineEditorIdRef.current = isOpen ? null : id;
+      setInlineEditorId(inlineEditorIdRef.current);
+      if (isOpen) {
+        inlineSuggestionsRef.current = { id: null, value: null, failed: false };
+        setInlineSuggestions({ id: null, value: null, failed: false });
+        return;
+      }
+      inlineSuggestionsRef.current = { id, value: null, failed: false };
+      setInlineSuggestions({ id, value: null, failed: false });
+      void loadRowSuggestions(id);
+    },
+    [loadRowSuggestions],
+  );
+
   const closeDetail = useCallback(() => {
     detailRequestRef.current += 1;
     setDetailId(null);
@@ -1007,7 +1068,7 @@ export default function TransactionsWorkspace({
   );
 
   const handleRowSaved = useCallback(
-    (saved: TransactionRow) => {
+    (saved: TransactionRow, closeEditor = false) => {
       // Install the authoritative saved row before reloading. Without this the
       // inline editor briefly compares its saved base version with the old
       // row prop and flashes a stale-draft warning after every successful save.
@@ -1019,6 +1080,13 @@ export default function TransactionsWorkspace({
             }
           : current,
       );
+      if (closeEditor && inlineEditorIdRef.current === saved.id) {
+        inlineEditorIdRef.current = null;
+        setInlineEditorId(null);
+        inlineSuggestionsRef.current = { id: null, value: null, failed: false };
+        setInlineSuggestions({ id: null, value: null, failed: false });
+        setMessage({ tone: "status", text: "Inline change saved." });
+      }
       reloadRow(saved.id);
     },
     [reloadRow],
@@ -1028,12 +1096,110 @@ export default function TransactionsWorkspace({
   // refreshes the authoritative row before any retry can be attempted.
   const handleRowStale = useCallback(
     (id: string, text: string) => {
-      setInlineEditorId((current) => (current === id ? null : current));
+      inlineSuggestionsRef.current = { id: null, value: null, failed: false };
+      setInlineSuggestions({ id: null, value: null, failed: false });
+      if (inlineEditorIdRef.current === id) {
+        inlineEditorIdRef.current = null;
+        setInlineEditorId(null);
+      }
       setMessage({ tone: "error", text });
       reloadRow(id);
     },
     [reloadRow],
   );
+
+  async function confirmRowCategory(row: TransactionRow) {
+    if (inventoryFailed || loading || confirmingRowId !== null || addingSuggestionKey !== null) {
+      return;
+    }
+    setConfirmingRowId(row.id);
+    setMessage(null);
+    try {
+      const result = await saveTransactionAction({
+        id: row.id,
+        expected_version: row.version,
+        changes: { confirm_category: true },
+      });
+      if (!result.ok) {
+        if (result.kind === "version_conflict" || result.kind === "not_found") {
+          handleRowStale(
+            row.id,
+            result.kind === "not_found"
+              ? "That transaction no longer exists in your workspace. The list refresh was requested."
+              : "This transaction changed before it could be confirmed. The list refresh was requested.",
+          );
+          return;
+        }
+        if (result.kind === "unavailable" || result.kind === "unauthorized") {
+          handleRowStale(
+            row.id,
+            result.kind === "unauthorized"
+              ? "Your session expired. Sign in again before retrying."
+              : "The confirmation outcome is uncertain. The list refresh was requested; check the saved value before retrying.",
+          );
+          return;
+        }
+        setMessage({ tone: "error", text: result.message });
+        return;
+      }
+      setMessage({ tone: "status", text: "Category confirmed." });
+      handleRowSaved(result.value.transaction);
+    } catch {
+      handleRowStale(
+        row.id,
+        "The confirmation outcome is uncertain. The list refresh was requested; check the saved value before retrying.",
+      );
+    } finally {
+      setConfirmingRowId(null);
+    }
+  }
+
+  async function acceptRowSuggestedTag(row: TransactionRow, tag: TransactionTagRef) {
+    const key = `${row.id}:${tag.id}`;
+    if (inventoryFailed || loading || addingSuggestionKey !== null || confirmingRowId !== null) {
+      return;
+    }
+    setAddingSuggestionKey(key);
+    setMessage(null);
+    try {
+      const result = await saveTransactionAction({
+        id: row.id,
+        expected_version: row.version,
+        changes: { add_tag_ids: [tag.id] },
+      });
+      if (!result.ok) {
+        if (result.kind === "version_conflict" || result.kind === "not_found") {
+          handleRowStale(
+            row.id,
+            result.kind === "not_found"
+              ? "That transaction no longer exists in your workspace. The list refresh was requested."
+              : "This transaction changed before the suggested tag could be added. The list refresh was requested.",
+          );
+          return;
+        }
+        if (result.kind === "unavailable" || result.kind === "unauthorized") {
+          handleRowStale(
+            row.id,
+            result.kind === "unauthorized"
+              ? "Your session expired. Sign in again before retrying."
+              : "The suggested-tag save outcome is uncertain. The list refresh was requested; check the saved value before retrying.",
+          );
+          return;
+        }
+        setMessage({ tone: "error", text: result.message });
+        return;
+      }
+      setMessage({ tone: "status", text: `Suggested tag “${tag.display_name}” added.` });
+      handleRowSaved(result.value.transaction);
+    } catch {
+      handleRowStale(
+        row.id,
+        "The suggested-tag save outcome is uncertain. The list refresh was requested; check the saved value before retrying.",
+      );
+    } finally {
+      setAddingSuggestionKey(null);
+    }
+  }
 
   const totalPages = data
     ? Math.max(1, Math.ceil(data.filtered_total / Math.max(1, data.page_size)))
@@ -1044,6 +1210,18 @@ export default function TransactionsWorkspace({
         ?.statement_import ?? null)
     : null;
 
+  const suggestionsByTransaction = new Map(
+    (data?.suggestions ?? []).map((suggestion) => [suggestion.transaction_id, suggestion]),
+  );
+  function suggestedTagsFor(row: TransactionRow): TransactionTagRef[] {
+    const suggestion = suggestionsByTransaction.get(row.id);
+    if (!suggestion) {
+      return [];
+    }
+    const assigned = new Set(row.merchant_tags.map((tag) => tag.id));
+    return suggestion.suggested_tags.filter((tag) => !assigned.has(tag.id)).slice(0, 3);
+  }
+
   const preparedAction = prepared?.action ?? null;
 
   return (
@@ -1051,7 +1229,6 @@ export default function TransactionsWorkspace({
       account={account}
       activeNav="transactions"
       description="Search, filter, classify, and hide imported transactions. Counts describe rows, never financial totals."
-      eyebrow="Workspace"
       title="Transactions"
     >
       {overviewHref ? (
@@ -1064,7 +1241,7 @@ export default function TransactionsWorkspace({
       ) : null}
       {data ? (
         <section
-          className="mt-4 rounded-[1.25rem] border border-line bg-surface p-4 card-shadow"
+          className="finance-summary finance-money-strip mt-4 rounded-[1.25rem] border border-line bg-surface p-4 card-shadow"
           aria-label="Filtered list money summary"
         >
           <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2 text-sm">
@@ -1167,10 +1344,7 @@ export default function TransactionsWorkspace({
         </p>
       ) : null}
 
-      <section
-        aria-labelledby="filters-title"
-        className="mt-6 rounded-[2rem] border border-line bg-surface p-5 card-shadow sm:p-6"
-      >
+      <section aria-labelledby="filters-title" className="finance-unboxed mt-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-bold text-ink" id="filters-title">
             Find transactions
@@ -1191,7 +1365,7 @@ export default function TransactionsWorkspace({
         </div>
 
         <form
-          className="mt-4 flex flex-wrap items-end gap-2"
+          className="finance-search-form mt-4 flex flex-wrap items-end gap-2"
           onSubmit={(event) => {
             event.preventDefault();
             changeFilters({ search: searchInput });
@@ -1277,8 +1451,7 @@ export default function TransactionsWorkspace({
               <option value="">All categories</option>
               {sortByDisplayName(categories).map((category) => (
                 <option key={category.id} value={category.id}>
-                  {category.display_name} ({category.kind})
-                  {category.is_archived ? " — archived" : ""}
+                  {formatCategoryLabel(category)}
                 </option>
               ))}
             </select>
@@ -1430,76 +1603,77 @@ export default function TransactionsWorkspace({
           >
             Suggested or unconfirmed
           </button>
-          <label className="ml-auto text-sm font-semibold text-ink">
-            Page size
-            <select
-              className="ml-2 rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
-              onChange={(event) => {
-                const nextSize = Number(event.target.value);
-                viewRef.current = { ...viewRef.current, page: 1, pageSize: nextSize };
-                setPageSize(nextSize);
-                setPage(1);
-                clearSelection();
-                syncUrl(filters, 1, nextSize, sortBy, sortDirection, null);
-                void runQuery(filters, 1, nextSize, sortBy, sortDirection);
-              }}
-              value={pageSize}
-            >
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
-          </label>
+          <div className="ml-auto flex flex-wrap items-center gap-3">
+            {data ? (
+              <p className="text-sm text-muted">
+                {data.filtered_total} {data.filtered_total === 1 ? "transaction" : "transactions"}{" "}
+                filtered
+              </p>
+            ) : null}
+            <label className="text-sm font-semibold text-ink">
+              Page size
+              <select
+                className="ml-2 rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
+                onChange={(event) => {
+                  const nextSize = Number(event.target.value);
+                  viewRef.current = { ...viewRef.current, page: 1, pageSize: nextSize };
+                  setPageSize(nextSize);
+                  setPage(1);
+                  clearSelection();
+                  syncUrl(filters, 1, nextSize, sortBy, sortDirection, null);
+                  void runQuery(filters, 1, nextSize, sortBy, sortDirection);
+                }}
+                value={pageSize}
+              >
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </label>
+          </div>
         </div>
       </section>
 
       {data ? (
-        <section
-          aria-labelledby="list-title"
-          className="mt-6 rounded-[2rem] border border-line bg-surface p-5 card-shadow sm:p-6"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-bold text-ink" id="list-title">
-                Matching transactions
-              </h2>
-              <p className="mt-1 text-sm text-muted" role="status">
-                {data.matching_visible_count} visible and {data.matching_hidden_count} hidden match
-                these filters; showing {data.filtered_total}{" "}
-                {visibility === "all"
-                  ? "rows"
-                  : visibility === "hidden"
-                    ? "hidden rows"
-                    : "visible rows"}{" "}
-                of {data.matching_total}. Page {data.page} of {totalPages}.
-                {data.inventory_count === 0 ? " Your workspace has no transactions yet." : ""}
-              </p>
-            </div>
-            <label className="flex items-center gap-2 text-sm font-semibold text-ink">
-              <input
-                checked={allPageSelected}
-                disabled={rows.length === 0 || loading}
-                onChange={togglePage}
-                ref={selectPageRef}
-                type="checkbox"
-              />
-              Select this page
-            </label>
-          </div>
-
+        <>
           <section
             aria-labelledby="bulk-title"
-            className="mt-4 rounded-2xl border border-line bg-page p-4"
+            className="mt-6 rounded-2xl border border-line bg-page p-4"
           >
-            <h3 className="text-sm font-bold text-ink" id="bulk-title">
-              Bulk classification and visibility
-            </h3>
-            <p className="mt-1 text-sm text-muted" role="status">
-              {selectionLabel}{" "}
-              {allMatching
-                ? "Later matches are not included. The confirmation captures this exact scope."
-                : "Selections persist across pages but not across filter changes."}
-            </p>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-ink" id="bulk-title">
+                  Bulk classification and visibility
+                </h3>
+                <p className="mt-1 text-sm text-muted" role="status">
+                  {selectionLabel}{" "}
+                  {allMatching
+                    ? "Later matches are not included. The confirmation captures this exact scope."
+                    : "Selections persist across pages but not across filter changes."}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-sm font-semibold text-ink">
+                  <input
+                    checked={allPageSelected}
+                    disabled={rows.length === 0 || loading}
+                    onChange={togglePage}
+                    ref={selectPageRef}
+                    type="checkbox"
+                  />
+                  Select this page
+                </label>
+                <button
+                  aria-controls="bulk-edit-content"
+                  aria-expanded={bulkExpanded}
+                  className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                  onClick={() => setBulkExpanded((current) => !current)}
+                  type="button"
+                >
+                  {bulkExpanded ? "Hide bulk edit" : "Show bulk edit"}
+                </button>
+              </div>
+            </div>
             {operationId ? (
               <p
                 className="mt-2 rounded-xl border border-warning-line bg-warning-soft px-3 py-2 text-xs font-semibold text-warning-ink"
@@ -1509,23 +1683,200 @@ export default function TransactionsWorkspace({
                 confirmation or recovery panel below to apply or abandon it.
               </p>
             ) : null}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-                disabled={rows.length === 0 || allMatching}
-                onClick={toggleAllMatching}
-                type="button"
-              >
-                Select all matching filters
-              </button>
-              <button
-                className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-                disabled={!allMatching && selectionCount === 0}
-                onClick={() => clearSelection()}
-                type="button"
-              >
-                Clear selection
-              </button>
+            <div hidden={!bulkExpanded} id="bulk-edit-content">
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                  disabled={rows.length === 0 || allMatching}
+                  onClick={toggleAllMatching}
+                  type="button"
+                >
+                  Select all matching filters
+                </button>
+                <button
+                  className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                  disabled={!allMatching && selectionCount === 0}
+                  onClick={() => clearSelection()}
+                  type="button"
+                >
+                  Clear selection
+                </button>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label className="text-sm font-semibold text-ink">
+                  Set category
+                  <select
+                    className="mt-1 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
+                    disabled={
+                      !canAssignCategories || busy || operationId !== null || bulkConfirmCategory
+                    }
+                    onChange={(event) => setBulkCategoryId(event.target.value)}
+                    value={bulkCategoryId}
+                  >
+                    <option value="">Keep category</option>
+                    {activeCategories(categories).map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {formatCategoryLabel(category)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-sm font-semibold text-ink">
+                  Add tags
+                  <select
+                    className="mt-1 h-24 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
+                    disabled={
+                      !canAssignCategories || busy || operationId !== null || bulkConfirmCategory
+                    }
+                    multiple
+                    onChange={(event) =>
+                      setBulkAddTagIds(
+                        Array.from(event.target.selectedOptions, (option) => option.value),
+                      )
+                    }
+                    value={bulkAddTagIds}
+                  >
+                    {activeTags(tags).map((tag) => (
+                      <option key={tag.id} value={tag.id}>
+                        {tag.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-sm font-semibold text-ink">
+                  Remove tags
+                  <select
+                    className="mt-1 h-24 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
+                    disabled={
+                      !canAssignCategories || busy || operationId !== null || bulkConfirmCategory
+                    }
+                    multiple
+                    onChange={(event) =>
+                      setBulkRemoveTagIds(
+                        Array.from(event.target.selectedOptions, (option) => option.value),
+                      )
+                    }
+                    value={bulkRemoveTagIds}
+                  >
+                    {visibleTags(tags).map((tag) => (
+                      <option key={tag.id} value={tag.id}>
+                        {tag.display_name}
+                        {tag.is_archived ? " — archived" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="text-sm font-semibold text-ink">
+                  Visibility
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    <button
+                      aria-pressed={bulkHidden === true}
+                      className={
+                        bulkHidden === true
+                          ? "rounded-full bg-ink px-4 py-2 text-sm font-bold text-page"
+                          : "rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                      }
+                      disabled={busy || operationId !== null || bulkConfirmCategory}
+                      onClick={() => setBulkHidden((current) => (current === true ? null : true))}
+                      type="button"
+                    >
+                      Hide
+                    </button>
+                    <button
+                      aria-pressed={bulkHidden === false}
+                      className={
+                        bulkHidden === false
+                          ? "rounded-full bg-ink px-4 py-2 text-sm font-bold text-page"
+                          : "rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                      }
+                      disabled={busy || operationId !== null || bulkConfirmCategory}
+                      onClick={() => setBulkHidden((current) => (current === false ? null : false))}
+                      type="button"
+                    >
+                      Restore
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs font-normal text-muted">
+                    Restore refuses wholly when any selected transaction has a hidden parent
+                    statement.
+                  </p>
+                </div>
+                <div className="text-sm font-semibold text-ink">
+                  Category confirmation
+                  <div className="mt-1">
+                    <button
+                      aria-pressed={bulkConfirmCategory}
+                      className={
+                        bulkConfirmCategory
+                          ? "rounded-full border border-suggestion-line bg-suggestion-soft px-4 py-2 text-sm font-bold text-suggestion-ink"
+                          : "rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                      }
+                      disabled={busy || operationId !== null}
+                      onClick={() => {
+                        setBulkConfirmCategory((current) => !current);
+                        setBulkCategoryId("");
+                        setBulkAddTagIds([]);
+                        setBulkRemoveTagIds([]);
+                        setBulkHidden(null);
+                      }}
+                      type="button"
+                    >
+                      Confirm category only
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs font-normal text-muted">
+                    Confirms the current category without changing it. It cannot be combined with
+                    another bulk change.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  className="rounded-full bg-ink px-5 py-2.5 text-sm font-bold text-page disabled:opacity-60"
+                  disabled={!canPrepare}
+                  onClick={() => void prepareBulkChange()}
+                  type="button"
+                >
+                  Review change
+                </button>
+                <button
+                  className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                  disabled={busy}
+                  onClick={resetBulkControls}
+                  type="button"
+                >
+                  Reset change
+                </button>
+                <span className="text-xs text-muted">
+                  Selected count = changed + already matching; nothing is written until Apply.
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section
+            aria-labelledby="list-title"
+            className="mt-6 rounded-[2rem] border border-line bg-surface p-5 card-shadow sm:p-6"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-ink" id="list-title">
+                  Matching transactions
+                </h2>
+                <p className="mt-1 text-sm text-muted" role="status">
+                  {data.matching_visible_count} visible and {data.matching_hidden_count} hidden
+                  match these filters; showing {data.filtered_total}{" "}
+                  {visibility === "all"
+                    ? "rows"
+                    : visibility === "hidden"
+                      ? "hidden rows"
+                      : "visible rows"}{" "}
+                  of {data.matching_total}. Page {data.page} of {totalPages}.
+                  {data.inventory_count === 0 ? " Your workspace has no transactions yet." : ""}
+                </p>
+              </div>
               {loading ? (
                 <span className="text-sm text-muted" role="status">
                   Refreshing…
@@ -1533,378 +1884,299 @@ export default function TransactionsWorkspace({
               ) : null}
             </div>
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <label className="text-sm font-semibold text-ink">
-                Set category
-                <select
-                  className="mt-1 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
-                  disabled={
-                    !canAssignCategories || busy || operationId !== null || bulkConfirmCategory
-                  }
-                  onChange={(event) => setBulkCategoryId(event.target.value)}
-                  value={bulkCategoryId}
-                >
-                  <option value="">Keep category</option>
-                  {activeCategories(categories).map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.display_name} ({category.kind})
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="text-sm font-semibold text-ink">
-                Add tags
-                <select
-                  className="mt-1 h-24 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
-                  disabled={
-                    !canAssignCategories || busy || operationId !== null || bulkConfirmCategory
-                  }
-                  multiple
-                  onChange={(event) =>
-                    setBulkAddTagIds(
-                      Array.from(event.target.selectedOptions, (option) => option.value),
-                    )
-                  }
-                  value={bulkAddTagIds}
-                >
-                  {activeTags(tags).map((tag) => (
-                    <option key={tag.id} value={tag.id}>
-                      {tag.display_name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="text-sm font-semibold text-ink">
-                Remove tags
-                <select
-                  className="mt-1 h-24 w-full rounded-xl border border-line bg-page px-3 py-2 text-sm text-ink"
-                  disabled={
-                    !canAssignCategories || busy || operationId !== null || bulkConfirmCategory
-                  }
-                  multiple
-                  onChange={(event) =>
-                    setBulkRemoveTagIds(
-                      Array.from(event.target.selectedOptions, (option) => option.value),
-                    )
-                  }
-                  value={bulkRemoveTagIds}
-                >
-                  {visibleTags(tags).map((tag) => (
-                    <option key={tag.id} value={tag.id}>
-                      {tag.display_name}
-                      {tag.is_archived ? " — archived" : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="text-sm font-semibold text-ink">
-                Visibility
-                <div className="mt-1 flex flex-wrap gap-2">
-                  <button
-                    aria-pressed={bulkHidden === true}
-                    className={
-                      bulkHidden === true
-                        ? "rounded-full bg-ink px-4 py-2 text-sm font-bold text-page"
-                        : "rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-                    }
-                    disabled={busy || operationId !== null || bulkConfirmCategory}
-                    onClick={() => setBulkHidden((current) => (current === true ? null : true))}
-                    type="button"
-                  >
-                    Hide
-                  </button>
-                  <button
-                    aria-pressed={bulkHidden === false}
-                    className={
-                      bulkHidden === false
-                        ? "rounded-full bg-ink px-4 py-2 text-sm font-bold text-page"
-                        : "rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-                    }
-                    disabled={busy || operationId !== null || bulkConfirmCategory}
-                    onClick={() => setBulkHidden((current) => (current === false ? null : false))}
-                    type="button"
-                  >
-                    Restore
-                  </button>
-                </div>
-                <p className="mt-1 text-xs font-normal text-muted">
-                  Restore refuses wholly when any selected transaction has a hidden parent
-                  statement.
-                </p>
-              </div>
-              <div className="text-sm font-semibold text-ink">
-                Category confirmation
-                <div className="mt-1">
-                  <button
-                    aria-pressed={bulkConfirmCategory}
-                    className={
-                      bulkConfirmCategory
-                        ? "rounded-full border border-suggestion-line bg-suggestion-soft px-4 py-2 text-sm font-bold text-suggestion-ink"
-                        : "rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-                    }
-                    disabled={busy || operationId !== null}
-                    onClick={() => {
-                      setBulkConfirmCategory((current) => !current);
-                      setBulkCategoryId("");
-                      setBulkAddTagIds([]);
-                      setBulkRemoveTagIds([]);
-                      setBulkHidden(null);
-                    }}
-                    type="button"
-                  >
-                    Confirm category only
-                  </button>
-                </div>
-                <p className="mt-1 text-xs font-normal text-muted">
-                  Confirms the current category without changing it. It cannot be combined with
-                  another bulk change.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <button
-                className="rounded-full bg-ink px-5 py-2.5 text-sm font-bold text-page disabled:opacity-60"
-                disabled={!canPrepare}
-                onClick={() => void prepareBulkChange()}
-                type="button"
-              >
-                Review change
-              </button>
-              <button
-                className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-                disabled={busy}
-                onClick={resetBulkControls}
-                type="button"
-              >
-                Reset change
-              </button>
-              <span className="text-xs text-muted">
-                Selected count = changed + already matching; nothing is written until Apply.
-              </span>
-            </div>
-          </section>
-
-          {data.filtered_total === 0 ? (
-            <div className="mt-4 rounded-2xl border border-line bg-page p-5">
-              {data.inventory_count === 0 ? (
-                <>
-                  <h3 className="text-lg font-semibold text-ink">No transactions yet</h3>
-                  <p className="mt-2 text-sm leading-6 text-muted">
-                    Transactions appear after a statement import. Create a ZAR account, categories
-                    and tags in{" "}
-                    <Link className="underline underline-offset-4" href="/settings">
-                      Settings
+            {data.filtered_total === 0 ? (
+              <div className="mt-4 rounded-2xl border border-line bg-page p-5">
+                {data.inventory_count === 0 ? (
+                  <>
+                    <h3 className="text-lg font-semibold text-ink">No transactions yet</h3>
+                    <p className="mt-2 text-sm leading-6 text-muted">
+                      Transactions appear after a statement import. Create a ZAR account, categories
+                      and tags in{" "}
+                      <Link className="underline underline-offset-4" href="/settings">
+                        Settings
+                      </Link>
+                      , then import a statement in{" "}
+                      <Link className="underline underline-offset-4" href="/imports">
+                        Imports
+                      </Link>
+                      .
+                    </p>
+                  </>
+                ) : visibility === "visible" && data.matching_hidden_count > 0 ? (
+                  <>
+                    <h3 className="text-lg font-semibold text-ink">All matching rows are hidden</h3>
+                    <p className="mt-2 text-sm leading-6 text-muted">
+                      {data.matching_hidden_count} hidden transaction
+                      {data.matching_hidden_count === 1 ? "" : "s"} match these filters.
+                    </p>
+                    <button
+                      className="mt-3 rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                      onClick={() => changeFilters({ visibility: "hidden" })}
+                      type="button"
+                    >
+                      Open the Hidden view
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-lg font-semibold text-ink">No matching transactions</h3>
+                    <p className="mt-2 text-sm leading-6 text-muted">
+                      Your filters matched no rows on this page view. Counts above are the truthful
+                      totals; page numbers are not totals.
+                    </p>
+                    <Link
+                      className="mt-3 inline-flex rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
+                      href="/transactions"
+                    >
+                      Clear filters
                     </Link>
-                    , then import a statement in{" "}
-                    <Link className="underline underline-offset-4" href="/imports">
-                      Imports
-                    </Link>
-                    .
-                  </p>
-                </>
-              ) : visibility === "visible" && data.matching_hidden_count > 0 ? (
-                <>
-                  <h3 className="text-lg font-semibold text-ink">All matching rows are hidden</h3>
-                  <p className="mt-2 text-sm leading-6 text-muted">
-                    {data.matching_hidden_count} hidden transaction
-                    {data.matching_hidden_count === 1 ? "" : "s"} match these filters.
-                  </p>
-                  <button
-                    className="mt-3 rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-                    onClick={() => changeFilters({ visibility: "hidden" })}
-                    type="button"
-                  >
-                    Open the Hidden view
-                  </button>
-                </>
-              ) : (
-                <>
-                  <h3 className="text-lg font-semibold text-ink">No matching transactions</h3>
-                  <p className="mt-2 text-sm leading-6 text-muted">
-                    Your filters matched no rows on this page view. Counts above are the truthful
-                    totals; page numbers are not totals.
-                  </p>
-                  <Link
-                    className="mt-3 inline-flex rounded-full border border-line px-4 py-2 text-sm font-bold text-ink"
-                    href="/transactions"
-                  >
-                    Clear filters
-                  </Link>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className={`${TABLE_WRAPPER_CLASS} mt-4`}>
-              <table className={`${TABLE_CLASS} min-w-[64rem]`}>
-                <thead className={TABLE_HEAD_CLASS}>
-                  <tr>
-                    <th className={`${TH_CLASS} w-10`} scope="col">
-                      <span className="sr-only">Select</span>
-                    </th>
-                    <th className={TH_CLASS} scope="col">
-                      Date
-                    </th>
-                    <th className={TH_CLASS} scope="col">
-                      Description
-                    </th>
-                    <th className={TH_CLASS} scope="col">
-                      Account
-                    </th>
-                    <th className={TH_CLASS} scope="col">
-                      Classification
-                    </th>
-                    <th className={`${TH_CLASS} text-right`} scope="col">
-                      Amount
-                    </th>
-                    <th className={`${TH_CLASS} text-right`} scope="col">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => {
-                    const badge = hiddenBadge(row);
-                    const isSelected = selection.has(row.id);
-                    return (
-                      <Fragment key={row.id}>
-                        <tr className={TABLE_ROW_CLASS}>
-                          <td className={TD_CLASS}>
-                            <input
-                              aria-label={`Select transaction ${row.description || "no description"} on ${row.transaction_date} for ${amountLabel(row)}`}
-                              checked={isSelected}
-                              disabled={loading}
-                              onChange={() => toggleRow(row)}
-                              type="checkbox"
-                            />
-                          </td>
-                          <td className={`${TD_CLASS} whitespace-nowrap text-muted`}>
-                            {row.transaction_date}
-                          </td>
-                          <td className={TD_CLASS}>
-                            <button
-                              className="block w-full text-left text-sm font-semibold text-ink hover:underline"
-                              onClick={(event) => void openDetail(row.id, event.currentTarget)}
-                              type="button"
-                            >
-                              {row.description.trim() === "" ? "No description" : row.description}
-                            </button>
-                            <span className="mt-0.5 block text-xs text-muted">
-                              Version {row.version}
-                            </span>
-                          </td>
-                          <td className={`${TD_CLASS} text-muted`}>
-                            {row.financial_account.display_name}
-                            {row.financial_account.is_archived ? " (archived)" : ""}
-                          </td>
-                          <td className={TD_CLASS}>
-                            <div className="flex flex-wrap gap-1.5 text-xs">
-                              <span
-                                className={
-                                  row.category.kind === "Uncategorised"
-                                    ? "rounded-full border border-warning-line bg-surface px-2 py-1 font-semibold text-ink"
-                                    : "rounded-full border border-line bg-surface px-2 py-1 font-semibold text-ink"
-                                }
-                              >
-                                {row.category.display_name} ({row.category.kind})
-                              </span>
-                              {!row.category_confirmed && row.category.kind !== "Uncategorised" ? (
-                                <span
-                                  className="rounded-full border border-suggestion-line bg-suggestion-soft px-2 py-1 font-semibold text-suggestion-ink"
-                                  title="This category is not confirmed yet. Open Edit inline to confirm it."
-                                >
-                                  <span className="sr-only">Category not confirmed: </span>
-                                  Unconfirmed
-                                </span>
-                              ) : null}
-                              {row.category.is_archived ? (
-                                <span className="rounded-full border border-line bg-elevated px-2 py-1 font-semibold text-muted">
-                                  Archived category
-                                </span>
-                              ) : null}
-                              {sortByDisplayName(row.merchant_tags).map((tag) => (
-                                <span
-                                  className="rounded-full border border-line bg-surface px-2 py-1 font-semibold text-ink"
-                                  key={tag.id}
-                                >
-                                  {tag.display_name}
-                                  {tag.is_archived ? " (archived)" : ""}
-                                </span>
-                              ))}
-                              {badge ? (
-                                <span className="rounded-full border border-warning-line bg-warning-soft px-2 py-1 font-semibold text-warning-ink">
-                                  {badge}
-                                </span>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td
-                            className={`${TD_CLASS} text-right font-mono text-sm font-semibold whitespace-nowrap tabular-nums text-ink`}
-                          >
-                            {amountLabel(row)}
-                          </td>
-                          <td className={TD_CLASS}>
-                            <div className="flex justify-end">
-                              <button
-                                aria-expanded={inlineEditorId === row.id}
-                                className="rounded-full border border-line px-3 py-1.5 text-xs font-bold text-ink disabled:opacity-50"
-                                disabled={inventoryFailed}
-                                onClick={() =>
-                                  setInlineEditorId((current) =>
-                                    current === row.id ? null : row.id,
-                                  )
-                                }
-                                type="button"
-                              >
-                                {inlineEditorId === row.id ? "Close inline editor" : "Edit inline"}
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                        {inlineEditorId === row.id ? (
-                          <tr className={EDITOR_ROW_CLASS}>
-                            <td className="px-4 py-4" colSpan={7}>
-                              <TransactionInlineEditor
-                                categories={categories}
-                                classificationDisabled={inventoryFailed}
-                                onSaved={(saved) => handleRowSaved(saved)}
-                                onStale={(text) => handleRowStale(row.id, text)}
-                                row={row}
-                                tags={tags}
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className={`${TABLE_WRAPPER_CLASS} mt-4`}>
+                <table
+                  role="table"
+                  aria-label="Matching transactions"
+                  className={`${TABLE_CLASS} min-w-[64rem]`}
+                >
+                  <thead className={TABLE_HEAD_CLASS}>
+                    <tr>
+                      <th className={`${TH_CLASS} w-10`} scope="col">
+                        <span className="sr-only">Select</span>
+                      </th>
+                      <th className={TH_CLASS} scope="col">
+                        Date
+                      </th>
+                      <th className={TH_CLASS} scope="col">
+                        Description
+                      </th>
+                      <th className={TH_CLASS} scope="col">
+                        Account
+                      </th>
+                      <th className={TH_CLASS} scope="col">
+                        Tags
+                      </th>
+                      <th className={TH_CLASS} scope="col">
+                        Classification
+                      </th>
+                      <th className={`${TH_CLASS} text-right`} scope="col">
+                        Amount
+                      </th>
+                      <th className={`${TH_CLASS} text-right`} scope="col">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => {
+                      const badge = hiddenBadge(row);
+                      const isSelected = selection.has(row.id);
+                      return (
+                        <Fragment key={row.id}>
+                          <tr className={TABLE_ROW_CLASS}>
+                            <td data-label="Select" className={TD_CLASS}>
+                              <input
+                                aria-label={`Select transaction ${row.description || "no description"} on ${row.transaction_date} for ${amountLabel(row)}`}
+                                checked={isSelected}
+                                disabled={loading}
+                                onChange={() => toggleRow(row)}
+                                type="checkbox"
                               />
                             </td>
+                            <td
+                              data-label="Date"
+                              className={`${TD_CLASS} whitespace-nowrap text-muted`}
+                            >
+                              {row.transaction_date}
+                            </td>
+                            <td data-label="Description" className={TD_CLASS}>
+                              <button
+                                className="block w-full text-left text-sm font-semibold text-ink hover:underline"
+                                onClick={(event) => void openDetail(row.id, event.currentTarget)}
+                                type="button"
+                              >
+                                {row.description.trim() === "" ? "No description" : row.description}
+                              </button>
+                              <span className="mt-0.5 block text-xs text-muted">
+                                Version {row.version}
+                              </span>
+                            </td>
+                            <td data-label="Account" className={`${TD_CLASS} text-muted`}>
+                              {row.financial_account.display_name}
+                              {row.financial_account.is_archived ? " (archived)" : ""}
+                            </td>
+                            <td data-label="Tags" className={TD_CLASS}>
+                              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                                {row.merchant_tags.length === 0 &&
+                                suggestedTagsFor(row).length === 0 ? (
+                                  <span className="text-muted">No tags</span>
+                                ) : (
+                                  sortByDisplayName(row.merchant_tags).map((tag) => (
+                                    <span
+                                      className="rounded-full border border-line bg-surface px-2 py-1 font-semibold text-ink"
+                                      key={tag.id}
+                                    >
+                                      {tag.display_name}
+                                      {tag.is_archived ? " (archived)" : ""}
+                                    </span>
+                                  ))
+                                )}
+                                {suggestedTagsFor(row).map((tag) => {
+                                  const key = `${row.id}:${tag.id}`;
+                                  const adding = addingSuggestionKey === key;
+                                  return (
+                                    <button
+                                      aria-label={`Add suggested tag ${tag.display_name} for ${row.description || "this transaction"}`}
+                                      className="suggested-tag-chip rounded-full border border-dashed border-suggestion-line bg-suggestion-soft px-2 py-1 font-semibold text-suggestion-ink disabled:opacity-60"
+                                      disabled={
+                                        inventoryFailed ||
+                                        loading ||
+                                        addingSuggestionKey !== null ||
+                                        confirmingRowId !== null
+                                      }
+                                      key={tag.id}
+                                      onClick={() => void acceptRowSuggestedTag(row, tag)}
+                                      title="Add this suggested tag. The inline editor stays available for other changes."
+                                      type="button"
+                                    >
+                                      {adding ? "Adding…" : `Suggested: ${tag.display_name}`}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </td>
+                            <td data-label="Classification" className={TD_CLASS}>
+                              <div className="flex flex-wrap gap-1.5 text-xs">
+                                <span
+                                  className={
+                                    !row.category_confirmed
+                                      ? "rounded-full border border-dashed border-warning-line bg-surface px-2 py-1 font-semibold text-ink"
+                                      : row.category.kind === "Uncategorised"
+                                        ? "rounded-full border border-warning-line bg-surface px-2 py-1 font-semibold text-ink"
+                                        : "rounded-full border border-line bg-surface px-2 py-1 font-semibold text-ink"
+                                  }
+                                >
+                                  {row.category.kind === "Uncategorised"
+                                    ? row.category.display_name
+                                    : `${row.category.display_name} (${row.category.kind})`}
+                                </span>
+                                {!row.category_confirmed &&
+                                row.category.kind !== "Uncategorised" ? (
+                                  <button
+                                    aria-label={`Confirm category ${row.category.display_name} for ${row.description || "this transaction"}`}
+                                    className="category-confirm-button rounded-full border border-suggestion-line bg-suggestion-soft px-2 py-1 font-semibold text-suggestion-ink"
+                                    disabled={
+                                      inventoryFailed ||
+                                      loading ||
+                                      confirmingRowId !== null ||
+                                      addingSuggestionKey !== null
+                                    }
+                                    onClick={() => void confirmRowCategory(row)}
+                                    title="Confirm this category. The inline editor stays available for other changes."
+                                    type="button"
+                                  >
+                                    {confirmingRowId === row.id ? "Confirming…" : "Unconfirmed"}
+                                  </button>
+                                ) : null}
+                                {row.category_confirmed && row.category.kind !== "Uncategorised" ? (
+                                  <span className="rounded border border-success-line bg-success-soft px-2 py-1 font-semibold text-success-ink">
+                                    Confirmed
+                                  </span>
+                                ) : null}
+                                {row.category.is_archived ? (
+                                  <span className="rounded-full border border-line bg-elevated px-2 py-1 font-semibold text-muted">
+                                    Archived category
+                                  </span>
+                                ) : null}
+                                {badge ? (
+                                  <span className="rounded-full border border-warning-line bg-warning-soft px-2 py-1 font-semibold text-warning-ink">
+                                    {badge}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </td>
+                            <td
+                              data-label="Amount"
+                              className={`${TD_CLASS} text-right font-mono text-sm font-semibold whitespace-nowrap tabular-nums text-ink`}
+                            >
+                              {amountLabel(row)}
+                            </td>
+                            <td data-label="Actions" className={TD_CLASS}>
+                              <div className="flex justify-end">
+                                <button
+                                  aria-controls={`inline-editor-${row.id}`}
+                                  aria-expanded={inlineEditorId === row.id}
+                                  className="rounded-full border border-line px-3 py-1.5 text-xs font-bold text-ink disabled:opacity-50"
+                                  disabled={inventoryFailed}
+                                  onClick={() => toggleInlineEditor(row.id)}
+                                  type="button"
+                                >
+                                  {inlineEditorId === row.id
+                                    ? "Close inline editor"
+                                    : "Edit inline"}
+                                </button>
+                              </div>
+                            </td>
                           </tr>
-                        ) : null}
-                      </Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+                          {inlineEditorId === row.id ? (
+                            <tr className={EDITOR_ROW_CLASS} id={`inline-editor-${row.id}`}>
+                              <td className="px-4 py-4" colSpan={8}>
+                                <TransactionInlineEditor
+                                  categories={categories}
+                                  classificationDisabled={inventoryFailed}
+                                  onSaved={(saved, closeEditor) =>
+                                    handleRowSaved(saved, closeEditor)
+                                  }
+                                  onStale={(text) => handleRowStale(row.id, text)}
+                                  row={row}
+                                  suggestedTags={
+                                    inlineSuggestions.id === row.id && !inlineSuggestions.failed
+                                      ? inlineSuggestions.value
+                                      : null
+                                  }
+                                  tags={tags}
+                                />
+                                {inlineSuggestions.id === row.id && inlineSuggestions.failed ? (
+                                  <p className="mt-1 px-3 text-xs text-muted">
+                                    Suggestions could not be loaded. Assigned tags can still be
+                                    added in the editor above.
+                                  </p>
+                                ) : null}
+                              </td>
+                            </tr>
+                          ) : null}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
-          <nav aria-label="Transaction pages" className="mt-4 flex flex-wrap items-center gap-2">
-            <button
-              className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink disabled:opacity-50"
-              disabled={data.page <= 1 || loading}
-              onClick={() => changePage(data.page - 1)}
-              type="button"
-            >
-              Previous
-            </button>
-            <span className="text-sm text-muted">
-              Page {data.page} of {totalPages}
-            </span>
-            <button
-              className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink disabled:opacity-50"
-              disabled={data.page >= totalPages || loading}
-              onClick={() => changePage(data.page + 1)}
-              type="button"
-            >
-              Next
-            </button>
-          </nav>
-        </section>
+            <nav aria-label="Transaction pages" className="mt-4 flex flex-wrap items-center gap-2">
+              <button
+                className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink disabled:opacity-50"
+                disabled={data.page <= 1 || loading}
+                onClick={() => changePage(data.page - 1)}
+                type="button"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-muted">
+                Page {data.page} of {totalPages}
+              </span>
+              <button
+                className="rounded-full border border-line px-4 py-2 text-sm font-bold text-ink disabled:opacity-50"
+                disabled={data.page >= totalPages || loading}
+                onClick={() => changePage(data.page + 1)}
+                type="button"
+              >
+                Next
+              </button>
+            </nav>
+          </section>
+        </>
       ) : null}
 
       {prepared ? (
@@ -2116,7 +2388,7 @@ export default function TransactionsWorkspace({
           <div
             aria-label="Transaction detail drawer"
             aria-modal="true"
-            className="relative z-10 h-full w-full max-w-2xl overflow-y-auto bg-page p-4 shadow-2xl focus:outline-none sm:p-6"
+            className="finance-drawer relative z-10 h-full w-full max-w-2xl overflow-y-auto bg-page p-4 shadow-2xl focus:outline-none sm:p-6"
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.preventDefault();

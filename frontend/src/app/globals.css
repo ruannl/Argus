@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./finance-workspace.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -22,7 +23,8 @@
   --accent-soft-line: #a7f3d0;
   --accent-soft-ink: #065f46;
   --accent-ring: #d1fae5;
-  --chart-out: #0f172a;
+  --chart-in: #166534;
+  --chart-out: #991b1b;
   --inverse: #0f172a;
   --inverse-ink: #ffffff;
   --inverse-muted: #cbd5e1;
@@ -61,7 +63,8 @@
   --accent-soft-line: #1e3a5f;
   --accent-soft-ink: #bfdbfe;
   --accent-ring: #1e3a5f;
-  --chart-out: #cbd5e1;
+  --chart-in: #4ade80;
+  --chart-out: #f87171;
   --inverse: #060b16;
   --inverse-ink: #e2e8f0;
   --inverse-muted: #94a3b8;
@@ -98,6 +101,7 @@
   --color-accent-soft-line: var(--accent-soft-line);
   --color-accent-soft-ink: var(--accent-soft-ink);
   --color-accent-ring: var(--accent-ring);
+  --color-chart-in: var(--chart-in);
   --color-chart-out: var(--chart-out);
   --color-inverse: var(--inverse);
   --color-inverse-ink: var(--inverse-ink);

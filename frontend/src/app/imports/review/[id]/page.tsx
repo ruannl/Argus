@@ -111,7 +111,6 @@ export default async function ReviewPage({
         account={account}
         activeNav="imports"
         description="Review a statement before committing it."
-        eyebrow="Workspace"
         title="Import review"
       >
         <ReviewUnavailable kind={review.kind} />
@@ -124,7 +123,6 @@ export default async function ReviewPage({
       account={account}
       activeNav="imports"
       description="Every row is read-only. Decisions are limited to skip, duplicate override, category, and tag selection."
-      eyebrow="Workspace"
       title="Import review"
     >
       <ReviewWorkspace

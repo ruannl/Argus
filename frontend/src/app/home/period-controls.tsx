@@ -87,7 +87,7 @@ export default function PeriodControls({
         Reporting period and filters
       </h2>
 
-      <div className="rounded-[1.5rem] border border-line bg-surface p-4 card-shadow sm:p-5">
+      <div className="finance-unboxed">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-bold tracking-[0.14em] text-muted uppercase">Period</span>
           <Link

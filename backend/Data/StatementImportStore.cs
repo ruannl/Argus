@@ -1584,8 +1584,9 @@ public sealed class StatementImportStore
               AND ({2} = FALSE OR jsonb_array_length(selected_tag_ids) = 0)
               AND ({3} = FALSE OR within_file_group IS NOT NULL)
               AND ({4} = FALSE OR NOT (
-                    skip = FALSE
-                    AND (near_candidate_total > 0 OR duplicate_reasons @> '["stable_id_changed"]'::jsonb)
+                    duplicate_state <> 'none'
+                    OR near_candidate_total > 0
+                    OR duplicate_reasons @> '["stable_id_changed"]'::jsonb
                   ))
             ORDER BY
             """;
@@ -1653,8 +1654,9 @@ public sealed class StatementImportStore
               AND ({2} = FALSE OR jsonb_array_length(selected_tag_ids) = 0)
               AND ({3} = FALSE OR within_file_group IS NOT NULL)
               AND ({4} = FALSE OR NOT (
-                    skip = FALSE
-                    AND (near_candidate_total > 0 OR duplicate_reasons @> '["stable_id_changed"]'::jsonb)
+                    duplicate_state <> 'none'
+                    OR near_candidate_total > 0
+                    OR duplicate_reasons @> '["stable_id_changed"]'::jsonb
                   ))
             """, reviewId, possibleDuplicatesOnly, untaggedOnly, repeatsInFileOnly, excludePossibleDuplicates).SingleAsync(cancellationToken);
 

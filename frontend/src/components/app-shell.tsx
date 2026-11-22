@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import FinanceScrollRegion from "@/components/finance-scroll-region";
 import { PRODUCT_NAME } from "@/lib/brand";
 import { endSessionAction } from "@/lib/server/account-actions";
 import type { CurrentAccount } from "@/lib/server/backend-client";
@@ -18,10 +19,33 @@ type AppShellProps = {
   account: CurrentAccount;
   activeNav: WorkspaceNav;
   title: string;
-  eyebrow: string;
   description?: string;
   children: ReactNode;
 };
+
+function NavigationIcon({ destination }: { destination: WorkspaceNav }) {
+  const paths: Record<WorkspaceNav, string> = {
+    overview: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
+    transactions: "M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4",
+    imports: "M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5",
+    settings: "M4 6h16M4 12h16M4 18h16M8 3v6m8 0v6M8 15v6",
+  };
+  return (
+    <svg
+      aria-hidden="true"
+      className="finance-nav-icon"
+      fill="none"
+      focusable="false"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.7"
+      viewBox="0 0 24 24"
+    >
+      <path d={paths[destination]} />
+    </svg>
+  );
+}
 
 /**
  * Persistent authenticated workspace frame. The nav wraps onto its own row on
@@ -32,58 +56,49 @@ export default function AppShell({
   account,
   activeNav,
   title,
-  eyebrow,
   description,
   children,
 }: AppShellProps) {
   return (
-    <main className="min-h-screen">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-3 px-4 py-4 sm:px-6 lg:px-8">
-          <Link className="text-sm font-semibold tracking-[0.16em] text-ink uppercase" href="/home">
+    <main className="finance-workspace finance-app min-h-screen">
+      <header className="finance-shell border-b border-line bg-surface">
+        <div className="finance-shell-inner mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-1.5 sm:px-6 lg:px-8">
+          <Link
+            className="text-[0.8125rem] font-semibold tracking-[0.08em] text-ink uppercase"
+            href="/home"
+          >
             {PRODUCT_NAME}
           </Link>
-          <span className="inline-flex rounded-full border border-accent-soft-line bg-accent-soft px-3 py-1 text-xs font-semibold text-accent-soft-ink">
-            ZAR workspace
-          </span>
+          <span className="finance-workspace-marker text-muted">ZAR workspace</span>
 
           <nav
             aria-label="Workspace"
-            className="order-last flex w-full flex-wrap items-center gap-1 sm:order-none sm:ml-auto sm:w-auto"
+            className="finance-navigation order-last flex w-full flex-wrap items-center gap-1 lg:order-none lg:w-auto"
           >
             {NAV_ITEMS.map((item) => {
               const isActive = item.key === activeNav;
               return (
                 <Link
                   aria-current={isActive ? "page" : undefined}
-                  className={
-                    isActive
-                      ? "rounded-full bg-ink px-4 py-2 text-sm font-semibold text-page"
-                      : "rounded-full px-4 py-2 text-sm font-semibold text-muted transition hover:bg-elevated hover:text-ink"
-                  }
+                  className="finance-nav-link"
                   href={item.href}
                   key={item.key}
                 >
+                  <NavigationIcon destination={item.key} />
                   {item.label}
                 </Link>
               );
             })}
           </nav>
 
-          <div className="ml-auto flex items-center gap-2 sm:ml-0">
+          <div className="ml-auto flex flex-wrap items-center gap-1">
             {account.admin ? (
-              <Link
-                className="inline-flex items-center justify-center rounded-full border border-warning-line bg-warning-soft px-4 py-2 text-sm font-bold text-warning-ink-soft transition hover:bg-warning-soft-hover"
-                href="/admin"
-              >
+              <Link className="finance-nav-utility finance-nav-utility-accent" href="/admin">
                 Admin
               </Link>
             ) : null}
             <form action={endSessionAction}>
-              <button
-                className="inline-flex items-center justify-center rounded-full border border-line px-4 py-2 text-sm font-bold text-ink transition hover:border-ink hover:text-ink"
-                type="submit"
-              >
+              <button className="finance-nav-utility" type="submit">
                 Log out
               </button>
             </form>
@@ -91,20 +106,15 @@ export default function AppShell({
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
-        <header className="max-w-3xl">
-          <p className="text-xs font-semibold tracking-[0.14em] text-accent-text uppercase">
-            {eyebrow}
-          </p>
-          <h1 className="mt-3 text-3xl leading-tight font-semibold tracking-[-0.04em] text-ink sm:text-4xl">
-            {title}
-          </h1>
-          {description ? (
-            <p className="mt-4 text-base leading-7 text-muted">{description}</p>
-          ) : null}
-        </header>
-        {children}
-      </div>
+      <FinanceScrollRegion>
+        <div className="finance-content mx-auto w-full max-w-6xl px-4 pt-5 pb-24 sm:px-6 lg:px-8">
+          <header className="finance-page-heading max-w-3xl">
+            <h1 className="text-ink">{title}</h1>
+            {description ? <p className="mt-1 text-muted">{description}</p> : null}
+          </header>
+          {children}
+        </div>
+      </FinanceScrollRegion>
     </main>
   );
 }

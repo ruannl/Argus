@@ -21,6 +21,9 @@ TestResults/
 *.suo
 .vs/
 
+# Next.js dev-server generated agent instructions (recreated on every run).
+frontend/AGENTS.md
+
 # OS / editor noise
 .DS_Store
 Thumbs.db

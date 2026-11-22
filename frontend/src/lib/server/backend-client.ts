@@ -783,6 +783,12 @@ export type TransactionRow = {
   hidden_reason: "none" | "individual" | "statement" | "both";
 };
 
+export type TransactionSuggestion = {
+  transaction_id: string;
+  suggested_tags: TransactionTagRef[];
+  has_more_suggestions: boolean;
+};
+
 export type TransactionPage = {
   transactions: TransactionRow[];
   inventory_count: number;
@@ -795,6 +801,7 @@ export type TransactionPage = {
   sort_by: string;
   sort_direction: string;
   money_totals: TransactionMoneyTotals;
+  suggestions: TransactionSuggestion[];
 };
 
 export type TransactionMoneyDiagnostic = {
@@ -2037,6 +2044,35 @@ export type ReportBucket = {
   money_out_descriptor: ReportFilterDescriptor;
 };
 
+export type ReportCategoryTrendMonth = {
+  start_date: string;
+  end_date: string;
+  label: string;
+  is_partial: boolean;
+  coverage: "covered" | "partial" | "uncovered";
+};
+
+export type ReportCategoryTrendCell = {
+  amount: string;
+  count: number;
+  descriptor: ReportFilterDescriptor;
+};
+
+export type ReportCategoryTrendCategory = {
+  id: string;
+  display_name: string;
+  kind: CategoryKind;
+  is_archived: boolean;
+  money_out: string;
+  count: number;
+  months: ReportCategoryTrendCell[];
+};
+
+export type ReportCategoryTrend = {
+  months: ReportCategoryTrendMonth[];
+  categories: ReportCategoryTrendCategory[];
+};
+
 export type ReportFocus = {
   kind: string;
   category_id: string | null;
@@ -2112,6 +2148,7 @@ export type ReportResponse = {
   categories: ReportCategoryBreakdown | null;
   tags: ReportTagBreakdown | null;
   trend: ReportBucket[] | null;
+  category_trend: ReportCategoryTrend | null;
   coverage: ReportCoveragePair | null;
   focus_group: ReportGroupTotals | null;
   transactions: ReportTransactionPage | null;

@@ -128,10 +128,16 @@ function AliasRow({
   return (
     <Fragment>
       <tr className={TABLE_ROW_CLASS}>
-        <td className={`${TD_CLASS} font-semibold text-ink`}>{alias.display_alias}</td>
-        <td className={TD_CLASS}>{alias.tag_display_name}</td>
-        <td className={`${TD_CLASS} text-muted`}>{alias.category_display_name ?? "—"}</td>
-        <td className={TD_CLASS}>
+        <td data-label="Alias" className={`${TD_CLASS} font-semibold text-ink`}>
+          {alias.display_alias}
+        </td>
+        <td data-label="Suggests tag" className={TD_CLASS}>
+          {alias.tag_display_name}
+        </td>
+        <td data-label="Suggests category" className={`${TD_CLASS} text-muted`}>
+          {alias.category_display_name ?? "—"}
+        </td>
+        <td data-label="Actions" className={TD_CLASS}>
           <div className="flex flex-wrap justify-end gap-2">
             <button
               aria-controls={editorId}
@@ -239,7 +245,7 @@ export default function AliasesSection({
         action={async (formData) => {
           setCreateResult(await createAliasAction(formData));
         }}
-        className="mt-5 rounded-3xl border border-line bg-surface p-4 sm:p-5"
+        className="finance-unboxed mt-5"
       >
         <AliasEditorFields categories={categories} disabled={atAliasLimit} tags={tags} />
         <button
@@ -261,7 +267,11 @@ export default function AliasesSection({
         <p className={EMPTY_STATE_CLASS}>No aliases yet. Add one above.</p>
       ) : (
         <div className={TABLE_WRAPPER_CLASS}>
-          <table className={`${TABLE_CLASS} min-w-[46rem]`}>
+          <table
+            role="table"
+            aria-label="Merchant aliases"
+            className={`${TABLE_CLASS} min-w-[46rem]`}
+          >
             <thead className={TABLE_HEAD_CLASS}>
               <tr>
                 <th className={TH_CLASS} scope="col">

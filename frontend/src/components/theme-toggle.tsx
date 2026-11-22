@@ -18,6 +18,7 @@ export default function ThemeToggle() {
     <button
       aria-label="Switch between light and dark theme"
       className="fixed right-4 bottom-4 z-50 inline-flex h-11 w-11 items-center justify-center rounded-full border border-line bg-surface text-ink shadow-lg transition hover:bg-elevated focus-visible:ring-2 focus-visible:ring-accent-text focus-visible:ring-offset-2 focus-visible:ring-offset-page"
+      data-theme-toggle
       onClick={toggleTheme}
       title="Switch between light and dark theme"
       type="button"

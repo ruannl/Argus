@@ -143,6 +143,7 @@ function report(overrides: Record<string, unknown> = {}): ReportResponse {
         money_out_descriptor: descriptor,
       },
     ],
+    category_trend: null,
     coverage: {
       current: {
         total_days: 28,
