@@ -535,9 +535,7 @@ function CategoryBars({ report, state }: { report: ReportResponse; state: Report
           </summary>
           <div className="mt-2 overflow-x-auto">
             <table className="w-full caption-bottom text-left text-xs">
-              <caption className="sr-only">
-                {label} by category, with the same values as the bars
-              </caption>
+              <caption className="sr-only">{label}, with the same values as the bars</caption>
               <thead>
                 <tr className="text-muted">
                   <th scope="col">Category</th>
@@ -692,9 +690,7 @@ function TagBars({
           </summary>
           <div className="mt-2 overflow-x-auto">
             <table className="w-full caption-bottom text-left text-xs">
-              <caption className="sr-only">
-                {label} by merchant tag, with overlap disclosure
-              </caption>
+              <caption className="sr-only">{label}, with overlap disclosure</caption>
               <thead>
                 <tr className="text-muted">
                   <th scope="col">Tag</th>

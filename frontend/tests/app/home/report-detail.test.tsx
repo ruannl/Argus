@@ -224,7 +224,7 @@ describe("report detail", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { level: 1, name: "Groceries" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Groceries" })).toBeInTheDocument();
     expect(screen.getByText(/2026-02-15 to 2026-02-28/)).toBeInTheDocument();
     expect(screen.getByText(/Missing statement dates are not zero spending/)).toBeInTheDocument();
     expect(screen.getByText(/Bars share one scale from zero/)).toBeInTheDocument();
@@ -311,7 +311,7 @@ describe("report detail", () => {
       <ReportDetail kind="comparison" path="/home/comparison" report={comparison} state={state} />,
     );
 
-    expect(screen.getByText("Period Comparison")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
     expect(screen.getByText("-R 500.00")).toBeInTheDocument();
     expect(screen.getAllByText(/Current/).length).toBeGreaterThan(0);
     expect(screen.getAllByText("R 100.00").length).toBeGreaterThan(0);

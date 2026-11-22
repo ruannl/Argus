@@ -579,7 +579,9 @@ export default function ReportDetail({
     <div>
       <BackToOverview state={overviewState} />
       <header className="mt-2">
-        <h1 className="text-2xl font-semibold tracking-[-0.02em] text-ink">{title}</h1>
+        {kind === "comparison" ? null : (
+          <h2 className="text-2xl font-semibold tracking-[-0.02em] text-ink">{title}</h2>
+        )}
         <p className="mt-1 text-sm text-muted">
           {report.period
             ? `${report.period.label}: ${report.period.start_date} to ${report.period.end_date}`
