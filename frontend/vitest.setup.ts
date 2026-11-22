@@ -33,7 +33,9 @@ vi.mock("next/headers", () => ({
 
 vi.mock("next/navigation", () => ({
   redirect: runtimeMocks.redirect,
+  usePathname: () => window.location.pathname,
   useRouter: () => runtimeMocks.router,
+  useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 
 vi.mock("next/server", () => ({

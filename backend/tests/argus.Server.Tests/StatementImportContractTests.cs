@@ -843,6 +843,31 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
     }
 
     [Fact]
+    public async Task ReviewCanExcludeSuppressedExactDuplicates()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var header = "one\ntwo\nthree\nfour\nfive\nsix\nDate,Amount,Balance,Description\n";
+        var first = await PrepareAsync(session, accountId, System.Text.Encoding.UTF8.GetBytes(header + "2025/01/02,-10.00,0.00,Coffee shop\n"), new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31));
+        var firstCommit = await SendAsync(Post($"{ReviewsPath}/{first.GetProperty("summary").GetProperty("id").GetGuid()}/commit", Json(CommitBody(first)), session: session));
+        Assert.Equal(HttpStatusCode.Created, firstCommit.StatusCode);
+
+        var secondCsv = header + "2025/01/02,-10.00,0.00,Coffee shop\n2025/01/04,-22.00,0.00,Bookstore\n";
+        var second = await PrepareAsync(session, accountId, System.Text.Encoding.UTF8.GetBytes(secondCsv), new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31));
+        var reviewId = second.GetProperty("summary").GetProperty("id").GetGuid();
+        Assert.Equal(1, second.GetProperty("summary").GetProperty("suppressed_count").GetInt32());
+
+        var excluded = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}?duplicates=exclude", session: session)));
+        var excludedRows = Rows(excluded);
+        Assert.Single(excludedRows);
+        Assert.Equal("Bookstore", excludedRows[0].GetProperty("description").GetString());
+        Assert.Equal(1, excluded.GetProperty("page").GetProperty("total").GetInt32());
+
+        var all = Rows(await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session))));
+        Assert.Equal(2, all.Length);
+    }
+
+    [Fact]
     public async Task WithinFileRepeatsRequireAGroupDecision()
     {
         var (session, _) = await NewCustomerAsync();

@@ -3,16 +3,32 @@
 import { useState } from "react";
 
 import { saveTransactionAction } from "@/lib/server/transaction-actions";
-import type { Category, MerchantTag, TransactionRow } from "@/lib/server/backend-client";
+import type {
+  Category,
+  MerchantTag,
+  TransactionRow,
+  TransactionTagRef,
+} from "@/lib/server/backend-client";
 
+import { formatCategoryLabel } from "@/lib/category-label";
 import { sortByDisplayName } from "@/lib/display-order";
+
+export type TransactionTagSuggestions = {
+  tags: TransactionTagRef[];
+  hasMore: boolean;
+};
 
 type TransactionInlineEditorProps = {
   row: TransactionRow;
   categories: Category[];
   tags: MerchantTag[];
   classificationDisabled?: boolean;
-  onSaved: (transaction: TransactionRow) => void;
+  /**
+   * Suggestions for this row: null while they load, an empty list when there
+   * are none. They stay proposals until the user accepts one.
+   */
+  suggestedTags?: TransactionTagSuggestions | null;
+  onSaved: (transaction: TransactionRow, closeEditor?: boolean) => void;
   onStale: (message: string) => void;
 };
 
@@ -21,6 +37,7 @@ export default function TransactionInlineEditor({
   categories,
   tags,
   classificationDisabled = false,
+  suggestedTags = null,
   onSaved,
   onStale,
 }: TransactionInlineEditorProps) {
@@ -29,6 +46,7 @@ export default function TransactionInlineEditor({
   const [removeIds, setRemoveIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
   // The draft belongs to the row version it was opened from. A background
   // refresh must never pair this draft's category with a newer row version.
   const [base, setBase] = useState({
@@ -47,6 +65,62 @@ export default function TransactionInlineEditor({
   const addOptions = sortByDisplayName(
     tags.filter((tag) => !tag.is_archived && !assignedIds.has(tag.id)),
   );
+  const visibleSuggestions = (suggestedTags?.tags ?? [])
+    .filter(
+      (suggestion) =>
+        !suggestion.is_archived &&
+        !assignedIds.has(suggestion.id) &&
+        !addIds.includes(suggestion.id),
+    )
+    .slice(0, 8);
+
+  async function acceptSuggestion(tag: TransactionTagRef) {
+    if (controlsDisabled || acceptingId !== null) {
+      return;
+    }
+    setAcceptingId(tag.id);
+    setMessage(null);
+    try {
+      const result = await saveTransactionAction({
+        id: row.id,
+        expected_version: base.version,
+        changes: { add_tag_ids: [tag.id] },
+      });
+      if (!result.ok) {
+        if (result.kind === "version_conflict" || result.kind === "not_found") {
+          onStale(
+            result.kind === "not_found"
+              ? "That transaction no longer exists in your workspace. The list refresh was requested."
+              : "This transaction changed while you were editing. The editor was closed; reopen it after the list refreshes.",
+          );
+          return;
+        }
+        if (result.kind === "unavailable" || result.kind === "unauthorized") {
+          onStale(
+            result.kind === "unauthorized"
+              ? "Your session expired. Sign in again before retrying."
+              : "The suggested-tag save outcome is uncertain. The list refresh was requested; check the saved value before retrying.",
+          );
+          return;
+        }
+        setMessage(result.message);
+        return;
+      }
+      setBase({
+        version: result.value.transaction.version,
+        categoryId: result.value.transaction.category.id,
+      });
+      setAddIds([]);
+      setMessage(`Suggested tag “${tag.display_name}” added.`);
+      onSaved(result.value.transaction);
+    } catch {
+      onStale(
+        "The suggested-tag save outcome is uncertain. The list refresh was requested; check the saved value before retrying.",
+      );
+    } finally {
+      setAcceptingId(null);
+    }
+  }
 
   async function save() {
     if (classificationDisabled) {
@@ -113,7 +187,7 @@ export default function TransactionInlineEditor({
       setMessage("Inline change saved.");
       setAddIds([]);
       setRemoveIds([]);
-      onSaved(result.value.transaction);
+      onSaved(result.value.transaction, true);
     } catch {
       onStale(
         "The inline save outcome is uncertain. The list refresh was requested; check the saved value before retrying.",
@@ -183,7 +257,7 @@ export default function TransactionInlineEditor({
           >
             {assignable.map((category) => (
               <option key={category.id} value={category.id}>
-                {category.display_name} ({category.kind}){category.is_archived ? " — archived" : ""}
+                {formatCategoryLabel(category)}
               </option>
             ))}
           </select>
@@ -217,6 +291,49 @@ export default function TransactionInlineEditor({
           </select>
         </label>
       </div>
+      {suggestedTags !== null ? (
+        <section aria-labelledby={`inline-suggestions-${row.id}`} className="mt-3">
+          <h4
+            className="text-xs font-semibold text-suggestion-ink"
+            id={`inline-suggestions-${row.id}`}
+          >
+            Suggested tags for {row.description || "this transaction"}
+          </h4>
+          <p className="mt-1 text-xs leading-5 text-muted">
+            Suggestions come from your aliases, history, and active tags for this description.
+            Nothing is applied until you accept it.
+          </p>
+          {suggestedTags.tags.length === 0 ? (
+            <p className="mt-1 text-xs text-muted">No suggestions for this description.</p>
+          ) : visibleSuggestions.length === 0 ? (
+            <p className="mt-1 text-xs text-muted">
+              Every suggested tag is already assigned or selected.
+            </p>
+          ) : (
+            <div className="mt-1 flex flex-wrap gap-2">
+              {visibleSuggestions.map((suggestion) => (
+                <button
+                  aria-label={`Add suggested tag ${suggestion.display_name}`}
+                  className="inline-suggestion-chip rounded-full border border-suggestion-line bg-suggestion-soft px-3 py-1 text-xs font-bold text-suggestion-ink disabled:opacity-60"
+                  disabled={controlsDisabled || acceptingId !== null}
+                  key={suggestion.id}
+                  onClick={() => void acceptSuggestion(suggestion)}
+                  type="button"
+                >
+                  {acceptingId === suggestion.id
+                    ? "Adding…"
+                    : `Suggested: ${suggestion.display_name}`}
+                </button>
+              ))}
+            </div>
+          )}
+          {suggestedTags.hasMore ? (
+            <p className="mt-1 text-xs text-muted">
+              More suggestions exist; assigning or removing a tag refreshes this list.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
       {row.merchant_tags.length > 0 ? (
         <fieldset className="mt-2" disabled={controlsDisabled}>
           <legend className="text-xs font-semibold text-ink">Remove assigned tags inline</legend>

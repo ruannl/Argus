@@ -114,7 +114,6 @@ export default function ImportWorkspace({
   const [mappingDirty, setMappingDirty] = useState(false);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [confirmZar, setConfirmZar] = useState(false);
   const [busy, setBusy] = useState<"idle" | "inspecting" | "preparing">("idle");
   const [message, setMessage] = useState<Message | null>(null);
   const [pending, startTransition] = useTransition();
@@ -124,7 +123,6 @@ export default function ImportWorkspace({
     setMapping({});
     setStartDate("");
     setEndDate("");
-    setConfirmZar(false);
   }
 
   function chooseFile(file: File | null) {
@@ -152,7 +150,7 @@ export default function ImportWorkspace({
       accountId,
       startDate,
       endDate,
-      confirmZar,
+      true,
       mapping,
       mode,
     );
@@ -195,10 +193,9 @@ export default function ImportWorkspace({
       setMappingDirty(false);
       setStartDate(body.proposed_start_date ?? "");
       setEndDate(body.proposed_end_date ?? "");
-      setConfirmZar(false);
       setMessage({
         tone: "status",
-        text: "Inspection complete. Confirm the mapping, ZAR, and statement dates.",
+        text: "Inspection complete. Confirm the mapping and statement dates.",
       });
     } catch (error) {
       if ((error as Error).name !== "AbortError") {
@@ -217,10 +214,6 @@ export default function ImportWorkspace({
     }
     if (startDate > endDate) {
       setMessage({ tone: "error", text: "The start date must not be after the end date." });
-      return;
-    }
-    if (!confirmZar) {
-      setMessage({ tone: "error", text: "Confirm that this statement is in ZAR." });
       return;
     }
     if (mappingDirty) {
@@ -295,7 +288,7 @@ export default function ImportWorkspace({
             panel: (
               <>
                 {activeAccounts.length === 0 ? (
-                  <section className="rounded-[2rem] border border-line bg-surface p-6 card-shadow sm:p-8">
+                  <section className="finance-unboxed">
                     <h2 className="text-2xl font-semibold tracking-[-0.03em] text-ink">
                       Add a financial account first
                     </h2>
@@ -341,7 +334,7 @@ export default function ImportWorkspace({
                     ) : null}
                   </section>
                 ) : (
-                  <section className="rounded-[2rem] border border-line bg-surface p-6 card-shadow sm:p-8">
+                  <section className="finance-unboxed">
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div>
                         <p className="text-xs font-semibold tracking-[0.14em] text-accent-text uppercase">
@@ -461,9 +454,9 @@ export default function ImportWorkspace({
                             Detected {sourceKindLabel(inspect.detected_source_kind)}
                           </p>
                           <p className="mt-1 text-sm text-muted">
-                            Confirm the statement is in ZAR and that the coverage dates are
-                            inclusive. Rows outside the coverage period stay invalid until you
-                            adjust the dates or skip them.
+                            This workspace accepts ZAR statements only. Confirm that the coverage
+                            dates are inclusive. Rows outside the coverage period stay invalid until
+                            you adjust the dates or skip them.
                           </p>
                         </div>
 
@@ -487,15 +480,6 @@ export default function ImportWorkspace({
                             />
                           </label>
                         </div>
-                        <label className="flex items-start gap-3 text-sm font-semibold text-ink">
-                          <input
-                            checked={confirmZar}
-                            className="mt-1"
-                            onChange={(event) => setConfirmZar(event.target.checked)}
-                            type="checkbox"
-                          />
-                          <span>I confirm this statement is in South African rand (ZAR).</span>
-                        </label>
 
                         {sourceKind === "generic_csv" ? (
                           <fieldset className="rounded-2xl border border-line bg-page p-4">
@@ -625,7 +609,11 @@ export default function ImportWorkspace({
                   <p className={EMPTY_STATE_CLASS}>No open reviews.</p>
                 ) : (
                   <div className={TABLE_WRAPPER_CLASS}>
-                    <table className={`${TABLE_CLASS} min-w-[44rem]`}>
+                    <table
+                      role="table"
+                      aria-label="Open import reviews"
+                      className={`${TABLE_CLASS} min-w-[44rem]`}
+                    >
                       <thead className={TABLE_HEAD_CLASS}>
                         <tr>
                           <th className={TH_CLASS} scope="col">
@@ -645,21 +633,21 @@ export default function ImportWorkspace({
                       <tbody>
                         {reviews.map((review) => (
                           <tr className={TABLE_ROW_CLASS} key={review.id}>
-                            <td className={TD_CLASS}>
+                            <td data-label="Statement" className={TD_CLASS}>
                               <p className="font-semibold text-ink">
                                 {sourceKindLabel(review.source_kind)}
                               </p>
                               <p className="mt-0.5 text-xs text-muted">Version {review.version}</p>
                             </td>
-                            <td className={`${TD_CLASS} text-muted`}>
+                            <td data-label="Coverage" className={`${TD_CLASS} text-muted`}>
                               {review.start_date ?? "Unknown start"} to{" "}
                               {review.end_date ?? "unknown end"}
                             </td>
-                            <td className={`${TD_CLASS} text-muted tabular-nums`}>
+                            <td data-label="Rows" className={`${TD_CLASS} text-muted tabular-nums`}>
                               {review.imported_count} included · {review.suppressed_count}{" "}
                               suppressed · {review.skipped_count} skipped
                             </td>
-                            <td className={`${TD_CLASS} text-right`}>
+                            <td data-label="Action" className={`${TD_CLASS} text-right`}>
                               <Link
                                 className="inline-flex rounded-full border border-line px-4 py-2 text-sm font-bold text-ink transition hover:border-ink"
                                 href={`/imports/review/${review.id}`}
@@ -695,11 +683,18 @@ export default function ImportWorkspace({
                   <p className={EMPTY_STATE_CLASS}>No statements imported yet.</p>
                 ) : (
                   <div className={TABLE_WRAPPER_CLASS}>
-                    <table className={`${TABLE_CLASS} min-w-[52rem]`}>
+                    <table
+                      role="table"
+                      aria-label="Committed import history"
+                      className={`${TABLE_CLASS} min-w-[52rem]`}
+                    >
                       <thead className={TABLE_HEAD_CLASS}>
                         <tr>
                           <th className={TH_CLASS} scope="col">
                             Statement
+                          </th>
+                          <th className={TH_CLASS} scope="col">
+                            Account
                           </th>
                           <th className={TH_CLASS} scope="col">
                             Coverage
@@ -719,49 +714,71 @@ export default function ImportWorkspace({
                         </tr>
                       </thead>
                       <tbody>
-                        {history.map((item) => (
-                          <tr className={TABLE_ROW_CLASS} key={item.id}>
-                            <td className={`${TD_CLASS} font-semibold text-ink`}>
-                              {item.statement_label}
-                            </td>
-                            <td className={`${TD_CLASS} text-muted`}>
-                              {item.start_date} to {item.end_date}
-                            </td>
-                            <td className={`${TD_CLASS} text-muted`}>
-                              {sourceKindLabel(item.source_type)}
-                            </td>
-                            <td className={`${TD_CLASS} text-muted tabular-nums`}>
-                              {item.imported_count} imported · {item.suppressed_count} suppressed
-                            </td>
-                            <td className={TD_CLASS}>
-                              {item.is_hidden ? (
-                                <span
-                                  className={`${STATUS_PILL_CLASS} bg-warning-soft text-warning-text`}
-                                >
-                                  Hidden
-                                </span>
-                              ) : item.live_hidden_count > 0 ? (
-                                <span className={`${STATUS_PILL_CLASS} bg-elevated text-muted`}>
-                                  {item.live_hidden_count} hidden
-                                </span>
-                              ) : (
-                                <span
-                                  className={`${STATUS_PILL_CLASS} bg-success-soft text-success-ink`}
-                                >
-                                  Visible
-                                </span>
-                              )}
-                            </td>
-                            <td className={`${TD_CLASS} text-right`}>
-                              <Link
-                                className="inline-flex rounded-full border border-line px-4 py-2 text-sm font-bold text-ink transition hover:border-ink"
-                                href={`/imports/${item.id}`}
+                        {history.map((item) => {
+                          const itemAccount = accounts.find(
+                            (candidate) => candidate.id === item.financial_account_id,
+                          );
+                          return (
+                            <tr className={TABLE_ROW_CLASS} key={item.id}>
+                              <td
+                                data-label="Statement"
+                                className={`${TD_CLASS} font-semibold text-ink`}
                               >
-                                View statement
-                              </Link>
-                            </td>
-                          </tr>
-                        ))}
+                                {item.statement_label}
+                              </td>
+                              <td data-label="Account" className={`${TD_CLASS} text-muted`}>
+                                {itemAccount ? (
+                                  <>
+                                    {itemAccount.display_name}
+                                    {itemAccount.is_archived ? " (archived)" : ""}
+                                  </>
+                                ) : (
+                                  "Unknown account"
+                                )}
+                              </td>
+                              <td data-label="Coverage" className={`${TD_CLASS} text-muted`}>
+                                {item.start_date} to {item.end_date}
+                              </td>
+                              <td data-label="Source" className={`${TD_CLASS} text-muted`}>
+                                {sourceKindLabel(item.source_type)}
+                              </td>
+                              <td
+                                data-label="Rows"
+                                className={`${TD_CLASS} text-muted tabular-nums`}
+                              >
+                                {item.imported_count} imported · {item.suppressed_count} suppressed
+                                · {item.skipped_count} skipped
+                              </td>
+                              <td data-label="Status" className={TD_CLASS}>
+                                {item.is_hidden ? (
+                                  <span
+                                    className={`${STATUS_PILL_CLASS} bg-warning-soft text-warning-text`}
+                                  >
+                                    Hidden
+                                  </span>
+                                ) : item.live_hidden_count > 0 ? (
+                                  <span className={`${STATUS_PILL_CLASS} bg-elevated text-muted`}>
+                                    {item.live_hidden_count} hidden
+                                  </span>
+                                ) : (
+                                  <span
+                                    className={`${STATUS_PILL_CLASS} bg-success-soft text-success-ink`}
+                                  >
+                                    Visible
+                                  </span>
+                                )}
+                              </td>
+                              <td data-label="Action" className={`${TD_CLASS} text-right`}>
+                                <Link
+                                  className="inline-flex rounded-full border border-line px-4 py-2 text-sm font-bold text-ink transition hover:border-ink"
+                                  href={`/imports/${item.id}`}
+                                >
+                                  View statement
+                                </Link>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

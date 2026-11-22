@@ -42,7 +42,6 @@ function DetailUnavailable({
       account={account}
       activeNav="transactions"
       description="A single imported transaction with its read-only source identity and editable classification."
-      eyebrow="Transaction"
       title="Transaction detail"
     >
       <section className="mt-8 rounded-[2rem] border border-warning-line bg-warning-soft p-6">
@@ -184,7 +183,6 @@ export default async function TransactionDetailPage({
       account={account}
       activeNav="transactions"
       description="Imported identity is read-only; category, tags and your individual hide flag are editable under a version check."
-      eyebrow="Transaction"
       title="Transaction detail"
     >
       {overviewHref ? (

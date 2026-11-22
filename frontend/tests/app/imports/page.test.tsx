@@ -154,7 +154,9 @@ describe("imports page", () => {
 
     render(await ImportsPage());
 
-    expect(screen.getByRole("tab", { name: "Open reviews" })).toHaveClass("border-warning-line");
+    const waitingTab = screen.getByRole("tab", { name: "Open reviews Waiting" });
+    expect(within(waitingTab).getByText("Waiting")).toBeVisible();
+    expect(waitingTab).toHaveAttribute("title", "There is work waiting in this section.");
   });
 
   it("renders the next history cursor link", async () => {
@@ -206,6 +208,9 @@ describe("imports page", () => {
 
     await user.click(screen.getByRole("tab", { name: "History" }));
 
+    const historyTable = screen.getByRole("table", { name: "Committed import history" });
+    expect(within(historyTable).getByRole("columnheader", { name: "Account" })).toBeInTheDocument();
+    expect(within(historyTable).getByText("Cheque")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Load older imports" })).toHaveAttribute(
       "href",
       "/imports?tab=history&cursor=cursor-1",

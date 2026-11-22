@@ -11,7 +11,8 @@
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:finance": "playwright test --config playwright.finance.config.ts"
   },
   "dependencies": {
     "next": "16.4.6",

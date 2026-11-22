@@ -6,6 +6,7 @@ import {
   formatSignedMoney,
   isZeroAmount,
   normalizeAmount,
+  sumMoney,
 } from "@/lib/money-format";
 
 describe("exact ZAR formatting", () => {
@@ -42,6 +43,16 @@ describe("exact ZAR formatting", () => {
     expect(formatSignedMoney("10.00")).toBe("+R 10.00");
     expect(formatSignedMoney("-10.00")).toBe("-R 10.00");
     expect(formatSignedMoney("0.00")).toBe("R 0.00");
+  });
+
+  it("sums exact signed amounts without Number precision loss", () => {
+    expect(sumMoney([])).toBe("0.00");
+    expect(sumMoney(["1000.00", "234.56"])).toBe("1234.56");
+    expect(sumMoney(["10.00", "-3.50"])).toBe("6.50");
+    expect(sumMoney(["-10.00", "-3.50"])).toBe("-13.50");
+    expect(sumMoney(["123456789012345678901234567890.99", "0.01"])).toBe(
+      "123456789012345678901234567891.00",
+    );
   });
 
   it("rejects malformed amounts instead of inventing a value", () => {

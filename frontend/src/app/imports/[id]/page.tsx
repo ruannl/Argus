@@ -61,7 +61,6 @@ export default async function StatementPage({
       account={account}
       activeNav="imports"
       description="A committed statement and the rows it created. Individual transactions are never deleted; hide or restore the whole statement."
-      eyebrow="Workspace"
       title="Statement detail"
     >
       {result.ok ? (

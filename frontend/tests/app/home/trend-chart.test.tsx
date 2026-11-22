@@ -66,10 +66,11 @@ describe("TrendBarPlot", () => {
       />,
     );
 
-    const series = container.querySelectorAll(".bg-accent, .bg-chart-out");
+    const series = container.querySelectorAll(".bg-chart-in, .bg-chart-out");
 
     expect(series).toHaveLength(2);
     expect(container.querySelector(".bg-inverse")).toBeNull();
+    expect(container.querySelector(".bg-accent")).toBeNull();
     expect(series[0]).toHaveStyle({ height: "100%" });
     expect(series[1]).toHaveStyle({ height: "40%" });
   });

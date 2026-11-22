@@ -57,7 +57,6 @@ export default async function SalaryCyclesPage({
         account={account}
         activeNav="overview"
         description="Manage the receipt-confirmed dates used by salary-cycle reporting."
-        eyebrow="Overview"
         title="Salary cycles"
       >
         <section className="mt-6 rounded-[1.5rem] border border-warning-line bg-warning-soft p-4">
@@ -83,7 +82,6 @@ export default async function SalaryCyclesPage({
         account={account}
         activeNav="overview"
         description="Manage the receipt-confirmed dates used by salary-cycle reporting."
-        eyebrow="Overview"
         title="Salary cycles"
       >
         <section className="mt-6 rounded-[1.5rem] border border-warning-line bg-warning-soft p-4">
@@ -107,7 +105,6 @@ export default async function SalaryCyclesPage({
       account={account}
       activeNav="overview"
       description="Confirm, inspect and correct the receipt dates that define salary-cycle periods."
-      eyebrow="Overview"
       title="Salary cycles"
     >
       <Link

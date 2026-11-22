@@ -518,7 +518,7 @@ export default function ReviewWorkspace({
                 }
                 type="checkbox"
               />
-              Exclude possible duplicates
+              Exclude duplicates
             </label>
             <label className="flex items-center gap-2 text-xs font-semibold text-ink">
               <input
@@ -567,8 +567,95 @@ export default function ReviewWorkspace({
           </div>
         </div>
 
+        <nav aria-label="Review pages" className="mt-4 flex flex-wrap items-center gap-2">
+          {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => (
+            <Link
+              aria-current={pageNumber === review.page.page ? "page" : undefined}
+              className={
+                pageNumber === review.page.page
+                  ? "rounded-full bg-ink px-3 py-1.5 text-xs font-bold text-page"
+                  : "rounded-full border border-line px-3 py-1.5 text-xs font-bold text-ink"
+              }
+              href={reviewHref(
+                summary.id,
+                pageNumber,
+                pageSize,
+                sortDirection,
+                possibleOnly,
+                excludePossible,
+                repeatsInFile,
+                untaggedOnly,
+              )}
+              key={pageNumber}
+            >
+              {pageNumber}
+            </Link>
+          ))}
+          <span className="text-xs text-muted">
+            {includedCount} row{includedCount === 1 ? "" : "s"} currently included across the
+            review.
+          </span>
+          <label className="ml-auto flex items-center gap-2 text-xs font-semibold text-ink">
+            Sort by date
+            <select
+              className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm font-normal text-ink"
+              disabled={busy}
+              onChange={(event) =>
+                router.push(
+                  reviewHref(
+                    summary.id,
+                    1,
+                    pageSize,
+                    event.target.value as "asc" | "desc",
+                    possibleOnly,
+                    excludePossible,
+                    repeatsInFile,
+                    untaggedOnly,
+                  ),
+                )
+              }
+              value={sortDirection}
+            >
+              <option value="asc">Oldest first</option>
+              <option value="desc">Newest first</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs font-semibold text-ink">
+            Rows per page
+            <select
+              className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm font-normal text-ink"
+              disabled={busy}
+              onChange={(event) =>
+                router.push(
+                  reviewHref(
+                    summary.id,
+                    1,
+                    Number.parseInt(event.target.value, 10),
+                    sortDirection,
+                    possibleOnly,
+                    excludePossible,
+                    repeatsInFile,
+                    untaggedOnly,
+                  ),
+                )
+              }
+              value={pageSize}
+            >
+              {REVIEW_PAGE_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </label>
+        </nav>
+
         <div className={TABLE_WRAPPER_CLASS}>
-          <table className={`${TABLE_CLASS} min-w-[58rem] table-fixed`}>
+          <table
+            role="table"
+            aria-label="Import review rows"
+            className={`${TABLE_CLASS} min-w-[58rem] table-fixed`}
+          >
             <colgroup>
               <col className="w-[6rem]" />
               <col className="w-[7rem]" />
@@ -642,27 +729,28 @@ export default function ReviewWorkspace({
                         blocking ? `${TABLE_ROW_CLASS} bg-warning-soft/40` : TABLE_ROW_CLASS
                       }
                     >
-                      <td className={TD_CLASS}>
+                      <td data-label="Row" className={TD_CLASS}>
                         <p className="font-semibold text-ink">Row {rowNumber}</p>
                         <p className="mt-0.5 text-xs text-muted">
                           {row.source_page !== null ? `Page ${row.source_page} · ` : ""}Line{" "}
                           {row.source_line}
                         </p>
                       </td>
-                      <td className={`${TD_CLASS} whitespace-nowrap text-muted`}>
+                      <td data-label="Date" className={`${TD_CLASS} whitespace-nowrap text-muted`}>
                         {row.transaction_date ?? "Date unresolved"}
                       </td>
-                      <td className={`${TD_CLASS} max-w-md`}>
+                      <td data-label="Description" className={`${TD_CLASS} max-w-md`}>
                         <p className="break-words text-sm font-semibold text-ink">
                           {row.description}
                         </p>
                       </td>
                       <td
+                        data-label="Amount (ZAR)"
                         className={`${TD_CLASS} text-right font-mono font-semibold whitespace-nowrap tabular-nums text-ink`}
                       >
                         {row.amount ?? "—"}
                       </td>
-                      <td className={TD_CLASS}>
+                      <td data-label="Category" className={TD_CLASS}>
                         <div className="flex flex-col gap-2 text-xs">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span
@@ -748,7 +836,7 @@ export default function ReviewWorkspace({
                           </div>
                         </div>
                       </td>
-                      <td className={TD_CLASS}>
+                      <td data-label="Status" className={TD_CLASS}>
                         <div className="flex flex-wrap gap-1.5 text-xs">
                           {blocking ? (
                             <span
@@ -818,7 +906,7 @@ export default function ReviewWorkspace({
                           )}
                         </div>
                       </td>
-                      <td className={`${TD_CLASS} max-w-sm`}>
+                      <td data-label="Tags" className={`${TD_CLASS} max-w-sm`}>
                         <div className="flex flex-wrap gap-1.5 text-xs">
                           {selected.map(({ id, tag }) => (
                             <span
@@ -929,7 +1017,7 @@ export default function ReviewWorkspace({
                           </button>
                         </form>
                       </td>
-                      <td className={TD_CLASS}>
+                      <td data-label="Actions" className={TD_CLASS}>
                         <div className="flex flex-col items-end gap-2">
                           <label className="inline-flex items-center gap-2 text-xs font-semibold text-ink">
                             <input
@@ -1094,88 +1182,6 @@ export default function ReviewWorkspace({
         </div>
       </section>
 
-      <nav aria-label="Review pages" className="flex flex-wrap items-center gap-2">
-        {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => (
-          <Link
-            aria-current={pageNumber === review.page.page ? "page" : undefined}
-            className={
-              pageNumber === review.page.page
-                ? "rounded-full bg-ink px-3 py-1.5 text-xs font-bold text-page"
-                : "rounded-full border border-line px-3 py-1.5 text-xs font-bold text-ink"
-            }
-            href={reviewHref(
-              summary.id,
-              pageNumber,
-              pageSize,
-              sortDirection,
-              possibleOnly,
-              excludePossible,
-              repeatsInFile,
-              untaggedOnly,
-            )}
-            key={pageNumber}
-          >
-            {pageNumber}
-          </Link>
-        ))}
-        <span className="text-xs text-muted">
-          {includedCount} row{includedCount === 1 ? "" : "s"} currently included across the review.
-        </span>
-        <label className="ml-auto flex items-center gap-2 text-xs font-semibold text-ink">
-          Sort by date
-          <select
-            className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm font-normal text-ink"
-            disabled={busy}
-            onChange={(event) =>
-              router.push(
-                reviewHref(
-                  summary.id,
-                  1,
-                  pageSize,
-                  event.target.value as "asc" | "desc",
-                  possibleOnly,
-                  excludePossible,
-                  repeatsInFile,
-                  untaggedOnly,
-                ),
-              )
-            }
-            value={sortDirection}
-          >
-            <option value="asc">Oldest first</option>
-            <option value="desc">Newest first</option>
-          </select>
-        </label>
-        <label className="flex items-center gap-2 text-xs font-semibold text-ink">
-          Rows per page
-          <select
-            className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm font-normal text-ink"
-            disabled={busy}
-            onChange={(event) =>
-              router.push(
-                reviewHref(
-                  summary.id,
-                  1,
-                  Number.parseInt(event.target.value, 10),
-                  sortDirection,
-                  possibleOnly,
-                  excludePossible,
-                  repeatsInFile,
-                  untaggedOnly,
-                ),
-              )
-            }
-            value={pageSize}
-          >
-            {REVIEW_PAGE_SIZES.map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
-            ))}
-          </select>
-        </label>
-      </nav>
-
       {repeat ? (
         <section className="rounded-2xl border border-warning-line bg-warning-soft p-4">
           <h2 className="text-lg font-semibold text-warning-ink">
@@ -1219,7 +1225,7 @@ export default function ReviewWorkspace({
         </section>
       ) : null}
 
-      <section className="sticky bottom-0 rounded-2xl border border-line bg-surface p-4 card-shadow">
+      <section className="finance-review-actions rounded-2xl border border-line bg-surface p-4 card-shadow">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-sm text-muted">
             <p className="font-semibold text-ink">

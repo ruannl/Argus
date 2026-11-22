@@ -157,7 +157,17 @@ public sealed record TransactionPageResult(TransactionResponse[] Transactions,
                                            int PageSize,
                                            string SortBy,
                                            string SortDirection,
-                                           TransactionMoneyTotals MoneyTotals);
+                                           TransactionMoneyTotals MoneyTotals,
+                                           TransactionSuggestionResponse[] Suggestions);
+
+/// <summary>
+/// Row-level suggestion summary for the transactions list. Only unassigned
+/// tag candidates are included, capped so the table stays compact; the detail
+/// response keeps the full bounded list.
+/// </summary>
+public sealed record TransactionSuggestionResponse(Guid TransactionId,
+                                                   TransactionTagRef[] SuggestedTags,
+                                                   bool HasMoreSuggestions);
 
 public sealed record TransactionMoneyDiagnostic(long Count,
                                                 string MoneyIn,

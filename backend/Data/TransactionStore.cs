@@ -59,10 +59,55 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
             : await TransactionReadQueries.ReadRowsAsync(context, customerId, plan.Filter, plan.SortBy, plan.SortDirection, plan.PageSize, offset, includeVisibility: true, cancellationToken);
 
         TransactionMoneyTotals moneyTotals = await MoneyTotalsAsync(context, customerId, plan.Filter, cancellationToken);
+        TransactionSuggestionResponse[] suggestions = await PageSuggestionsAsync(context, customerId, rows, cancellationToken);
 
         await scope.CommitAsync(cancellationToken);
 
-        return new TransactionPageResult(rows.Select(row => row.Response).ToArray(), inventory, visible, hidden, matchingTotal, filteredTotal, plan.Page, plan.PageSize, plan.SortBy, plan.SortDirection, moneyTotals);
+        return new TransactionPageResult(rows.Select(row => row.Response).ToArray(), inventory, visible, hidden, matchingTotal, filteredTotal, plan.Page, plan.PageSize, plan.SortBy, plan.SortDirection, moneyTotals, suggestions);
+    }
+
+    /// <summary>
+    /// Batched row suggestions: one active-tag read and one suggestion-input
+    /// load for the whole page, then an in-memory build per row. Assigned tags
+    /// are excluded and the row cap keeps the table compact; the detail
+    /// response keeps the full bounded list.
+    /// </summary>
+    private static async Task<TransactionSuggestionResponse[]> PageSuggestionsAsync(ArgusDbContext context,
+                                                                                     Guid customerId,
+                                                                                     IReadOnlyList<TransactionReadQueries.TransactionRowData> rows,
+                                                                                     CancellationToken cancellationToken)
+    {
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        IReadOnlyList<(Guid Id, string DisplayName, string[] Tokens)> activeTags = await LoadActiveTagsAsync(context, customerId, cancellationToken);
+        string[] merchantKeys = rows
+            .Select(row => MerchantKey.FromDescription(row.NormalizedDescription))
+            .Where(key => key is not null)
+            .Select(key => key!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        SuggestionData suggestionData = await SuggestionLoader.LoadAsync(context, customerId, merchantKeys, cancellationToken);
+        (Guid Id, string[] Tokens)[] tagInputs = activeTags.Select(tag => (tag.Id, tag.Tokens)).ToArray();
+        Dictionary<Guid, (Guid Id, string DisplayName, string[] Tokens)> tagsById = activeTags.ToDictionary(tag => tag.Id);
+
+        return rows.Select(row =>
+        {
+            SuggestionResult suggestion = MerchantSuggestions.Build(row.NormalizedDescription, tagInputs, suggestionData);
+            HashSet<Guid> assigned = row.TagIds.ToHashSet();
+            Guid[] matches = suggestion.TagIds
+                .Where(id => !assigned.Contains(id) && tagsById.ContainsKey(id))
+                .Take(TransactionLimits.MaxRowSuggestions + 1)
+                .ToArray();
+            TransactionTagRef[] suggestedTags = matches
+                .Take(TransactionLimits.MaxRowSuggestions)
+                .Select(id => tagsById[id])
+                .Select(tag => new TransactionTagRef(tag.Id, tag.DisplayName, false))
+                .ToArray();
+            return new TransactionSuggestionResponse(row.Response.Id, suggestedTags, matches.Length > TransactionLimits.MaxRowSuggestions);
+        }).ToArray();
     }
 
     /// <summary>

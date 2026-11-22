@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using argus.Server.Reporting;
 
 namespace argus.Server.Tests;
 
@@ -84,6 +85,58 @@ public sealed class ReportingContractTests(KitFactory factory) : TransactionTest
         decimal tagOutSum = outRanks.Sum(rank => decimal.Parse(rank.GetProperty("amount").GetString()!, System.Globalization.CultureInfo.InvariantCulture));
         Assert.Equal(600m, tagOutSum);
         Assert.NotEqual(340m, tagOutSum);
+    }
+
+    [Fact]
+    public async Task CategoryTrendReturnsBoundedSixMonthMoneyOutSeries()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        Guid accountId = await CreateAccountAsync(session);
+        var (_, expenseId) = await DefaultCategoriesAsync(session);
+        Guid travelId = await CreateCategoryAsync(session, "Trend travel", "Expense");
+        Guid otherAccountId = await CreateAccountAsync(session, "Savings");
+        Guid otherCategoryId = await CreateCategoryAsync(session, "Trend other account", "Expense");
+        Guid statementId = await SeedStatementAsync(customerId, accountId);
+        Guid otherStatementId = await SeedStatementAsync(customerId, otherAccountId, label: "Other account");
+        DateOnly today = ReportingClock.Today(TimeProvider.System);
+        DateOnly firstMonth = new(today.Year, today.Month, 1);
+        firstMonth = firstMonth.AddMonths(-5);
+        await ExecuteSqlAsync($"""
+            UPDATE statement_imports
+            SET start_date = DATE '{firstMonth:yyyy-MM-dd}', end_date = DATE '{today:yyyy-MM-dd}'
+            WHERE id IN ('{statementId}', '{otherStatementId}');
+            """);
+
+        DateOnly oldest = firstMonth.AddDays(1);
+        await SeedTransactionAsync(customerId, accountId, statementId, expenseId, oldest, "Trend oldest expense", -10m, 1);
+        await SeedTransactionAsync(customerId, accountId, statementId, expenseId, today, "Trend latest expense", -5m, 2);
+        await SeedTransactionAsync(customerId, accountId, statementId, travelId, today, "Trend latest travel", -25m, 3);
+        await SeedTransactionAsync(customerId, otherAccountId, otherStatementId, otherCategoryId, today, "Trend other account", -40m, 1);
+
+        JsonElement report = await ReportAsync(session, CustomBody(firstMonth, today));
+        JsonElement trend = report.GetProperty("category_trend");
+        JsonElement months = trend.GetProperty("months");
+        Assert.Equal(6, months.GetArrayLength());
+        Assert.Equal(today.ToString("yyyy-MM-dd"), months[5].GetProperty("end_date").GetString());
+
+        JsonElement[] categories = trend.GetProperty("categories").EnumerateArray().ToArray();
+        Assert.Equal(3, categories.Length);
+        JsonElement travel = Assert.Single(categories, category => category.GetProperty("id").GetGuid() == travelId);
+        Assert.Equal("25.00", travel.GetProperty("money_out").GetString());
+        JsonElement travelLast = travel.GetProperty("months")[5];
+        Assert.Equal("25.00", travelLast.GetProperty("amount").GetString());
+        Assert.Equal(1, travelLast.GetProperty("count").GetInt64());
+        Assert.Equal("out", travelLast.GetProperty("descriptor").GetProperty("direction").GetString());
+
+        JsonElement[] selectedAccount = (await ReportAsync(session, FilteredBody(firstMonth, today, accountId)))
+            .GetProperty("category_trend").GetProperty("categories").EnumerateArray().ToArray();
+        Assert.Equal(2, selectedAccount.Length);
+        Assert.DoesNotContain(selectedAccount, category => category.GetProperty("id").GetGuid() == otherCategoryId);
+
+        JsonElement[] otherFilters = (await ReportAsync(session, FilteredBody(firstMonth, today, accountId, travelId)))
+            .GetProperty("category_trend").GetProperty("categories").EnumerateArray().ToArray();
+        Assert.Equal(2, otherFilters.Length);
+        Assert.Contains(otherFilters, category => category.GetProperty("id").GetGuid() == expenseId);
     }
 
     [Fact]
@@ -354,6 +407,22 @@ public sealed class ReportingContractTests(KitFactory factory) : TransactionTest
                 start_date = start.ToString("yyyy-MM-dd"),
                 end_date = end.ToString("yyyy-MM-dd"),
             },
+        };
+
+    private static object FilteredBody(DateOnly start,
+                                       DateOnly end,
+                                       Guid accountId,
+                                       Guid? categoryId = null) =>
+        new
+        {
+            view = "overview",
+            period = new
+            {
+                mode = "custom",
+                start_date = start.ToString("yyyy-MM-dd"),
+                end_date = end.ToString("yyyy-MM-dd"),
+            },
+            filters = new { financial_account_id = accountId, category_id = categoryId },
         };
 
     private static object CalendarBody(string preset) =>

@@ -87,6 +87,21 @@ export function isZeroAmount(value: string): boolean {
   return parseAmount(value).cents === BigInt(0);
 }
 
+/** Exact sum of invariant two-decimal amount strings. */
+export function sumMoney(values: string[]): string {
+  let cents = BigInt(0);
+  for (const value of values) {
+    const parsed = parseAmount(value);
+    cents += parsed.negative ? -parsed.cents : parsed.cents;
+  }
+
+  const negative = cents < BigInt(0);
+  const magnitude = negative ? -cents : cents;
+  const whole = magnitude / BigInt(100);
+  const fraction = (magnitude % BigInt(100)).toString().padStart(2, "0");
+  return `${negative ? "-" : ""}${whole.toString()}.${fraction}`;
+}
+
 /** One-decimal percentage string from the backend, or an explicit absence. */
 export function formatPercentage(value: string | null): string | null {
   if (value === null) {

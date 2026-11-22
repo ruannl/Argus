@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // Authenticated synthetic finance journeys run with their isolated fixture servers.
+  testIgnore: "**/finance/**",
   timeout: 30_000,
   expect: {
     timeout: 10_000,
@@ -28,8 +30,7 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       env: {
         ARGUS_AUTH_SECRET:
-          process.env.ARGUS_AUTH_SECRET ??
-          "test-only-auth-secret-placeholder-32-bytes",
+          process.env.ARGUS_AUTH_SECRET ?? "test-only-auth-secret-placeholder-32-bytes",
         // Auth.js pins its public origin from ARGUS_FRONTEND_URL. The test
         // server's exact origin is 127.0.0.1:3100, not the local development
         // default in .env, so the redirects stay on the server under test.

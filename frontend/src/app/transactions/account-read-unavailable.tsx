@@ -13,7 +13,7 @@ export default function AccountReadUnavailable({ kind, view, title }: AccountRea
   const router = useRouter();
 
   return (
-    <main className="min-h-screen px-5 py-8 sm:px-8 lg:px-12">
+    <main className="finance-workspace min-h-screen px-5 pt-5 pb-24 sm:px-8 lg:px-12">
       <section className="mx-auto max-w-3xl rounded-[2rem] border border-warning-line bg-warning-soft p-6 sm:p-10">
         <h1 className="text-2xl font-semibold text-warning-ink">
           {title ??

@@ -77,7 +77,6 @@ function ImportsWorkspace({
       account={account}
       activeNav="imports"
       description="Upload a bank or credit-card statement, confirm the mapping and dates, then review every row before committing."
-      eyebrow="Workspace"
       title="Imports"
     >
       <ImportWorkspace

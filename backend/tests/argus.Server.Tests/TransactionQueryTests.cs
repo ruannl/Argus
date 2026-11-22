@@ -374,6 +374,34 @@ public sealed class TransactionQueryTests(KitFactory factory, ITestOutputHelper 
     }
 
     [Fact]
+    public async Task PageIncludesAtMostThreeUnassignedSuggestedTagsPerRow()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var (_, expenseId) = await DefaultCategoriesAsync(session);
+        var statementId = await SeedStatementAsync(customerId, accountId);
+
+        string[] names = ["alpha", "bravo", "charlie", "delta", "echo"];
+        Guid[] tagIds = new Guid[names.Length];
+        for (int index = 0; index < names.Length; index++)
+        {
+            tagIds[index] = await CreateTagAsync(session, names[index]);
+        }
+        string description = string.Join(' ', names.Select(name => name.ToUpperInvariant()));
+        var rowId = await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2024, 11, 2), description, -5m, 1, tagIds: [tagIds[0]]);
+
+        var page = await QueryAsync(session, new { page = 1, page_size = 25 });
+        var entry = page.GetProperty("suggestions").EnumerateArray()
+            .Single(item => item.GetProperty("transaction_id").GetGuid() == rowId);
+        var suggested = entry.GetProperty("suggested_tags").EnumerateArray().ToArray();
+
+        Assert.Equal(3, suggested.Length);
+        Assert.True(entry.GetProperty("has_more_suggestions").GetBoolean());
+        Assert.DoesNotContain(suggested, tag => tag.GetProperty("id").GetGuid() == tagIds[0]);
+        Assert.All(suggested, tag => Assert.False(tag.GetProperty("is_archived").GetBoolean()));
+    }
+
+    [Fact]
     public async Task AliasSuggestsTagAndCategoryForAnAbbreviatedMerchant()
     {
         var (session, customerId) = await NewCustomerAsync();

@@ -18,6 +18,7 @@ export default function FormResult({ result }: { result: FinanceActionResult | n
       }
       role="status"
     >
+      {result.ok ? <span aria-hidden="true">✓ </span> : null}
       {result.message}
     </p>
   );

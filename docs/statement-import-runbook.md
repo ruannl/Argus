@@ -139,8 +139,9 @@ only. The original filename is not displayed in the UI.
    duplicate snapshot, and 24-hour expiry. No transactions exist yet.
 3. **Review** reads the durable rows, oldest transaction date first by default.
    The list can be narrowed to repeats in file, possible duplicates, rows
-   excluding possible duplicates, or untagged rows; these filters combine with
-   the date order. Invalid rows must be skipped. Repeated identical rows
+   excluding duplicates (suppressed exact duplicates, overrides, within-file
+   repeats and near matches), or untagged rows; these filters combine with the
+   date order. Invalid rows must be skipped. Repeated identical rows
    require a keep-all, skip-all, or per-row decision. A row
    that matches an existing occurrence is suppressed unless explicitly
    overridden. Tag suggestions are unselected and combine the customer's

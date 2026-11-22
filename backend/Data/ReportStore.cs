@@ -159,6 +159,7 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
                 null,
                 null,
                 null,
+                null,
                 setup,
                 _policyLabels);
         }
@@ -236,6 +237,10 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
         ReportBucketResponse[]? trend = includeBreakdowns
             ? await BuildTrendAsync(context, customerId, includedFilter, period, plan, currentCoverage, cancellationToken)
             : null;
+
+        ReportCategoryTrendResponse? categoryTrend = inventory == 0
+            ? null
+            : await BuildCategoryTrendAsync(context, customerId, plan, today, cancellationToken);
 
         ReportComparisonResponse? comparisonResponse = null;
         ReportCategoryChangesResponse? categoryChanges = null;
@@ -342,6 +347,7 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
             categories,
             tags,
             trend,
+            categoryTrend,
             new ReportCoveragePairResponse(currentCoverageResponse, priorCoverageResponse),
             focusGroup,
             transactions,
@@ -384,6 +390,22 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
                                     long CountOut);
 
     private sealed record DailyAmount(DateOnly Date, decimal MoneyIn, decimal MoneyOut, long Count);
+
+    private sealed record CategoryTrendMonth(DateOnly Start, DateOnly End, string Label, bool IsPartial);
+
+    private sealed record CategoryTrendDaily(DateOnly Date,
+                                             Guid Id,
+                                             string DisplayName,
+                                             string Kind,
+                                             bool IsArchived,
+                                             decimal MoneyOut,
+                                             long Count);
+
+    private sealed record CategoryTrendItem(Guid Id, string DisplayName, string Kind, bool IsArchived)
+    {
+        public decimal[] MoneyOut { get; } = new decimal[6];
+        public long[] Count { get; } = new long[6];
+    }
 
     private sealed record CoverageRange(DateOnly Start, DateOnly End);
 
@@ -832,6 +854,142 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
         }
 
         return [.. responses];
+    }
+
+    private async Task<ReportCategoryTrendResponse> BuildCategoryTrendAsync(ArgusDbContext context,
+                                                                            Guid customerId,
+                                                                            ReportQueryPlan plan,
+                                                                            DateOnly today,
+                                                                            CancellationToken cancellationToken)
+    {
+        DateOnly currentMonthStart = new(today.Year, today.Month, 1);
+        DateOnly firstMonthStart = currentMonthStart.AddMonths(-5);
+        List<CategoryTrendMonth> months = new(6);
+        for (int index = 0; index < 6; index++)
+        {
+            DateOnly monthStart = firstMonthStart.AddMonths(index);
+            DateOnly monthEnd = monthStart.AddMonths(1).AddDays(-1);
+            bool isCurrentMonth = index == 5;
+            DateOnly end = isCurrentMonth && today < monthEnd ? today : monthEnd;
+            months.Add(new CategoryTrendMonth(
+                monthStart,
+                end,
+                monthStart.ToString("MMM yyyy", CultureInfo.InvariantCulture),
+                isCurrentMonth && end < monthEnd));
+        }
+
+        ReportQueryPlan trendPlan = plan with
+        {
+            CategoryId = null,
+            MerchantTagId = null,
+            Untagged = false,
+            Direction = null,
+        };
+        TransactionFilter filter = new(
+            null,
+            firstMonthStart,
+            today,
+            plan.FinancialAccountId,
+            null,
+            null,
+            null,
+            false,
+            null,
+            null,
+            "out",
+            TransactionVisibility.Visible,
+            "included",
+            []);
+        List<CategoryTrendDaily> daily = await (
+            from transaction in TransactionQuery.Apply(context, customerId, filter, includeVisibility: true)
+            join category in context.Categories
+                on new { transaction.CustomerId, Id = transaction.CategoryId } equals new { category.CustomerId, Id = category.Id }
+            group transaction by new
+            {
+                transaction.TransactionDate,
+                category.Id,
+                category.DisplayName,
+                category.Kind,
+                category.IsArchived,
+            }
+            into grouped
+            select new CategoryTrendDaily(
+                grouped.Key.TransactionDate,
+                grouped.Key.Id,
+                grouped.Key.DisplayName,
+                grouped.Key.Kind,
+                grouped.Key.IsArchived,
+                grouped.Sum(transaction => transaction.Amount < 0m ? -transaction.Amount : 0m),
+                grouped.LongCount()))
+            .ToListAsync(cancellationToken);
+
+        Dictionary<Guid, CategoryTrendItem> items = [];
+        foreach (CategoryTrendDaily day in daily)
+        {
+            int monthIndex = (day.Date.Year - firstMonthStart.Year) * 12 + day.Date.Month - firstMonthStart.Month;
+            if (monthIndex < 0 || monthIndex >= months.Count)
+            {
+                continue;
+            }
+            if (!items.TryGetValue(day.Id, out CategoryTrendItem? item))
+            {
+                item = new CategoryTrendItem(day.Id, day.DisplayName, day.Kind, day.IsArchived);
+                items.Add(day.Id, item);
+            }
+            item.MoneyOut[monthIndex] += day.MoneyOut;
+            item.Count[monthIndex] += day.Count;
+        }
+
+        ResolvedPeriod coveragePeriod = new(
+            "calendar",
+            null,
+            "Category trend",
+            firstMonthStart,
+            today,
+            true,
+            false,
+            false,
+            null,
+            null);
+        List<CoverageRange> coverage = await LoadCoverageAsync(
+            context,
+            customerId,
+            coveragePeriod,
+            plan.FinancialAccountId,
+            cancellationToken);
+
+        ReportCategoryTrendMonthResponse[] monthResponses = months.Select(month =>
+        {
+            long totalDays = ReportingPeriods.DaysInclusive(month.Start, month.End);
+            long coveredDays = CoverageDays(month.Start, month.End, coverage);
+            string state = coveredDays <= 0 ? "uncovered" : coveredDays >= totalDays ? "covered" : "partial";
+            return new ReportCategoryTrendMonthResponse(
+                FormatDate(month.Start),
+                FormatDate(month.End),
+                month.Label,
+                month.IsPartial,
+                state);
+        }).ToArray();
+
+        ReportCategoryTrendCategoryResponse[] categoryResponses = items.Values
+            .OrderByDescending(item => item.MoneyOut.Sum())
+            .ThenBy(item => item.DisplayName, StringComparer.Ordinal)
+            .ThenBy(item => item.Id)
+            .Select(item => new ReportCategoryTrendCategoryResponse(
+                item.Id,
+                item.DisplayName,
+                item.Kind,
+                item.IsArchived,
+                TransactionRequestParser.FormatAmount(item.MoneyOut.Sum()),
+                item.Count.Sum(),
+                months.Select((month, index) => new ReportCategoryTrendCellResponse(
+                    TransactionRequestParser.FormatAmount(item.MoneyOut[index]),
+                    item.Count[index],
+                    Descriptor(month.Start, month.End, trendPlan, item.Id, "out", "visible", "included", [])))
+                    .ToArray()))
+            .ToArray();
+
+        return new ReportCategoryTrendResponse(monthResponses, categoryResponses);
     }
 
     private async Task<List<CoverageRange>> LoadCoverageAsync(ArgusDbContext context,

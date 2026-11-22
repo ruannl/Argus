@@ -14,6 +14,7 @@ import type {
   TransactionRow,
 } from "@/lib/server/backend-client";
 
+import { formatCategoryLabel } from "@/lib/category-label";
 import { sortByDisplayName } from "@/lib/display-order";
 
 type TransactionDetailViewProps = {
@@ -28,11 +29,6 @@ type TransactionDetailViewProps = {
 };
 
 type Message = { tone: "status" | "error"; text: string; details?: TransactionErrorDetails };
-
-function categoryLabel(category: Category): string {
-  const archived = category.is_archived ? " — archived" : "";
-  return `${category.display_name} (${category.kind})${archived}`;
-}
 
 function tagLabel(tag: MerchantTag): string {
   return tag.is_archived ? `${tag.display_name} — archived` : tag.display_name;
@@ -535,7 +531,7 @@ export default function TransactionDetailView({
               >
                 {activeCategories.map((category) => (
                   <option key={category.id} value={category.id}>
-                    {categoryLabel(category)}
+                    {formatCategoryLabel(category)}
                   </option>
                 ))}
               </select>
@@ -657,7 +653,7 @@ export default function TransactionDetailView({
 
         <div className="mt-4 flex flex-wrap gap-2">
           <button
-            className="rounded-full border border-line bg-surface px-4 py-2 text-sm font-bold text-ink"
+            className="finance-primary rounded-full border border-line bg-surface px-4 py-2 text-sm font-bold text-ink"
             disabled={busy || requiresReload}
             onClick={() => void saveSelectedChanges()}
             type="button"

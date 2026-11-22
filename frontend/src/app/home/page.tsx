@@ -85,7 +85,6 @@ export default async function HomePage({
         account={account}
         activeNav="overview"
         description="Summary and charts built from your imported statements."
-        eyebrow="Overview"
         title="Overview"
       >
         <InvalidState />
@@ -103,7 +102,6 @@ export default async function HomePage({
         account={account}
         activeNav="overview"
         description="Summary and charts built from your imported statements."
-        eyebrow="Overview"
         title="Overview"
       >
         <section className="mt-8 rounded-[2rem] border border-warning-line bg-warning-soft p-6">
@@ -158,7 +156,6 @@ export default async function HomePage({
       account={data.account}
       activeNav="overview"
       description="Summary and charts built from your imported statements, with a path to every matching transaction."
-      eyebrow="Overview"
       title="Overview"
     >
       <OverviewWorkspace

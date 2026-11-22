@@ -250,6 +250,29 @@ describe("import review page", () => {
     );
   });
 
+  it("places page numbers and sorting above the review table", async () => {
+    vi.mocked(getImportReview).mockResolvedValue({
+      ok: true,
+      value: { summary, page: { rows, total: 4, page: 1, page_size: 50 } },
+    });
+
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    const pages = screen.getByRole("navigation", { name: "Review pages" });
+    const table = screen.getByRole("table", { name: "Import review rows" });
+    expect(pages.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(pages).getByLabelText("Sort by date")).toHaveValue("asc");
+    expect(within(pages).getByLabelText("Rows per page")).toHaveValue("50");
+    expect(
+      within(pages).getByText(/rows currently included across the review/),
+    ).toBeInTheDocument();
+  });
+
   it("creates a tag inline and assigns it to the row", async () => {
     const user = userEvent.setup();
     vi.mocked(getImportReview).mockResolvedValue({
@@ -610,7 +633,7 @@ describe("import review page", () => {
     expect(screen.getByRole("checkbox", { name: "Repeats in file only" })).toBeChecked();
   });
 
-  it("excludes possible duplicates", async () => {
+  it("excludes duplicate rows", async () => {
     vi.mocked(getImportReview).mockResolvedValue({
       ok: true,
       value: { summary, page: { rows: [rows[0]], total: 1, page: 1, page_size: 50 } },
@@ -634,7 +657,7 @@ describe("import review page", () => {
       false,
       true,
     );
-    expect(screen.getByRole("checkbox", { name: "Exclude possible duplicates" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Exclude duplicates" })).toBeChecked();
   });
 
   it("wires repeat and exclusion filters into the review URL", async () => {
@@ -657,7 +680,7 @@ describe("import review page", () => {
     expect(testRouter.push.mock.calls[0][0]).toContain("sort_direction=asc");
 
     await user.click(screen.getByRole("checkbox", { name: /Possible duplicates only/ }));
-    await user.click(screen.getByRole("checkbox", { name: "Exclude possible duplicates" }));
+    await user.click(screen.getByRole("checkbox", { name: "Exclude duplicates" }));
     const lastCall = testRouter.push.mock.calls.at(-1)?.[0] as string;
     expect(lastCall).toContain("duplicates=exclude");
     expect(lastCall).not.toContain("duplicates=possible");

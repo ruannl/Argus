@@ -29,7 +29,7 @@ export default function FilterForm({ state, accounts, categories, tags }: Filter
 
   return (
     <form
-      className="rounded-[1.5rem] border border-line bg-surface p-4 card-shadow sm:p-5"
+      className="finance-unboxed"
       onSubmit={(event) => {
         event.preventDefault();
         const next: ReportingState = {

@@ -96,14 +96,24 @@ function ProfileSection({ account }: { account: CurrentAccount }) {
       </p>
 
       <div className={TABLE_WRAPPER_CLASS}>
-        <table className={TABLE_CLASS}>
+        <table role="table" aria-label="Profile details" className={TABLE_CLASS}>
           <tbody>
             {rows.map((row) => (
               <tr className={TABLE_ROW_CLASS} key={row.label}>
-                <th className={`${TD_CLASS} w-1/3 text-sm font-semibold text-muted`} scope="row">
+                <th
+                  id={`profile-${row.label.replaceAll(" ", "-")}`}
+                  className={`${TD_CLASS} w-1/3 text-sm font-semibold text-muted`}
+                  scope="row"
+                >
                   {row.label}
                 </th>
-                <td className={`${TD_CLASS} font-semibold text-ink`}>{row.value}</td>
+                <td
+                  headers={`profile-${row.label.replaceAll(" ", "-")}`}
+                  data-label={row.label}
+                  className={`${TD_CLASS} font-semibold text-ink`}
+                >
+                  {row.value}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -157,7 +167,6 @@ function SettingsWorkspace({
       account={account}
       activeNav="settings"
       description="Manage your ZAR financial accounts, categories, tags, aliases, and profile."
-      eyebrow="Settings"
       title="Settings"
     >
       {loadFailed ? (
