@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type {
@@ -67,7 +67,35 @@ export default function SalaryCycleWorkspace({
   });
   const generation = useRef(0);
   const previewGeneration = useRef(0);
+  const previewSectionRef = useRef<HTMLElement | null>(null);
+  const previewTriggerRef = useRef<HTMLElement | null>(null);
+  const messageRef = useRef<HTMLParagraphElement | null>(null);
+  const errorRef = useRef<HTMLParagraphElement | null>(null);
+  const restoreFocusRef = useRef<"trigger" | "message" | "error" | null>(null);
   const [announcement, setAnnouncement] = useState("");
+
+  // The preview replaces the trigger in reading order, so keyboard focus
+  // follows the preview into view and returns to the trigger when cancelled.
+  useEffect(() => {
+    if (preview) {
+      previewSectionRef.current?.focus();
+      return;
+    }
+    const target = restoreFocusRef.current;
+    restoreFocusRef.current = null;
+    if (target === "trigger") {
+      const trigger = previewTriggerRef.current;
+      if (trigger?.isConnected) {
+        trigger.focus();
+      }
+      return;
+    }
+    const destination =
+      target === "message" ? messageRef.current : target === "error" ? errorRef.current : null;
+    if (destination) {
+      destination.focus();
+    }
+  }, [preview]);
 
   const applyFirstPage = (
     nextStarts: SalaryCycleBoundary[],
@@ -97,6 +125,7 @@ export default function SalaryCycleWorkspace({
   };
 
   const retirePreview = async (message: string, reason: string, clearReceipts = false) => {
+    restoreFocusRef.current = "error";
     setError(message);
     setMessage(null);
     if (clearReceipts) {
@@ -232,6 +261,7 @@ export default function SalaryCycleWorkspace({
       );
       return;
     }
+    restoreFocusRef.current = "message";
     setMessage(
       result.value.status === "already_confirmed"
         ? `${result.value.start_date} was already confirmed. No boundary, source or revision changed.`
@@ -265,6 +295,7 @@ export default function SalaryCycleWorkspace({
       );
       return;
     }
+    restoreFocusRef.current = "message";
     setMessage(
       `Removed ${result.value.removed_date}. Affected periods and comparisons were recomputed.`,
     );
@@ -305,7 +336,10 @@ export default function SalaryCycleWorkspace({
                 <button
                   className="min-h-9 rounded-full border border-line px-3 text-xs font-bold text-ink disabled:opacity-50"
                   disabled={previewBusy}
-                  onClick={() => previewRemove(start)}
+                  onClick={(event) => {
+                    previewTriggerRef.current = event.currentTarget;
+                    void previewRemove(start);
+                  }}
                   type="button"
                 >
                   Remove date
@@ -338,6 +372,8 @@ export default function SalaryCycleWorkspace({
         <p
           aria-live="polite"
           className="rounded-xl border border-success-line bg-success-soft p-3 text-sm font-semibold text-success-ink"
+          ref={messageRef}
+          tabIndex={-1}
         >
           {message}
         </p>
@@ -346,7 +382,9 @@ export default function SalaryCycleWorkspace({
         <p
           aria-live="assertive"
           className="rounded-xl border border-warning-line bg-warning-soft p-3 text-sm text-warning-ink"
+          ref={errorRef}
           role="alert"
+          tabIndex={-1}
         >
           {error}
         </p>
@@ -424,7 +462,10 @@ export default function SalaryCycleWorkspace({
                 <button
                   className="min-h-9 rounded-full border border-line px-3 text-xs font-bold text-ink disabled:opacity-50"
                   disabled={previewBusy}
-                  onClick={() => void previewConfirm(row)}
+                  onClick={(event) => {
+                    previewTriggerRef.current = event.currentTarget;
+                    void previewConfirm(row);
+                  }}
                   type="button"
                 >
                   Use as salary start
@@ -450,6 +491,8 @@ export default function SalaryCycleWorkspace({
         <section
           aria-live="polite"
           className="rounded-[1.5rem] border border-accent-soft-line bg-accent-soft p-4"
+          ref={previewSectionRef}
+          tabIndex={-1}
         >
           <h2 className="text-lg font-semibold text-accent-soft-ink">
             {preview.value.action === "confirm" ? "Confirm this reporting date" : "Confirm removal"}
@@ -512,7 +555,10 @@ export default function SalaryCycleWorkspace({
             ) : null}
             <button
               className="min-h-10 rounded-full border border-line bg-surface px-4 text-sm font-bold text-ink"
-              onClick={() => setPreview(null)}
+              onClick={() => {
+                restoreFocusRef.current = "trigger";
+                setPreview(null);
+              }}
               type="button"
             >
               Cancel

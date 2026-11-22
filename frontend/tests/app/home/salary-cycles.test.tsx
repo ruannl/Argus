@@ -253,6 +253,9 @@ describe("salary cycle management", () => {
     await waitFor(() => expect(loadSalaryCyclesAction).toHaveBeenCalledWith(null));
     expect(testRouter.refresh).toHaveBeenCalled();
     expect(screen.getByText(/Confirmed 2026-03-25/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByText(/Confirmed 2026-03-25/)),
+    );
   });
 
   it("discards accumulated pages when a page revision differs from the displayed sequence", async () => {
@@ -278,6 +281,25 @@ describe("salary cycle management", () => {
     expect(screen.getByText("2026-02-24 · latest open cycle")).toBeInTheDocument();
     expect(screen.queryByText(/2026-01-25/)).not.toBeInTheDocument();
     expect(loadSalaryCyclesAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("moves focus into the removal preview and returns it to the trigger on cancel", async () => {
+    const user = userEvent.setup();
+    vi.mocked(previewSalaryCycleAction).mockResolvedValue({ ok: true, value: removePreview });
+    renderWorkspace();
+
+    const trigger = screen.getByRole("button", { name: "Remove date" });
+    await user.click(trigger);
+
+    const previewHeading = await screen.findByRole("heading", { name: "Confirm removal" });
+    const previewSection = previewHeading.closest("section");
+    expect(previewSection).not.toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(previewSection));
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("heading", { name: "Confirm removal" })).not.toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 
   it("requires an impact preview before removing a boundary", async () => {
