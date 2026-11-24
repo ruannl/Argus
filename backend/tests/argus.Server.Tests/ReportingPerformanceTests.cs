@@ -119,6 +119,20 @@ public sealed class ReportingPerformanceTests(KitFactory factory, ITestOutputHel
             ("customer_id", customerId));
         seedWatch.Stop();
 
+        // The fixture inserts 20,000 rows after the table was truncated; without
+        // planner statistics PostgreSQL still estimates the table as empty and
+        // can choose a nested-loop plan that misses the measurement target.
+        // Analyze the seeded tables so the measurement exercises the query plan
+        // a populated production database would use.
+        await ExecuteSqlAsync("""
+            ANALYZE transactions;
+            ANALYZE transaction_merchant_tags;
+            ANALYZE categories;
+            ANALYZE statement_imports;
+            ANALYZE salary_cycle_starts;
+            ANALYZE salary_cycle_state;
+            """);
+
         var modes = new (string Name, object Body)[]
         {
             ("salary_cycle", new { view = "overview" }),
