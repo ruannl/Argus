@@ -456,23 +456,56 @@ public static class StatementFixtureBuilder
     }
 }
 
-public readonly record struct PdfText(double X, double Y, string Text);
+public readonly record struct PdfText(double X, double Y, string Text, double FontSize = 8);
+
+public readonly record struct PdfFixtureImage(byte[] Bytes,
+                                              int Width,
+                                              int Height,
+                                              string Filter,
+                                              double Left,
+                                              double Bottom,
+                                              double Right,
+                                              double Top,
+                                              double RotationDegrees = 0,
+                                              bool IsMask = false);
 
 public sealed class MinimalPdfBuilder
 {
     private readonly List<PageContent> _pages = [];
 
-    public void AddPage(IEnumerable<PdfText> texts) => AddPage(texts, 0, 0, 0);
+    public void AddPage(IEnumerable<PdfText> texts) => AddPage(texts, 0, 0, 0, 595, 842, null);
 
     public void AddPage(IEnumerable<PdfText> texts,
                         int imageCount,
                         double imageWidth,
-                        double imageHeight)
+                        double imageHeight) =>
+        AddPage(texts, imageCount, imageWidth, imageHeight, 595, 842, null);
+
+    public void AddPage(IEnumerable<PdfText> texts,
+                        PdfFixtureImage image,
+                        double pageWidth = 612,
+                        double pageHeight = 792) =>
+        AddPage(texts, 0, 0, 0, pageWidth, pageHeight, image);
+
+    public void AddPage(IEnumerable<PdfText> texts,
+                        double pageWidth,
+                        double pageHeight) =>
+        AddPage(texts, 0, 0, 0, pageWidth, pageHeight, null);
+
+    private void AddPage(IEnumerable<PdfText> texts,
+                         int imageCount,
+                         double imageWidth,
+                         double imageHeight,
+                         double pageWidth,
+                         double pageHeight,
+                         PdfFixtureImage? fixtureImage)
     {
         StringBuilder builder = new StringBuilder();
         foreach (var text in texts)
         {
-            builder.Append("BT /F1 8 Tf 1 0 0 1 ")
+            builder.Append("BT /F1 ")
+                .Append(text.FontSize.ToString("0.##", CultureInfo.InvariantCulture))
+                .Append(" Tf 1 0 0 1 ")
                 .Append(text.X.ToString("0.##", CultureInfo.InvariantCulture))
                 .Append(' ')
                 .Append(text.Y.ToString("0.##", CultureInfo.InvariantCulture))
@@ -481,19 +514,20 @@ public sealed class MinimalPdfBuilder
                 .Append(") Tj ET\n");
         }
 
-        _pages.Add(new PageContent(builder.ToString(), imageCount, imageWidth, imageHeight));
+        _pages.Add(new PageContent(builder.ToString(), imageCount, imageWidth, imageHeight, pageWidth, pageHeight, fixtureImage));
     }
 
     public byte[] Build()
     {
-        var totalImages = _pages.Sum(page => page.ImageCount);
+        var totalImages = _pages.Sum(page => page.FixtureImage is null ? page.ImageCount : 1);
         var objectCount = 3 + _pages.Count * 2 + totalImages;
         var offsets = new long[objectCount + 1];
         var imageIds = new int[_pages.Count][];
         var nextImageId = 4 + _pages.Count * 2;
         for (var index = 0; index < _pages.Count; index++)
         {
-            imageIds[index] = Enumerable.Range(0, _pages[index].ImageCount).Select(_ => nextImageId++).ToArray();
+            int count = _pages[index].FixtureImage is null ? _pages[index].ImageCount : 1;
+            imageIds[index] = Enumerable.Range(0, count).Select(_ => nextImageId++).ToArray();
         }
 
         using MemoryStream output = new MemoryStream();
@@ -527,13 +561,13 @@ public sealed class MinimalPdfBuilder
             var pageId = 4 + index * 2;
             var contentId = pageId + 1;
             var resources = "/Font << /F1 3 0 R >>";
-            if (page.ImageCount > 0)
+            if (imageIds[index].Length > 0)
             {
                 var xobjects = string.Join(" ", imageIds[index].Select((id, imageIndex) => $"/Im{imageIndex + 1} {id} 0 R"));
                 resources += $" /XObject << {xobjects} >>";
             }
             BeginObject(pageId);
-            Write($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << {resources} >> /Contents {contentId} 0 R >>\n");
+            Write($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {page.PageWidth.ToString("0.##", CultureInfo.InvariantCulture)} {page.PageHeight.ToString("0.##", CultureInfo.InvariantCulture)}] /Resources << {resources} >> /Contents {contentId} 0 R >>\n");
             EndObject();
             var content = page.Text + ImageContent(page);
             BeginObject(contentId);
@@ -545,6 +579,20 @@ public sealed class MinimalPdfBuilder
 
         for (var index = 0; index < _pages.Count; index++)
         {
+            var page = _pages[index];
+            if (page.FixtureImage is PdfFixtureImage fixture)
+            {
+                BeginObject(imageIds[index][0]);
+                string imageData = fixture.IsMask
+                    ? "/ImageMask true /BitsPerComponent 1"
+                    : "/ColorSpace /DeviceGray /BitsPerComponent 8";
+                Write($"<< /Type /XObject /Subtype /Image /Width {fixture.Width} /Height {fixture.Height} {imageData} /Filter /{fixture.Filter} /Length {fixture.Bytes.Length} >>\nstream\n");
+                output.Write(fixture.Bytes);
+                Write("\nendstream\n");
+                EndObject();
+                continue;
+            }
+
             for (var imageIndex = 0; imageIndex < imageIds[index].Length; imageIndex++)
             {
                 BeginObject(imageIds[index][imageIndex]);
@@ -582,6 +630,16 @@ public sealed class MinimalPdfBuilder
 
     private static string ImageContent(PageContent page)
     {
+        if (page.FixtureImage is PdfFixtureImage image)
+        {
+            double width = image.Right - image.Left;
+            double height = image.Top - image.Bottom;
+            double radians = image.RotationDegrees * Math.PI / 180.0;
+            double cos = Math.Cos(radians);
+            double sin = Math.Sin(radians);
+            return $"q {(width * cos).ToString("0.####", CultureInfo.InvariantCulture)} {(width * sin).ToString("0.####", CultureInfo.InvariantCulture)} {(-height * sin).ToString("0.####", CultureInfo.InvariantCulture)} {(height * cos).ToString("0.####", CultureInfo.InvariantCulture)} {image.Left.ToString("0.##", CultureInfo.InvariantCulture)} {image.Bottom.ToString("0.##", CultureInfo.InvariantCulture)} cm /Im1 Do Q\n";
+        }
+
         StringBuilder builder = new StringBuilder();
         for (var index = 0; index < page.ImageCount; index++)
         {
@@ -602,5 +660,8 @@ public sealed class MinimalPdfBuilder
     private sealed record PageContent(string Text,
                                       int ImageCount,
                                       double ImageWidth,
-                                      double ImageHeight);
+                                      double ImageHeight,
+                                      double PageWidth,
+                                      double PageHeight,
+                                      PdfFixtureImage? FixtureImage);
 }

@@ -394,6 +394,15 @@ for (const theme of ["light", "dark"]) {
           );
           await expect(pages.getByLabel("Sort by date")).toBeVisible();
           await expect(pages.getByLabel("Rows per page")).toBeVisible();
+          if (width > 700) {
+            const lastCellFitsFrame = await rowsTable.evaluate((table) => {
+              const cell = table.querySelector('td[data-label="Actions"]');
+              const frame = table.closest(".finance-table-frame");
+              if (!cell || !frame) return false;
+              return cell.getBoundingClientRect().right <= frame.getBoundingClientRect().right;
+            });
+            expect(lastCellFitsFrame).toBe(true);
+          }
         }
         if (
           [

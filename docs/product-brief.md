@@ -5,6 +5,19 @@
 **Scope:** Product behaviour and outcomes. This is not an architecture plan.  
 **Evidence level:** Source inspection of the working tree. No runtime observation, analytics, or user research was available.
 
+> **Production-PDF reactivation (approved 2026-11-22; later operator-narrowed):**
+> Thread #6 Decision `ed5224b4-c390-4912-b804-eeb170c7b956` approved the
+> production Standard Bank PDF scope at Plan blob
+> `d17f9136d919035bd74a21aad26d0bb132e29d98` and brief blob
+> `a3ae4c3a92c891f71fd70c557fd6b779da68244f`, including verified empty-user
+> AES-256 R6 access despite the disabled text-copy permission bit. Implementation
+> was executed under that authority. On 2026-11-22 the operator also accepted the
+> two later code-review limitations recorded in the appendix: a crafted empty-owner
+> PDF may be extracted through the owner path, and crafted metadata/postal/postamble
+> residue may be omitted. Those are explicit risk acceptances, not fixes. The
+> earlier 2026-11-06 CSV-only deferral banner and proposal-era wording are
+> historical. No publication, deployment or implementation acceptance is implied.
+
 > **Scope amendment (2026-11-06, operator-directed):** Standard Bank PDF import
 > is deferred to Thread #6 while the FNB CSV/ZIP and generic mapped CSV path is
 > completed and reviewed. Until that thread lands, the product rejects
@@ -1324,22 +1337,42 @@ Architecture planning and implementation are divided into four sequential, repos
 
 The architecture agent should treat Section 1.1 and Sections 6, 7, and 9 as the product contract, Sections 4.9 and 4.10 as the sample-derived format contracts, Section 12.3 and 12.4 as the confirmed decisions and planning defaults, and Section 13.1 as the delivery programme topology. Preserve the existing account, session, admin, billing, and visual foundations described in Section 4.
 
-## Pending production-PDF amendment (2026-11-05)
+## Production-PDF amendment (approved 2026-11-22; operator-narrowed)
 
-**DEFERRED — not approved (2026-11-06).** The operator deferred Standard Bank
-PDF import to Thread #6. This amendment and Plan 2 revision 4 / C-PDF-2 remain
-future planning input; they are not current release scope and must not be
-implemented or treated as accepted until Thread #6 is explicitly activated.
-The approved body above and the 2026-11-06 scope amendment remain authoritative.
-This appendix does not claim implementation, private product acceptance, a new
-review verdict or publication authority.
+**APPROVED at brief blob `a3ae4c3a92c891f71fd70c557fd6b779da68244f`.**
+Thread #6 Decision `ed5224b4-c390-4912-b804-eeb170c7b956` approved this amendment
+together with Plan revision 10 at its exact blob. The operator later accepted the
+two code-review limitations recorded below; that is a risk acceptance, not a
+correction of the findings. The earlier "PROPOSED" wording and the 2026-11-05
+proposal (blob `edb223575923a2ad86e5fcfcb7620cc076bf36ba`) are historical. The
+preceding current brief is blob `595aa95d95f2e186130c511e2342bff85f72388e`.
+This appendix governs the named PDF clauses below; later consolidation is
+editorial, not a second source of truth. No implementation acceptance,
+publication or deployment is inferred.
+
+### Exact clause map and preserved agreement
+
+| Existing clause | Replacement boundary after approval |
+| --- | --- |
+| 2026-11-06 scope amendment; later amendments' references to continued PDF deferral; Section 1 summary/1.1 positive outcome and Sections 12/13 where PDF is deferred | Restore production Standard Bank PDF as an acceptance target under Thread #6 and Plan 2 revision 10, through the existing upload/review workflow. Replace only deferral/CSV-only-as-an-exclusive-format restriction; preserve the delivered FNB CSV/ZIP and generic CSV behavior, later suggestion/category/reporting amendments and historical delivery evidence. |
+| IMP-17; AC-IMP-16; “password-protected/encrypted PDF” wording in Section 1.1 negative outcome, Section 4.10 item 7, Section 5.2 recovery, SEC-3, Section 7.4 rule 20, MVP-21 and the PDF protection edge-case row | Use the precise empty-user/unsupported-protection policy below. Encrypted ZIP rejection and all authentication/privacy boundaries stay unchanged. |
+| IMP-16; AC-IMP-15; Section 4.10 items 1/7 and Section 7.4 rule 20 | Require readable transaction text and reject unknown/scanned images, with only the fixed nonfinancial masthead identity-and-placement exception below. No OCR, rendering service or size heuristic. |
+| IMP-18/19; AC-IMP-14/19/20; Section 4.10 items 2/3/6 and Section 7.4 rules 19/23; PDF metadata/summary edge-case rows | Recognize only the complete real page forms, metadata, Available balance, terminal postamble and measured gutters below. Preserve all source words or reject; a label or missing flow never alone permits omission. Retain row positions, continuations, invalid-row skip and unsupported-layout rejection. |
+| Every other approved clause/amendment | Unchanged, including exact transaction dates/cents/signs, Payments/Bank-fees outflow and Deposits inflow, ignored balances, immutable source, alias/confirmed-history/prefix suggestions, exact-date near duplicates, category defaults/confirmation provenance, tags, expiry, receipts/idempotency, hide/delete ownership, salary-cycle/calendar/custom reporting, chart/display amendments and programme topology/completion condition. |
+
+The original source-inspection/current-state narrative remains historical, as
+already stated by the Overview amendment. This appendix does not replace it with
+an unverified claim that PDF support is implemented. Only the paired Plan names
+implementation phases/files; product choices and required outcomes are here.
 
 ### Purpose and production inputs
 
 The operator confirms that the two Standard Bank statements described in
 Section 4.10 are intended production inputs, not test-only examples. Their
-structural expectations remain 4 pages / 49 transactions / 66 continuation
-lines and 18 pages / 297 transactions / 356 continuation lines. All pages,
+structural expectations remain 4 pages / 49 transactions and 18 pages / 297
+transactions. The operator accepted the factual correction that the real files
+contain 49/297 description-continuation lines; the originally recorded 66/356
+figure remains historical synthetic-fixture parameterisation. All pages,
 including page 1, have the six-column table. They are 612×792 PDF 2.0 documents,
 use Standard AES-256 V=5/R=6 encryption with an empty user password, carry the
 same masthead raster asset on each page, and have complete first/later-page
@@ -1347,7 +1380,7 @@ account metadata and a terminal statement summary. The real source files and
 all financial values remain private and are never repository fixtures.
 
 The Plan's earlier synthetic-only/no-raster/all-encryption rejection policy
-does not meet that production intent. Proposed revision 4 broadens the accepted
+does not meet that production intent. Proposed revision 10 broadens the accepted
 container/template, not the transaction meanings, ledger policy or privacy
 rules. No actual date, amount, description, account value, address or filename
 is included in this amendment.
@@ -1358,12 +1391,15 @@ Replace **IMP-17** with:
 
 > Reject PDFs requiring a nonempty **user password**, and unsupported or
 > malformed protection, without prompting for passwords, guessing passwords,
-> using owner access, external decryption or changing the original PDF.
-> Support unencrypted PDFs and the recognized Standard Bank AES-256
-> Standard-handler V=5/R=6 template only when the empty user password is
-> independently verified before page extraction. Merely opening the document
-> is insufficient because a library may accept an owner password first.
-> No password input or password storage is introduced.
+> adding an owner-access feature, external decryption or changing the original
+> PDF. The application does not supply an owner password. Support unencrypted
+> PDFs and the recognized Standard Bank AES-256 Standard-handler V=5/R=6
+> template only when the empty user password is independently verified before
+> page extraction. Merely opening the document is insufficient because a library
+> may accept an owner password first. A crafted empty-owner file may still be
+> opened by the library through the owner path; that is the accepted limitation
+> recorded below, not a guarantee that extraction used the user key. No password
+> input or password storage is introduced.
 
 For this preset, the words **password-protected** in Section 1.1's negative
 outcome, Section 4.10 item 7, Section 5.2 recovery, SEC-3, financial rule 20,
@@ -1376,17 +1412,30 @@ Replace **AC-IMP-16** with:
 
 > Given a PDF requiring a nonempty user password, accepting only empty-owner
 > access, or carrying unsupported/malformed protection, upload rejects safely
-> before any prepared review or committed financial effect. An approved
-> empty-user AES-256 R6 production-template control succeeds without supplying
-> a nonempty or owner password. No protection diagnostic or source value leaks.
+> before any prepared review or committed financial effect, except for the
+> accepted empty-owner-path limitation recorded below. An approved empty-user
+> AES-256 R6 production-template control succeeds without supplying a nonempty
+> or owner password. No protection diagnostic or source value leaks.
 
-**Separate explicit decision:** the two target documents disable the PDF
+**2026-11-22 operator limitation:** the application never supplies or asks for an
+owner password and does not add owner access as a feature. However, a crafted PDF
+with an empty owner password may be opened by the PDF library through the owner
+path; the guard verifies the empty-user fields but does not prove which key the
+library used to extract pages. The practical effect is self-injection into the
+uploading customer's own account, not cross-customer authority or privilege
+escalation. This is an accepted limitation of the approved container, not a
+license to use owner access generally.
+
+**Scope decision already approved on 2026-11-22:** the two target documents disable the PDF
 text-copy permission bit although they open with the empty user password.
 Supporting them therefore permits the account import despite that owner-set
 advisory restriction. It does not change permission bits, recover an owner
 password, claim bank authenticity or grant backend ownership from PDF metadata.
-Approval must explicitly include this decision; otherwise these exact files
-remain unsupported. Customer/session/account authorization stays unchanged.
+The operator selected “Activate production PDF support (Recommended)” and
+“Yes, accept with empty user password (Recommended)”; Thread #6 records those
+answers. That decision is retained, not inferred or asked again, and does not
+approve the rebased artifacts. Customer/session/account authorization stays
+unchanged; successful decryption and PDF metadata never prove application ownership.
 
 ### Proposed replacement image/text and metadata wording
 
@@ -1412,6 +1461,23 @@ Clarify **IMP-16**, Section 4.10 items 1/6/7, financial rule 20 and
 > are neither returned, normalized into a description, persisted, logged nor
 > used as transaction amount, fingerprint or account/currency authority.
 
+> Every extracted nonblank word must be retained in an unambiguous transaction
+> or continuation, consumed only by its complete permitted structure, or cause
+> whole-document rejection before a review is stored. A date-bearing or
+> flow-bearing candidate remains visible for value validation; a missing flow
+> alone cannot make it metadata. All-page header conflicts, off-page content,
+> ambiguous continuation and nonterminal balance/summary placement reject or
+> preserve the complete unambiguous row, never silently shorten the statement.
+
+**2026-11-22 operator limitation:** for the production profile, the exact
+every-word guarantee is narrowed for crafted PDFs. Extra words placed in
+metadata, opening-balance value, postal/address or postamble slots may be omitted
+rather than causing whole-document rejection; this includes a prefix inside an
+otherwise valid opening-balance value. The real files' rows, dates, descriptions
+and signed amounts remain exact; unsupported layouts and unexplained text outside
+those slots still reject. This is an accepted source-truth limitation, not a
+claim that every possible crafted variant is preserved.
+
 Section 4.10's position rule is clarified to use the actual complete header and
 table gutters on 612×792 pages, not midpoints between short header words. Long
 description text may extend beyond the old midpoint boundary while remaining
@@ -1420,6 +1486,14 @@ cells. Numeric description fragments are not amount candidates by value alone;
 true overlap/uncertain separation rejects rather than borrowing Balance.
 Payments and Bank fees remain outflows, Deposits inflows, and all exact-money,
 sign, zero/multiple-flow and immutable-invalid-row rules remain unchanged.
+
+The existing selector and file picker must make the supported preset reachable;
+there is no new endpoint, password input or generic PDF mapper. The user still
+confirms the destination, ZAR and inclusive statement dates, with explicit
+century confirmation only when the existing two-digit-year rules require it.
+Plain-language protection/image errors must not assert that every rejected PDF
+is encrypted or lacks text. All later category defaults/confirmation and review
+controls continue to apply to PDF-derived rows exactly as to CSV-derived rows.
 
 ### Private evidence and authority
 
@@ -1432,8 +1506,32 @@ through the published product child; row counts or earlier heuristic CSVs do
 not establish fidelity. Durable evidence uses sample aliases, structural
 counts, boolean comparisons, product/test identities and limits only.
 
+Before profile constants are coded, the paired Plan requires a private input
+gate to confirm the masthead is nonfinancial, capture its fixed encodings and
+exact public boilerplate, and calibrate the listed structural positions. These
+inputs and the independent private value oracle are not yet acceptance evidence;
+missing access or confirmation blocks the phase rather than permitting guesses.
+
 All other approved outcomes and the four-child programme remain unchanged.
-Thread #3 owns the correction; Thread #6 tracks the residual findings and is
-not a newly scheduled programme child. The latest implementation NO-GO remains
-in force. This proposal cannot close those findings or authorize work on
-Threads #4/#5, a new review, implementation or publication by itself.
+Thread #6 owns the correction and residual findings; Thread #3 remains resolved,
+and delivered Threads #4/#5 are neither blocked nor reopened. No programme child
+is added. The historical **PDF implementation** review
+`963d287e-c3e0-4214-ba9d-1aac0750ac9f` remains NO-GO and is not relabelled.
+Thread #6 records the later chronology: code review `wbr-9a6f6fc849` NO-GO with
+five HIGH findings, the corrections, code review `wb-4b120c0988` NO-GO with two
+remaining HIGH findings, the operator acceptance of those two as documented
+limitations, an evidence-only GO, and a limited contract/evidence GO. The
+strict-contract NO-GOs remain historical; the current product decision is the
+narrowed contract. Implementation acceptance, publication and deployment remain
+separate decisions.
+
+**Approval recorded:** the operator approved this 2026-11-22 production-PDF
+amendment at brief blob `a3ae4c3a92c891f71fd70c557fd6b779da68244f` together with
+Plan 2 revision 10 at blob `d17f9136d919035bd74a21aad26d0bb132e29d98` as the
+contract for Thread #6, including narrow backend/UI activation and the private
+input/acceptance procedure, while preserving all later CSV, expiry, suggestion,
+category and reporting agreements and the approved empty-user/copy-permission
+decision. The later operator risk acceptance narrows the protection and
+source-truth guarantees as recorded in the appendix. Approval is not
+implementation acceptance, publication or deployment; execution routing remains
+the operator's decision.

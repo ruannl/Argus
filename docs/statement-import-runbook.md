@@ -7,36 +7,58 @@ product brief or `docs/plans/02-statement-import.md`.
 
 ## Supported statements
 
-**Current scope (2026-11-06, operator-directed): CSV-only.** Plan 2 revision 5
-defers Standard Bank PDF import to Thread #6. The product exposes FNB CSV/ZIP
-and generic mapped CSV only. A `standard_bank_pdf` request is rejected before
-parsing with `400 pdf_import_deferred` and creates no review, statement,
-transaction or receipt. The PDF parser remains in the tree but is dormant. The
-last independent PDF verdict remains NO-GO
-(`963d287e-c3e0-4214-ba9d-1aac0750ac9f`) and must be resolved in Thread #6
-before PDF is re-enabled. Proposed revision 4 / C-PDF-2 and the pending brief
-amendment are deferred, not approved.
+**Current scope (2026-11-22, Plan 2 revision 10).** The product accepts FNB
+CSV/ZIP, generic mapped CSV, and the Standard Bank PDF production profile
+documented below. The PDF preset applies to the operator-supplied Standard Bank
+statement shape: 612x792 points, one fixed masthead image per page, AES-256
+revision 6 encryption with an empty user password, and the documented
+metadata/header/row/postamble/footer forms. The originals disable the text-copy
+permission bit; the operator explicitly accepted import after empty-user
+authentication, and no owner password is supplied. A PDF that requires a
+nonempty user password, uses unsupported protection, or carries an unapproved
+layout or image is rejected before a review is created. The historical PDF
+implementation verdict `963d287e-c3e0-4214-ba9d-1aac0750ac9f` remains NO-GO and
+is not relabelled. Thread #6 records later code reviews, the operator's
+acceptance of two documented limitations (owner-path extraction and crafted
+source-word omission), and a limited contract/evidence GO; implementation
+acceptance and publication remain separate decisions.
 
 | Source            | Accepted shape                                                                                               | Notes                                                                                                                                                                                                                                                                                                                                                                                   |
 | ----------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | FNB CSV           | Six-line preamble, seventh-line `Date,Amount,Balance,Description` header, four fields per row                | The balance column is ignored. Preamble and balance never persist or display.                                                                                                                                                                                                                                                                                                           |
 | FNB ZIP           | Exactly one root-level `.csv` entry                                                                          | No nested paths, directories, extra entries, traversal, or expansion beyond 10 MB.                                                                                                                                                                                                                                                                                                      |
-| Standard Bank PDF | **Deferred to Thread #6 — not accepted in the current release.**                                             | The API rejects this source kind with `pdf_import_deferred`. The parser material below is retained for the deferred fix and is not current operating behaviour. See [Standard Bank PDF extraction](#standard-bank-pdf-extraction).                                                                                                                                                      |
+| Standard Bank PDF | Standard Bank 612x792 text statement with the one approved masthead asset and the documented metadata/table/postamble forms | AES-256 V5/R6 with an empty user password is accepted, including the originals' disabled text-copy bit; no owner password is supplied. Exactly one approved fixed masthead image per page; other images and layouts reject. Balances, available balance and summary values are ignored and never stored. No OCR or arbitrary Standard Bank layouts. |
 | Generic CSV       | Customer-confirmed header line, delimiter, columns, date format, decimal/thousands separators, and sign mode | Columns are addressed by zero-based index. Mapping and coverage changes require a new review. The FNB preamble shape is excluded independently of the selected delimiter, including quoted metadata labels; a header line inside it is rejected. A boundary requires a recognized transaction header or an explicit FNB title, so ordinary description-first data is not misclassified. |
 
 ### Standard Bank PDF extraction
 
-**Dormant in the current CSV-only scope.** The following describes the
-**required contract for the deferred PDF fix**, not current product behaviour.
-The 2026-11-05 independent review of the first C-PDF-1 implementation returned
-NO-GO. The root-cause work order is C-PDF-1 Section I in
-`docs/plans/02-statement-import.md`; the corrected implementation and its
-evidence are recorded below. That verdict remains the last independent review
-and is not being relabelled as acceptance. Thread #6 owns the residual fix.
+**Active for the supported production profile.** The approved shape is the
+Standard Bank 612x792 statement supplied for this work. Every page must carry
+exactly one fixed masthead image in the measured masthead region: 656x225, no
+mask, and the approved JPEG asset (or the synthetic test asset with its matching
+filter). Position, dimensions and encoded identity are checked; the available
+image bounds do not expose the placement matrix, so a compensated rotation is
+not detected. Every extracted word and line is checked against the page frame.
+The parser accepts the first-page and later-page metadata forms, the
+six-column transaction table, `STATEMENT OPENING BALANCE`, continuation
+descriptions, the complete terminal postamble, and the two legal footer lines.
+Printed period proposals are used only when unambiguous; otherwise the customer
+confirms inclusive coverage dates, and an optional explicitly confirmed
+`century` resolves a two-digit year. Anything outside this profile rejects as
+`unsupported_layout` or `text_pdf_required` with no review or finance effect.
+Crafted extra words in metadata, opening-balance value, postal/address or
+postamble slots may be omitted; that is an operator-accepted source-truth
+limitation, not a claim that every crafted variant is preserved.
 
-The parser does not read text in reading order and does not skip rows above a
-header, below a footer, or below a fixed Y coordinate. Every non-whitespace
-extracted line on every page is classified:
+The 2026-11-05 independent review of the earlier generic C-PDF-1 implementation
+returned NO-GO. That verdict remains historical and is not relabelled. Later code
+reviews and the operator's accepted limitations are recorded on Thread #6; the
+fallback rules below still govern the non-production shapes exercised by
+synthetic tests and do not authorize guessing a new real-bank layout.
+
+The fallback parser does not read text in reading order and does not skip rows
+above a header, below a footer, or below a fixed Y coordinate. Every
+non-whitespace extracted line on every page is classified:
 
 - **Candidates.** Any line with a populated date or flow cell becomes a
   candidate before value validation. Malformed dates, malformed or missing
@@ -69,9 +91,14 @@ extracted line on every page is classified:
   conflicting header rejects before any row is interpreted. Account, Customer
   and Branch metadata in the preamble rejects before row promotion. A heading
   does not authorise unrelated text; any other unexplained text rejects.
-- **Images.** Any raster image on any page rejects as `text_pdf_required` before
-  text classification. A text header does not bypass the check, and a small
-  image is not assumed to be decoration.
+- **Images.** The production profile requires exactly the one approved masthead
+  image per page in the measured region; a missing, different, relocated,
+  masked, wrong-filter or wrong-dimension image rejects. A compensated rotation
+  that preserves the outer rectangle is not detected because the available
+  image bounds do not expose the placement matrix. On the fallback path, an
+  unsupported raster image rejects as `text_pdf_required` before text
+  classification. A text header does not bypass the check, and a small image is
+  not assumed to be decoration.
 
 This is a conservative text-only subset. Real-bank logos, unusual metadata, and
 layouts outside the synthetic fixtures may be rejected; that is a safe
@@ -79,18 +106,21 @@ rejection, not a claim of broad real-bank certification. No OCR, image
 interpretation, vector or annotation analysis, new parser dependency, or
 balance use is added.
 
-**User-facing copy limitation (CPDF-N2).** The frontend currently displays
-`That PDF has no text layer` for `text_pdf_required`
-(`frontend/src/app/imports/import-workspace.tsx:33` and
-`frontend/src/lib/server/import-actions.ts:45`). A text-bearing PDF with a
-raster logo is also rejected, so that copy is not proof that no text layer
-existed. The frontend wording is unchanged in this correction.
+**User-facing copy (CPDF-N2, corrected 2026-11-22).** `encrypted_pdf` means a
+nonempty user password or unsupported protection. `text_pdf_required` covers a
+PDF with no readable text **or an unsupported image**; it is not proof that
+every rejected file lacks a text layer. Both the upload component and the
+server-action error map use this wording.
 
-The importer does not support OCR, scanned PDFs, password-protected PDFs,
+The importer does not support OCR, scanned or image-only PDFs, PDFs that
+require a nonempty user password, arbitrary Standard Bank layouts,
 multi-currency values, balances, bank feeds, split transactions, or
-auto-categorisation. Dates and ZAR must be confirmed before preparing a review.
-Source date, description, signed amount, account, and source are immutable
-after preparation.
+auto-categorisation. The application verifies the empty-user AES-256 profile and
+does not require, request or supply an owner password. A crafted empty-owner
+file may be opened by the PDF library through the owner path; that is the
+operator-accepted self-injection limitation, not an owner-access feature. Dates
+and ZAR must be confirmed before preparing a review. Source date, description,
+signed amount, account, and source are immutable after preparation.
 
 ## Service bounds
 
@@ -285,9 +315,9 @@ review version and summary hash to one result.
 
 ## PDF parser child deployment
 
-**Dormant in the current CSV-only scope.** The import endpoints reject
-`standard_bank_pdf` before launching this child. The deployment contract is
-retained for the deferred PDF thread.
+**Active.** The `standard_bank_pdf` preset launches this child for inspect and
+prepare after the account, ZAR, period and upload guards pass. A rejected child
+result creates no review or finance record.
 
 PDF extraction runs in a child mode of the backend assembly:
 
@@ -528,20 +558,20 @@ above.
 
 ## Safe error codes
 
-The deferred production-template proposal adds no route or password field. Its
-private acceptance must not print real rows, filenames or diagnostics, and its
-synthetic authenticated tests must cover every residual finding from Thread #6.
-Until approval and new evidence, neither the source files' successful
-diagnostic extraction nor a completed correction changes the recorded NO-GO.
+The production PDF profile adds no route or password field. Private acceptance
+must not print real rows, filenames or diagnostics. The historical PDF NO-GO is
+not relabelled by this implementation; the revision-10 final implementation
+review is separate.
 
 `413 file_too_large`; `415 unsupported_format`; `400 invalid_request`,
 `unsupported_encoding`, `unsafe_archive`, `encrypted_pdf`, `text_pdf_required`,
 `unsupported_layout`, `processing_limit`, `format_confirmation_required`,
-`pdf_import_deferred`,
 `invalid_rows`, `duplicate_decision_required`, `no_included_rows`;
 `429 rate_limited`, `import_busy`; `404 not_found`; `409 review_stale`,
 `version_conflict`, `statement_repeat`, `idempotency_conflict`,
 `account_archived`, `identity_conflict`, `tag_unavailable`,
-`category_unavailable`; `410 review_expired`, `import_deleted`; `500 internal_server_error`. Foreign review/import IDs return
-`404`, not `410`. Error bodies never include source text, filenames, or
-exception details.
+`category_unavailable`; `410 review_expired`, `import_deleted`;
+`500 internal_server_error`. `pdf_import_deferred` remains a client/enum
+compatibility value for old responses; the active backend no longer returns it.
+Foreign review/import IDs return `404`, not `410`. Error bodies never include
+source text, filenames, or exception details.

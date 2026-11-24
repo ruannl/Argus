@@ -23,8 +23,9 @@ commands with the working directory inside the relevant tree.
 │   │                         report DTOs, limits and fault seam
 │   ├── Transactions/         filter/action/limit contracts, fault seam, shared DTOs
 │   ├── Finance/              merchant-key, alias/history and tag-token suggestion helpers shared with imports
-│   ├── Imports/              bounded FNB/generic CSV parsers, identity/fingerprint
-│   │                         code, and the dormant PDF parser/child runner
+│   ├── Imports/              bounded FNB/generic CSV parsers, production
+│   │                         Standard Bank PDF profile/guard, identity and
+│   │                         fingerprint code, and the PDF parser/child runner
 │   ├── Security/             argon2id, tokens, policy, rate limiter, HIBP
 │   ├── Http/                 error bodies, trust checks, account, finance, import
 │   │                         and transaction endpoints, bounded bodies
@@ -159,12 +160,19 @@ is never written to logs, audit events, or URL path segments. CORS allows
 Statement imports bound every file and request before buffering: 10 MB per file
 and decompressed ZIP payload, 20,000 rows, 200 PDF pages, a 10.1 MB multipart
 envelope, a 30-second parser deadline, and two concurrent parsers per process
-shared by CSV and PDF. Standard Bank PDF import is currently deferred: the API rejects
-that source kind with `pdf_import_deferred`, and the PDF parser and child runner
-remain dormant until the follow-up thread re-enables them. Raw uploads and real bank preamble metadata are request-local and
-never persisted. The durable review stores only sanitized mapped rows and
-expires after 24 hours; committed receipts retain identifiers and counts for
-retry safety. See `docs/statement-import-runbook.md`.
+shared by CSV and PDF. Standard Bank PDF import uses the approved production
+profile: 612x792 pages, one fixed masthead asset, empty-user AES-256 V5/R6 with
+the originals' disabled text-copy bit accepted, and the documented
+metadata/table/postamble forms. A different layout, image, protection profile or
+nonempty user password rejects safely with no review or finance effect. Two
+operator-accepted limitations apply to crafted files: a crafted empty-owner PDF
+may be opened by the library through the owner path, and crafted extra words in
+metadata, opening-balance value, postal/address or postamble slots may be
+omitted. No owner password is supplied or permission changed. Raw uploads and
+real bank preamble metadata are request-local and never persisted. The durable
+review stores only sanitized mapped rows and expires after 24 hours; committed
+receipts retain identifiers and counts for retry safety. See
+`docs/statement-import-runbook.md`.
 
 Transaction queries and edits reuse the same caller/session/subscriber guard and
 owner scoping. Search text travels only in bounded request bodies; list URLs

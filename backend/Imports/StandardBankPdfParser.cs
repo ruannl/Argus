@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using UglyToad.PdfPig;
+using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Core;
 using UglyToad.PdfPig.Exceptions;
 
 namespace argus.Server.Imports;
@@ -10,7 +12,7 @@ namespace argus.Server.Imports;
 /// reading order, never returns account metadata, preamble, filenames, or
 /// balances, and maps every failure to a fixed safe reason.
 /// </summary>
-public static class StandardBankPdfParser
+public static partial class StandardBankPdfParser
 {
     private static readonly Regex _dateAnchor = new(
         @"^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{2}|\d{4})$",
@@ -71,10 +73,21 @@ public static class StandardBankPdfParser
         "account", "account:", "customer", "customer:", "branch", "branch:",
     ];
 
+    private static readonly Regex _metadataLabelPrefix = new(
+        @"^(?:account|customer|branch)\b\s*:?\s*\S",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     // Footer text is recognised only in the bottom margin. This is a
     // classification position, not a traversal cutoff: anything beside or
     // below a footer is still visited and must be classified or rejected.
     private const double FooterMaxY = 60.0;
+
+    // The extracted glyph box can extend slightly past the page frame because
+    // its top bound includes font ascent. The measured 8pt fixture overhang is
+    // 5.9 points. A source baseline outside the frame still rejects, so this
+    // tolerance never admits off-page content.
+    private const double PageEdgeTolerance = 0.5;
+    private const double GlyphAscentTolerance = 6.0;
     private const double ContinuationLeftTolerance = 12.0;
     private const double ContinuationVerticalTolerance = 12.0;
 
@@ -85,7 +98,6 @@ public static class StandardBankPdfParser
     // Same-page repeated headers may differ only inside the fixture-backed
     // tolerance, and only when no word changes semantic columns.
     private const double HeaderCompatibilityTolerance = 6.0;
-    private const double HeaderExactTolerance = 0.01;
 
     // The inspected masthead/period fixtures sit around Y=780-820 on an
     // 842-point page. Y=400 is not a top-of-page role.
@@ -101,17 +113,70 @@ public static class StandardBankPdfParser
             throw new StatementRejectedException(ParserReasons.FileTooLarge);
         }
 
-        // Reject encrypted documents before the extraction library gets a chance
-        // to open them with an empty password.
-        if (bytes.AsSpan().IndexOf("/Encrypt"u8) >= 0)
-        {
-            throw new StatementRejectedException(ParserReasons.EncryptedPdf);
-        }
-
-        PdfDocument document;
+        // PdfPig 0.1.16's strict header parser accepts only %PDF-1.x. The
+        // approved production inputs are %PDF-2.0. Parse a temporary copy with
+        // the version bytes normalized; the original bytes are unchanged and
+        // every production-profile check still runs.
+        byte[] openBytes = NormalizeProductionHeader(bytes);
+        PdfDocument? document = null;
         try
         {
-            document = PdfDocument.Open(bytes, new ParsingOptions { UseLenientParsing = false, SkipMissingFonts = false, });
+            document = OpenDocument(openBytes);
+            if (document.IsEncrypted)
+            {
+                if (!PdfEmptyUserAccess.Verify(document))
+                {
+                    throw new StatementRejectedException(ParserReasons.EncryptedPdf);
+                }
+
+                // PdfPig may satisfy an empty password through the owner path.
+                // Strip the owner authentication values from a temporary copy
+                // so the library can only use the empty-user key that the guard
+                // just verified. A crafted file whose content is encrypted with
+                // a different key then fails to parse.
+                byte[]? userBytes = PdfEmptyUserAccess.StripOwnerAuthentication(openBytes);
+                if (userBytes is null)
+                {
+                    throw new StatementRejectedException(ParserReasons.EncryptedPdf);
+                }
+
+                document.Dispose();
+                try
+                {
+                    document = OpenDocument(userBytes);
+                }
+                catch (StatementRejectedException)
+                {
+                    throw new StatementRejectedException(ParserReasons.EncryptedPdf);
+                }
+
+                if (!document.IsEncrypted)
+                {
+                    throw new StatementRejectedException(ParserReasons.EncryptedPdf);
+                }
+            }
+
+            return ParseDocument(document, start, end, century);
+        }
+        catch (StatementRejectedException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
+        }
+        finally
+        {
+            document?.Dispose();
+        }
+    }
+
+    private static PdfDocument OpenDocument(byte[] bytes)
+    {
+        try
+        {
+            return PdfDocument.Open(bytes, new ParsingOptions { UseLenientParsing = false, SkipMissingFonts = false, });
         }
         catch (PdfDocumentEncryptedException)
         {
@@ -121,22 +186,21 @@ public static class StandardBankPdfParser
         {
             throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
         }
+    }
 
-        using (document)
+    private static byte[] NormalizeProductionHeader(byte[] bytes)
+    {
+        ReadOnlySpan<byte> pdf20 = "%PDF-2.0"u8;
+        if (bytes.Length < pdf20.Length || !bytes.AsSpan(0, pdf20.Length).SequenceEqual(pdf20))
         {
-            try
-            {
-                return ParseDocument(document, start, end, century);
-            }
-            catch (StatementRejectedException)
-            {
-                throw;
-            }
-            catch (Exception)
-            {
-                throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
-            }
+            return bytes;
         }
+
+        byte[] normalized = (byte[])bytes.Clone();
+        normalized[5] = (byte)'1';
+        normalized[7] = (byte)'7';
+
+        return normalized;
     }
 
     private static ParsedStatement ParseDocument(PdfDocument document,
@@ -144,13 +208,14 @@ public static class StandardBankPdfParser
                                                  DateOnly? end,
                                                  int? century)
     {
-        if (document.IsEncrypted)
-        {
-            throw new StatementRejectedException(ParserReasons.EncryptedPdf);
-        }
         if (document.NumberOfPages > ImportLimits.MaxPdfPages)
         {
             throw new StatementRejectedException(ParserReasons.ProcessingLimit);
+        }
+
+        if (IsProductionDocument(document))
+        {
+            return ParseProductionDocument(document, start, end, century);
         }
 
         int pageCount = document.NumberOfPages;
@@ -169,10 +234,16 @@ public static class StandardBankPdfParser
 
         foreach (var page in document.GetPages())
         {
+            PageFrame frame = GetPageFrame(page);
+
             // The supported subset is text-only. Check every page before any
             // cover/table branch: no header, marker or small logo is exempt.
             if (page.NumberOfImages > 0)
             {
+                foreach (var image in page.GetImages())
+                {
+                    ValidateImageFrame(image.BoundingBox, frame);
+                }
                 throw new StatementRejectedException(ParserReasons.TextPdfRequired);
             }
 
@@ -184,12 +255,11 @@ public static class StandardBankPdfParser
             }
             sawAnyText |= words.Count > 0;
 
-            // Every extracted word must belong to a mapped cell. The six bands
-            // cover [0, infinity); an off-page or non-finite coordinate is not
-            // silently dropped.
-            if (words.Any(word => !double.IsFinite(word.CenterX) || !double.IsFinite(word.CenterY) || word.CenterX < 0))
+            // Every extracted glyph must sit inside the visible page frame.
+            // The six bands do not excuse a word that the page clips.
+            foreach (var word in words)
             {
-                throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
+                ValidateWordFrame(word, frame);
             }
 
             var lines = GroupLines(words);
@@ -274,6 +344,21 @@ public static class StandardBankPdfParser
 
                 if (lineIndex < primary.LineIndex)
                 {
+                    // An aligned description fragment belongs to the preceding
+                    // candidate even when its text is a reserved word such as
+                    // Summary. Structural recognition must not erase it first.
+                    if (current is not null && IsSupportedContinuation(line, header, current, crossPageContinuation))
+                    {
+                        string continuationText = line.TextIn(header, 1);
+                        if (continuationText.Length == 0)
+                        {
+                            throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
+                        }
+                        current.AppendContinuation(continuationText, line.CenterY);
+                        crossPageContinuation = false;
+                        continue;
+                    }
+
                     string preambleText = StatementText.CollapseWhitespace(line.Text);
                     if (_summaryHeading.IsMatch(preambleText))
                     {
@@ -434,7 +519,7 @@ public static class StandardBankPdfParser
             {
                 throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
             }
-            if (balance.Kind == BodyEventKind.BalanceClosing && balance.Index < lastFinalCandidate)
+            if (balance.Kind == BodyEventKind.BalanceClosing && balance.Index < lastDisqualifyingIndex)
             {
                 throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
             }
@@ -634,11 +719,72 @@ public static class StandardBankPdfParser
         return false;
     }
 
+    private static PageFrame GetPageFrame(Page page)
+    {
+        PdfRectangle media = page.MediaBox.Bounds;
+        PdfRectangle crop = page.CropBox.Bounds;
+        double left = Math.Max(media.Left, crop.Left);
+        double bottom = Math.Max(media.Bottom, crop.Bottom);
+        double right = Math.Min(media.Right, crop.Right);
+        double top = Math.Min(media.Top, crop.Top);
+        if (!double.IsFinite(left) ||
+            !double.IsFinite(bottom) ||
+            !double.IsFinite(right) ||
+            !double.IsFinite(top) ||
+            right <= left ||
+            top <= bottom)
+        {
+            throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
+        }
+
+        return new PageFrame(left, bottom, right, top);
+    }
+
+    private static void ValidateWordFrame(PdfWord word, PageFrame frame)
+    {
+        if (!double.IsFinite(word.Left) ||
+            !double.IsFinite(word.Right) ||
+            !double.IsFinite(word.Bottom) ||
+            !double.IsFinite(word.Top) ||
+            word.Right < word.Left ||
+            word.Top < word.Bottom ||
+            word.Left < frame.Left - PageEdgeTolerance ||
+            word.Right > frame.Right + PageEdgeTolerance ||
+            word.Bottom < frame.Bottom - PageEdgeTolerance ||
+            word.Top > frame.Top + GlyphAscentTolerance)
+        {
+            throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
+        }
+    }
+
+    private static void ValidateImageFrame(PdfRectangle bounds, PageFrame frame)
+    {
+        if (!double.IsFinite(bounds.Left) ||
+            !double.IsFinite(bounds.Right) ||
+            !double.IsFinite(bounds.Bottom) ||
+            !double.IsFinite(bounds.Top) ||
+            bounds.Right < bounds.Left ||
+            bounds.Top < bounds.Bottom ||
+            bounds.Left < frame.Left - PageEdgeTolerance ||
+            bounds.Right > frame.Right + PageEdgeTolerance ||
+            bounds.Bottom < frame.Bottom - PageEdgeTolerance ||
+            bounds.Top > frame.Top + PageEdgeTolerance)
+        {
+            throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
+        }
+    }
+
     private static bool IsTopOfPage(PdfLine line, double pageHeight) =>
         line.CenterY >= pageHeight - TopRegionBelowPageTop;
 
     private static bool IsMetadataLabelLine(PdfLine line)
     {
+        string text = StatementText.CollapseWhitespace(line.Text);
+        if (_metadataLabelPrefix.IsMatch(text))
+        {
+            return true;
+        }
+
         var first = line.Words.OrderBy(word => word.Left).FirstOrDefault();
         if (first is null)
         {
@@ -718,9 +864,18 @@ public static class StandardBankPdfParser
             var line = lines[lineIndex];
             var words = line.Words.OrderBy(word => word.Left).ToList();
             var normalized = words.Select(word => NormalizeLabel(word.Text)).ToList();
-            if (!TryGetHeaderIndices(normalized, out int dateIndex, out int descriptionIndex, out int paymentsIndex, out int depositsIndex, out int bankIndex, out int feesIndex, out int balanceIndex))
+            if (!TryFindHeaderCore(normalized, out int coreStart, out int coreLength, out int dateIndex, out int descriptionIndex, out int paymentsIndex, out int depositsIndex, out int bankIndex, out int feesIndex, out int balanceIndex))
             {
                 continue;
+            }
+
+            // A header consumes only its complete ordered core. Extra words
+            // beside it are unexplained residue: retaining them as a row would
+            // emit header labels as a transaction, and skipping them would drop
+            // source text. The complete-header rule cannot hide either case.
+            if (coreStart != 0 || coreStart + coreLength != normalized.Count)
+            {
+                throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
             }
 
             var date = words[dateIndex];
@@ -776,15 +931,10 @@ public static class StandardBankPdfParser
             return false;
         }
 
-        bool exact = primary.Boundaries.Zip(other.Boundaries, (left, right) => Math.Abs(left - right) <= HeaderExactTolerance).All(value => value) && Math.Abs(primary.DescriptionLeft - other.DescriptionLeft) <= HeaderExactTolerance;
-        if (exact)
-        {
-            return true;
-        }
-
         // A tolerated shift is safe only when no word would change semantic
         // columns. Tolerance cannot change a flow direction or turn Balance
-        // into a flow.
+        // into a flow. This check applies even when the boundary shift is
+        // within the smallest tolerance: a word on a boundary can still move.
         for (int lineIndex = 0; lineIndex < lines.Count; lineIndex++)
         {
             if (headerLineIndices.Contains(lineIndex))
@@ -819,53 +969,72 @@ public static class StandardBankPdfParser
         return -1;
     }
 
-    private static bool TryGetHeaderIndices(IReadOnlyList<string> normalized,
-                                            out int dateIndex,
-                                            out int descriptionIndex,
-                                            out int paymentsIndex,
-                                            out int depositsIndex,
-                                            out int bankIndex,
-                                            out int feesIndex,
-                                            out int balanceIndex)
+    private static bool TryFindHeaderCore(IReadOnlyList<string> normalized,
+                                          out int coreStart,
+                                          out int coreLength,
+                                          out int dateIndex,
+                                          out int descriptionIndex,
+                                          out int paymentsIndex,
+                                          out int depositsIndex,
+                                          out int bankIndex,
+                                          out int feesIndex,
+                                          out int balanceIndex)
     {
+        coreStart = -1;
+        coreLength = 0;
         dateIndex = descriptionIndex = paymentsIndex = depositsIndex = -1;
         bankIndex = feesIndex = balanceIndex = -1;
 
-        if (normalized.Count == 7)
+        for (int start = 0; start < normalized.Count; start++)
         {
-            if (normalized[0] != "date" || normalized[1] != "description" || normalized[2] != "payments" || normalized[3] != "deposits" || normalized[4] != "bank" || normalized[5] != "fees" || normalized[6] != "balance")
+            if (start + 7 <= normalized.Count &&
+                normalized[start] == "date" &&
+                normalized[start + 1] == "description" &&
+                normalized[start + 2] == "payments" &&
+                normalized[start + 3] == "deposits" &&
+                normalized[start + 4] == "bank" &&
+                normalized[start + 5] == "fees" &&
+                normalized[start + 6] == "balance")
             {
-                return false;
+                if (coreStart >= 0)
+                {
+                    throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
+                }
+                coreStart = start;
+                coreLength = 7;
+                dateIndex = start;
+                descriptionIndex = start + 1;
+                paymentsIndex = start + 2;
+                depositsIndex = start + 3;
+                bankIndex = start + 4;
+                feesIndex = start + 5;
+                balanceIndex = start + 6;
             }
-
-            dateIndex = 0;
-            descriptionIndex = 1;
-            paymentsIndex = 2;
-            depositsIndex = 3;
-            bankIndex = 4;
-            feesIndex = 5;
-            balanceIndex = 6;
-            return true;
+            else if (start + 6 <= normalized.Count &&
+                     normalized[start] == "date" &&
+                     normalized[start + 1] == "description" &&
+                     normalized[start + 2] == "payments" &&
+                     normalized[start + 3] == "deposits" &&
+                     normalized[start + 4] == "bankfees" &&
+                     normalized[start + 5] == "balance")
+            {
+                if (coreStart >= 0)
+                {
+                    throw new StatementRejectedException(ParserReasons.UnsupportedLayout);
+                }
+                coreStart = start;
+                coreLength = 6;
+                dateIndex = start;
+                descriptionIndex = start + 1;
+                paymentsIndex = start + 2;
+                depositsIndex = start + 3;
+                bankIndex = start + 4;
+                feesIndex = start + 4;
+                balanceIndex = start + 5;
+            }
         }
 
-        if (normalized.Count == 6)
-        {
-            if (normalized[0] != "date" || normalized[1] != "description" || normalized[2] != "payments" || normalized[3] != "deposits" || normalized[4] != "bankfees" || normalized[5] != "balance")
-            {
-                return false;
-            }
-
-            dateIndex = 0;
-            descriptionIndex = 1;
-            paymentsIndex = 2;
-            depositsIndex = 3;
-            bankIndex = 4;
-            feesIndex = 4;
-            balanceIndex = 5;
-            return true;
-        }
-
-        return false;
+        return coreStart >= 0;
     }
 
     private static double Midpoint(double left, double right) => (left + right) / 2.0;
@@ -891,6 +1060,8 @@ public static class StandardBankPdfParser
 
         public double CenterX => (Left + Right) / 2.0;
     }
+
+    private readonly record struct PageFrame(double Left, double Bottom, double Right, double Top);
 
     private sealed class PdfLine(PdfWord first)
     {

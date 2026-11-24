@@ -6,19 +6,6 @@ namespace argus.Server.Imports;
 /// </summary>
 public static class StatementParser
 {
-    /// <summary>
-    /// Standard Bank PDF is deliberately dormant while the real-template
-    /// hardening work is deferred to the PDF follow-up thread. Reject it before
-    /// any bytes are decoded or a parser child is started.
-    /// </summary>
-    private static void EnsureSourceKindEnabled(StatementSourceKind sourceKind)
-    {
-        if (sourceKind == StatementSourceKind.StandardBankPdf)
-        {
-            throw new StatementRejectedException(ParserReasons.PdfImportDeferred);
-        }
-    }
-
     private static Task<ParsedStatement> RunCsvAsync(ParserAdmission admission, Func<CancellationToken, ParsedStatement> parse, CancellationToken cancellationToken) =>
         admission.RunAsync(
             token => Task.Run(() => parse(token), token),
@@ -33,7 +20,6 @@ public static class StatementParser
                                                            ParserAdmission admission,
                                                            CancellationToken cancellationToken = default)
     {
-        EnsureSourceKindEnabled(sourceKind);
         if (bytes.Length > ImportLimits.MaxFileBytes)
         {
             throw new StatementRejectedException(ParserReasons.FileTooLarge);
@@ -71,7 +57,6 @@ public static class StatementParser
                                                            ParserAdmission admission,
                                                            CancellationToken cancellationToken = default)
     {
-        EnsureSourceKindEnabled(sourceKind);
         if (bytes.Length > ImportLimits.MaxFileBytes)
         {
             throw new StatementRejectedException(ParserReasons.FileTooLarge);

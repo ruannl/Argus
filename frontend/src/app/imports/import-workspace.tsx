@@ -38,15 +38,18 @@ type Message = { tone: "status" | "error"; text: string };
 const ERROR_MESSAGES: Record<string, string> = {
   invalid_request: "That request could not be accepted.",
   file_too_large: "That statement is larger than the 10 MB limit.",
-  unsupported_format: "That file type is not supported.",
+  unsupported_format:
+    "That file type is not supported. Use an FNB CSV/ZIP, a Standard Bank PDF, or a mapped CSV.",
   unsupported_encoding: "That CSV is not valid UTF-8. Re-export it as UTF-8.",
   unsafe_archive: "That archive is unsafe or does not contain exactly one root-level CSV.",
-  encrypted_pdf: "That PDF is password-protected.",
-  text_pdf_required: "That PDF has no text layer. Scanned statements are outside the MVP.",
+  encrypted_pdf: "That PDF requires a password or uses unsupported protection.",
+  text_pdf_required:
+    "That PDF is not a supported text-based statement. Scanned or image-only PDFs, and unrecognised images, are outside the MVP.",
   unsupported_layout: "That statement layout is not recognised.",
   processing_limit: "That statement exceeds a processing limit.",
   format_confirmation_required: "Confirm the mapping and dates before continuing.",
-  pdf_import_deferred: "PDF import is coming later. Use an FNB CSV/ZIP or a mapped CSV for now.",
+  pdf_import_deferred:
+    "PDF import is not available in this build. Use an FNB CSV/ZIP or a mapped CSV.",
   import_busy: "Another statement is being processed. Try again shortly.",
   not_found: "That item no longer exists.",
   review_expired: "That review has expired.",
@@ -114,6 +117,7 @@ export default function ImportWorkspace({
   const [mappingDirty, setMappingDirty] = useState(false);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [century, setCentury] = useState("2000");
   const [busy, setBusy] = useState<"idle" | "inspecting" | "preparing">("idle");
   const [message, setMessage] = useState<Message | null>(null);
   const [pending, startTransition] = useTransition();
@@ -126,17 +130,9 @@ export default function ImportWorkspace({
   }
 
   function chooseFile(file: File | null) {
-    if (file && isPdfFile(file)) {
-      setSelectedFile(null);
-      resetInspection();
-      setMessage({
-        tone: "error",
-        text: "PDF import is coming later. Use an FNB CSV/ZIP or a mapped CSV for now.",
-      });
-      if (fileInput.current) {
-        fileInput.current.value = "";
-      }
-      return;
+    if (file && isPdfFile(file) && sourceKind !== "standard_bank_pdf") {
+      setSourceKind("standard_bank_pdf");
+      setCentury("2000");
     }
     setSelectedFile(file);
     resetInspection();
@@ -153,6 +149,7 @@ export default function ImportWorkspace({
       true,
       mapping,
       mode,
+      century,
     );
 
     const form = new FormData();
@@ -264,6 +261,7 @@ export default function ImportWorkspace({
   }
 
   const ready = Boolean(accountId && selectedFile && inspect?.can_prepare);
+  const unresolvedDates = Boolean(inspect?.preview.some((row) => !row.transaction_date));
   const amountMode = mapping.amount_mode ?? "signed";
   const working = busy !== "idle" || pending;
 
@@ -376,12 +374,15 @@ export default function ImportWorkspace({
                         <select
                           className="rounded-xl border border-line bg-page px-3 py-2 text-base font-normal text-ink"
                           onChange={(event) => {
-                            setSourceKind(event.target.value as SourceKind);
+                            const next = event.target.value as SourceKind;
+                            setSourceKind(next);
+                            setCentury(next === "standard_bank_pdf" ? "2000" : "");
                             resetInspection();
                           }}
                           value={sourceKind}
                         >
                           <option value="fnb">FNB CSV or ZIP</option>
+                          <option value="standard_bank_pdf">Standard Bank PDF</option>
                           <option value="generic_csv">Generic CSV with mapping</option>
                         </select>
                       </label>
@@ -393,7 +394,7 @@ export default function ImportWorkspace({
                           Statement file
                         </span>
                         <input
-                          accept=".csv,.zip,text/csv,application/zip"
+                          accept=".csv,.zip,.pdf,text/csv,application/zip,application/pdf"
                           aria-labelledby="statement-file-label"
                           className="sr-only"
                           onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
@@ -433,6 +434,28 @@ export default function ImportWorkspace({
                         ) : null}
                       </div>
                     </div>
+
+                    {sourceKind === "standard_bank_pdf" ? (
+                      <div className="mt-4 grid max-w-xs gap-2 text-sm font-semibold text-ink">
+                        <label htmlFor="pdf-century">Two-digit-year century</label>
+                        <input
+                          className="rounded-xl border border-line bg-page px-3 py-2 text-base font-normal text-ink"
+                          id="pdf-century"
+                          inputMode="numeric"
+                          onChange={(event) => {
+                            setCentury(event.target.value);
+                            setMessage(null);
+                            resetInspection();
+                          }}
+                          placeholder="e.g. 2000"
+                          value={century}
+                        />
+                        <span className="text-xs font-normal text-muted">
+                          Defaults to 2000. Use 1900 for older statements. Changing it clears the
+                          preview, so inspect again.
+                        </span>
+                      </div>
+                    ) : null}
 
                     {message ? (
                       <p
@@ -534,14 +557,29 @@ export default function ImportWorkspace({
 
                         <div>
                           <h3 className="text-sm font-bold text-ink">Preview</h3>
+                          {unresolvedDates ? (
+                            <p
+                              className="mt-2 rounded-xl border border-warning-line bg-warning-soft p-3 text-sm text-warning-ink"
+                              role="status"
+                            >
+                              Some dates use two-digit years and could not be resolved. Check the
+                              century above, then inspect again.
+                            </p>
+                          ) : null}
                           <div className="mt-2 space-y-2">
                             {inspect.preview.map((row) => (
                               <div
                                 className="grid gap-1 rounded-xl border border-line bg-page p-3 text-sm sm:grid-cols-[7rem_1fr_8rem]"
                                 key={row.row_id}
                               >
-                                <span className="font-mono text-xs text-muted">
-                                  {row.transaction_date ?? "date?"}
+                                <span
+                                  className={
+                                    row.transaction_date
+                                      ? "font-mono text-xs text-muted"
+                                      : "font-mono text-xs font-semibold text-warning-ink"
+                                  }
+                                >
+                                  {row.transaction_date ?? "Date unresolved"}
                                 </span>
                                 <span className="break-words text-ink">{row.description}</span>
                                 <span className="font-mono tabular-nums text-ink sm:text-right">

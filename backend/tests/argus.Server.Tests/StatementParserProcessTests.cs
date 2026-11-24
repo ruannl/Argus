@@ -302,9 +302,8 @@ public sealed class StatementParserProcessTests
         Assert.Equal(2, compatibleRepeat.Rows.Count);
         Assert.All(compatibleRepeat.Rows, row => Assert.True(row.IsValid));
 
-        var residueHeader = await runner.ParseAsync(BuildHeaderResiduePdf(), options);
-        Assert.Equal(3, residueHeader.Rows.Count);
-        Assert.Contains(residueHeader.Rows, row => row.ValidationCodes.Contains(ValidationCodes.InvalidDate));
+        var residueHeader = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(BuildHeaderResiduePdf(), options));
+        Assert.Equal(ParserReasons.UnsupportedLayout, residueHeader.Reason);
 
         foreach (var conflicting in new[]
                  {
@@ -344,6 +343,16 @@ public sealed class StatementParserProcessTests
 
         var midPageSummaryFailure = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(BuildMidPageSummaryPdf(), options));
         Assert.Equal(ParserReasons.UnsupportedLayout, midPageSummaryFailure.Reason);
+
+        var summaryContinuation = await runner.ParseAsync(BuildSummaryContinuationBelowCandidatePdf(), options);
+        Assert.Equal(2, summaryContinuation.Rows.Count);
+        Assert.Equal("Above row Summary", summaryContinuation.Rows[0].Description);
+
+        var outOfFrame = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(BuildOutOfFrameSummaryPdf(), options));
+        Assert.Equal(ParserReasons.UnsupportedLayout, outOfFrame.Reason);
+
+        var closingBeforeSummary = await Assert.ThrowsAsync<StatementRejectedException>(() => runner.ParseAsync(BuildClosingBalanceBeforeSummaryPdf(), options));
+        Assert.Equal(ParserReasons.UnsupportedLayout, closingBeforeSummary.Reason);
 
         var sourceLineResult = await runner.ParseAsync(BuildSourceLinePdf(), options);
         Assert.Equal(3, sourceLineResult.Rows.Count);
@@ -445,7 +454,7 @@ public sealed class StatementParserProcessTests
         var texts = ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530);
         AddPaymentRow(texts, 760, "01 Feb 2025", "First row", "10.00");
         texts.AddRange(ProcessHeader(700, 40, 100, 300, 400, 470, 500, 530));
-        texts.Add(new PdfText(560, 700, "RESIDUE"));
+        texts.Add(new PdfText(560, 700, "X"));
         AddPaymentRow(texts, 680, "02 Feb 2025", "Second row", "20.00");
         MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
@@ -482,7 +491,8 @@ public sealed class StatementParserProcessTests
         List<PdfText> texts = new List<PdfText>
         {
             new(40, 840, "Synthetic Bank"),
-            new(40, 820, "Account: PRIVATE_ACCOUNT_7731"),
+            new(40, 820, "Account:123 PRIVATE_ACCOUNT_7731"),
+            new(300, 820, "10.00"),
         };
         texts.AddRange(ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530));
         AddPaymentRow(texts, 760, "01 Feb 2025", "Valid row", "10.00");
@@ -562,6 +572,48 @@ public sealed class StatementParserProcessTests
         MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(StatementFixtureBuilder.HandAuthoredSmallPdfTexts());
         pdf.AddPage([new PdfText(100, 400, "Summary")]);
+
+        return pdf.Build();
+    }
+
+    private static byte[] BuildSummaryContinuationBelowCandidatePdf()
+    {
+        List<PdfText> texts = new List<PdfText>
+        {
+            new(40, 820, "01 Feb 2025"),
+            new(100, 820, "Above row"),
+            new(300, 820, "10.00"),
+            new(100, 812, "Summary"),
+        };
+        texts.AddRange(ProcessHeader(800, 40, 100, 300, 400, 470, 500, 530));
+        AddPaymentRow(texts, 760, "02 Feb 2025", "Body row", "20.00");
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
+        pdf.AddPage(texts);
+
+        return pdf.Build();
+    }
+
+    private static byte[] BuildOutOfFrameSummaryPdf()
+    {
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
+        pdf.AddPage(StatementFixtureBuilder.HandAuthoredSmallPdfTexts());
+        pdf.AddPage([new PdfText(100, 900, "Summary")]);
+
+        return pdf.Build();
+    }
+
+    private static byte[] BuildClosingBalanceBeforeSummaryPdf()
+    {
+        List<PdfText> first = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        {
+            new(100, 706, "Total payments"),
+            new(300, 706, "1,234.56"),
+            new(100, 688, "Closing balance"),
+            new(530, 688, "1,234.56"),
+        };
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
+        pdf.AddPage(first);
+        pdf.AddPage([new PdfText(40, 780, "Summary")]);
 
         return pdf.Build();
     }

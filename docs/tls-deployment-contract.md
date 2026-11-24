@@ -42,10 +42,12 @@ the certificates, and the network boundary.
 
 ## Statement import deployment requirements
 
-**Current scope:** Standard Bank PDF import is deferred by Plan 2 revision 5.
-The backend rejects `standard_bank_pdf` before launching the parser child, so
-the child-process requirements below are dormant but remain part of the
-deployment contract for the follow-up PDF thread.
+**Current scope:** Standard Bank PDF import is active for the approved
+production profile (612x792 pages, one fixed masthead asset, empty-user AES-256
+V5/R6, documented metadata/table/postamble forms). The backend launches the
+parser child after the account, ZAR, period and upload guards pass, so the
+child-process requirements below apply to every deployment that offers the PDF
+preset.
 
 9. **The proxy admits the bounded import envelope.** Allow multipart requests up
    to 10,100,000 bytes and JSON review mutations up to 256 KiB. Do not raise
@@ -55,7 +57,7 @@ deployment contract for the follow-up PDF thread.
     30-second parser deadline for CSV and PDF parsing. The ingress request
     timeout must be longer than the parser deadline plus normal database work,
     and the runtime must allow the backend to launch the
-    `--parse-statement-pdf` child of its own assembly when PDF is re-enabled.
+    `--parse-statement-pdf` child of its own assembly.
 11. **Published output is self-contained.** Deploy the published backend output,
     including the server runtime configuration. The PDF child is launched from
     that output, not only from `dotnet run`.
@@ -64,7 +66,7 @@ deployment contract for the follow-up PDF thread.
     has a 256 MiB managed-heap target, a 384 MiB resident-memory ceiling
     enforced by the parent, bounded stdin and stdout, and whole-tree termination
     on timeout or disconnect. A platform that forbids child processes cannot
-    serve the Standard Bank PDF preset when it is re-enabled.
+    serve the Standard Bank PDF preset.
 13. **Import privacy survives infrastructure.** Raw uploads are not persisted.
     Ensure proxy access logs, APM traces, error trackers, and backups do not
     capture request bodies, multipart filenames, or financial source text.

@@ -1,11 +1,13 @@
 # Plan 2: Statement Import, Parsers, Review, and Idempotency
 
-- **Current approved revision:** 9 (`2026-11-09`) — operator-approved category-confirmation provenance at import commit. Each included transaction records `category_confirmed`: `FALSE` for an untouched review default or no determined category, `TRUE` when the customer changed or cleared the category. Confirmation happens later in Transactions; the import commit does not confirm categories. Detailed scope is in "Revision 9 — Category confirmation provenance at import commit" below. This is a semantic authority correction; no new plan review is claimed, and the implementation remains subject to a fresh acceptance review. Thread #3 Decision `7e440b3c-b8a2-46ce-a72c-c7b945cf871d` records approval.
+- **Approved revision:** 10 (`2026-11-22`) — production Standard Bank PDF support, rebased in place from deferred revision 4 onto approved revision 9. **Approved by Thread #6 Decision `ed5224b4-c390-4912-b804-eeb170c7b956` against Plan blob `d17f9136d919035bd74a21aad26d0bb132e29d98` and brief blob `a3ae4c3a92c891f71fd70c557fd6b779da68244f`; implementation executed under that authority.** The current file adds progress, post-review correction and operator risk-acceptance annotations after approval; the approved blob remains the baseline, while the current narrowed protection/source claims are those recorded in the operator risk-acceptance section. **Implementation was accepted with the two documented limitations on 2026-11-22.** The earlier proposal-era "not approved" wording is historical and is not the current status.
+- **Publication status:** implementation acceptance is not commit, merge, push, deployment or publication authority. On 2026-11-24 the operator authorized committing and pushing the revision-10 tree; the resulting branch commit and verification are recorded on Thread #6. Merge, pull request creation, deployment and release remain unauthorized.
+- **Prior approved revision:** 9 (`2026-11-09`) — operator-approved category-confirmation provenance at import commit. Each included transaction records `category_confirmed`: `FALSE` for an untouched review default or no determined category, `TRUE` when the customer changed or cleared the category. Confirmation happens later in Transactions; the import commit does not confirm categories. Detailed scope is in "Revision 9 — Category confirmation provenance at import commit" below. This is a semantic authority correction; no new plan review is claimed, and the implementation remains subject to a fresh acceptance review. Thread #3 Decision `7e440b3c-b8a2-46ce-a72c-c7b945cf871d` records approval.
 - **Prior approved revision:** 8 (`2026-11-09`) — operator-approved category-default correction for import review. When a category can be determined from the customer's explicit aliases or own historical choices, the review preselects it; Uncategorised remains only when no category can be determined or the customer explicitly clears the selection. The customer can change the category before commit. Tag suggestions remain advisory and unselected. Detailed scope is in "Revision 8 — Category suggestions in import review" below. This is a semantic authority correction; no new plan review is claimed, and the implementation remains subject to a fresh acceptance review. Thread #3 Decision `a8054d7e-aacc-4981-b5ce-eecc786b287d` records approval.
 - **Prior approved revision:** 7 (`2026-11-09`) — operator-approved suggestion-source and near-duplicate correction. Suggestions may use explicit aliases, the customer's own historical choices keyed by a generic merchant key, and exact/truncated-prefix token matching; near duplicates require the exact transaction date. Detailed scope is in "Revision 7 — Suggestion sources and exact-date near duplicates" below. This is a semantic authority correction for PR #8; no new plan review is claimed, and the code remains subject to a fresh acceptance review. Thread #3 Decision `a92fc81b-879b-4844-8543-1b25a51abda5` records approval.
 - **Prior approved revision:** 6 (`2026-11-07`) — bounded L1 expiry correction, explicitly approved on Thread #4 in Decision `060f596f-31c3-4632-a1b3-a91e36879448` against contract `27141eaf-98da-4ba6-9378-3d84ce78c136`. The correction merged in PR #3 at 63815ee as part of the Plan 3 revision-3 branch after merge-gate review 37828a33 returned GO with zero blocking findings; PR #5 at 1b80a66 fixed the later expiry-wait test instability. It was not separately plan-reviewed, and no new plan review is claimed. The operator accepted Plan 3 as Validated on 2026-11-08. It preserves revision 5's **CSV-only delivery**: FNB CSV/ZIP and generic mapped CSV remain active; Standard Bank PDF stays disabled/deferred to Thread #6.
 - **Prior approved revision:** 5 (`2026-11-06`), CSV-only delivery. Immediately preceding file blob `94efd17a193f0cb2df3321ce63d1c4347f34a006` at `eda95113b6bf29102a6ec24c2cea45058334a9c0`. Its historical approval and implementation acceptance are preserved below. Revision 6 changes only the absolute-expiry boundary in commit and its bounded tests/documentation.
-- **Deferred revision 4:** **C-PDF-2 — production Standard Bank template**, proposed `2026-11-05`. It is **NOT APPROVED** and is deferred with PDF import; it is preserved as future planning input for Thread #6. No implementation or additional review is authorized by it.
+- **Historical deferred revision 4:** **C-PDF-2 — production Standard Bank template**, proposed `2026-11-05`, was never approved. Its full proposal is preserved as Git blob `1b2d2e3965243a1c0581b72bd8685eb895129153`; revision 10 replaces that proposal, not approved revisions 5–9. The immediately preceding full Plan is blob `e473b066156230261ac319b761d70e2a7a7e6dff`. No historical PDF verdict is relabelled.
 - **Revision 3 authority:** The operator explicitly selected **Approve revision 3** after the bounded Specialist GO and both note dispositions. Approved annotated proposal blob: `53a63747ba2bb7e79d4a1dc5b966fce6b11c7153`; reviewed blob: `053218c3a9640fa124126db8ad8e88a625576e7f`. Its CSV/FNB/generic rules remain active. Its PDF-specific rules are dormant while Revision 5 defers PDF. Thread #3 records the final activated file blob and approval provenance.
 - **Status:** **Revision 5's CSV-only implementation is historically review-accepted.** Final independent review `5524f1dd-f982-49af-a6fd-5a863fe95987` returned **GO** with zero findings against the exact baseline below; it does not review revisions 6, 7, 8, or 9. L1 was identified by whole-tree review `9d131c1c-58d6-449c-b22f-c88688cc24fc` against `c76c78f`; its approved correction merged in PR #3 at 63815ee after merge-gate review 37828a33 returned GO with zero blocking findings, without reopening Thread #3 or changing programme order. PR #5 at 1b80a66 fixed the expiry-wait instability. The operator accepted Plan 3 as Validated on 2026-11-08; Thread #5 is unblocked for Plan 4 planning. Revision 7 is an operator-approved semantic amendment for PR #8; it preserves the revision-5 review and revision-6 execution records and does not accept the PR #8 code, which remains subject to a fresh acceptance review. Revision 8 is an operator-approved semantic amendment for import-review category defaults; it narrows AC6's "category stays Uncategorised" clause and the selected brief's CAT-6 wording for import review only, as described below. Revision 9 is an operator-approved semantic amendment for category-confirmation provenance at import commit; it records the review row's confirmation state on each created transaction and leaves confirmation to the Transactions workspace. Revisions 8 and 9 were implemented with Plan 3 revision 5 on branch `feature/category-confirmation` and merged in PR #12 at `28fede1` after two independent Specialist reviews (the second returned GO) and green required checks. The post-GO PATCH correction was merged on explicit operator authorization. Earlier NO-GO reviews and the dormant PDF NO-GO remain historical provenance, not relabelled acceptance. No deployment occurred.
 - **Revision 7 authority:** Operator instruction in the PR #8 artifact-revision request, 2026-11-09; Thread #3 Decision `a92fc81b-879b-4844-8543-1b25a51abda5`. No new Specialist review is claimed.
@@ -15,11 +17,13 @@
 - **Specialist provenance:** Request `9d4092ed-ce89-44e5-9e0b-fc63b572d865`; reviewed revision 1 / Git blob `f03ffe737fc669f0b7d2737e04f2d13307a64306` on the implementation base below. Immutable full review SHA-256 `3c3d227603443489af81f8ed6fc1634d0efae44735de63e294ee5d522ea1907b` (18,756 bytes). Verdict: 0 CRITICAL, 0 HIGH, 5 MEDIUM notes, 1 LOW note. Final annotated blob and acceptance provenance are recorded on Thread #3. Notes/status below are operational dispositions, not a new semantic revision or a second review.
 - **Revision 2 authority:** Operator's bounded Architect correction request on Thread #3. Supersedes the `TextFieldParser` choice and explicitly names the requested helper/test-runner paths. The accepted revision 1 annotated blob was `b03f058e75833e2dff254acb788fc566b363cac7`; the immediately preceding file, including execution records, was blob `fdeee65e3989997aad92056c2d2e37de01330678`. Revision 2 is not separately Specialist-reviewed; the operator explicitly requested no new plan review. The original plan gate and its provenance remain intact, without claiming that the new tokenizer was reviewed in revision 1.
 - **Implementation baseline:** `496f34ab39a792b090753ed4e2215562fe0ea15d` on `main`.
-- **Governing child:** HiveMind Thread #3 (`7f9a4a3a-ccaa-41db-9064-26fb78c657c5`).
+- **Current PDF work owner:** HiveMind Thread #6 (`60b8290f-9470-405b-bace-531094f65e47`). Thread #3 (`7f9a4a3a-ccaa-41db-9064-26fb78c657c5`) is the resolved, Validated owner of the delivered CSV work and category amendments; it is not reopened. Thread #6 remains related to it, not a new programme child.
 - **Governing programme:** Thread #1 (`306f43f0-6ed8-43ea-8f75-0019027f8b06`), Ready Requirement revision 1 (`134e0580-8e55-4216-b883-9e9c6c466d9b`). Programme topology and progression remain authoritative in HiveMind, not this file.
-- **Selected brief:** `docs/product-brief.md`, approved body from `0e7f1c8ab773a66c99c2e0ae96f4fe314c321a03`, plus the 2026-11-06 CSV-only scope amendment and the 2026-11-09 behavior, category-default and category-confirmation amendments. Sections 1.1, 6, 7, and 9 govern behaviour; Sections 4.9–4.10 govern documented formats; Sections 12–13 govern limitations, decisions, defaults, and this unit. The production-PDF amendment is **deferred, not accepted**, by the Revision 5 operator decision.
+- **Selected brief:** `docs/product-brief.md`, immediately preceding blob `595aa95d95f2e186130c511e2342bff85f72388e`, including all behavior, category, salary-cycle and Overview-display amendments. Its rebased 2026-11-22 production-PDF appendix is **approved** as part of brief blob `a3ae4c3a92c891f71fd70c557fd6b779da68244f`; the earlier "proposed, not accepted" status is historical. Revision 10 names exactly which PDF clauses the appendix supersedes; every other brief clause keeps its existing authority.
 - **Predecessor content:** `docs/plans/01-foundation-and-entities.md` at `496f34a`, particularly the `/v1/finance/*` boundary and Section 12 note N11. Plan 1 is complete and is not amended here.
-- **Authority:** This file is the editable Plan. There is no native Plan or duplicate child Requirement. The approved umbrella Requirement, selected brief, and Thread #3 scope sufficiently specify this unit. Review provenance is recorded on Thread #3 against the exact file blob; publication and implementation approval are separate operator decisions.
+- **Authority:** This file remains the single editable Plan; no separate PDF plan or duplicate Thread document is created. The accepted umbrella Requirement, selected brief and Thread #6 decision specify the follow-up. Revision-10 review/approval provenance belongs on Thread #6 against exact full-file blobs. Earlier Thread #3 records remain history. No Thread #1 topology, child order or other Thread state changes here. Plan approval, implementation acceptance and publication are separate decisions.
+
+**Reading the historical body:** Sections 1–12 and earlier execution records describe their stated original baselines, not a claim that finance/import/reporting are still absent today. The revision-10 current-source table supersedes those current-state descriptions for this follow-up only. Approved rules remain binding except for the explicit revision-10 clause map after operator approval.
 
 ## 1. Desired outcome and current behaviour
 
@@ -538,6 +542,8 @@ Real-stack walkthrough, using already approved/configured local services: run `d
 | 2026-11-04 | **Revision 3 approved:** after review and note disposition, the operator selected `Approve revision 3` in response to the explicit question approving C-PDF-1 as the governing correction for implementation, including rejection of raster-logo PDFs and the recorded existing error-wording limitation. The approved annotated proposal was blob `53a63747ba2bb7e79d4a1dc5b966fce6b11c7153`. Activate the same reviewed architecture with authority/status metadata only; no further semantic rewrite or review. This supersedes the pending state in the preceding historical proposal/review rows, not the implementation NO-GO. |
 | 2026-11-05 | **C-PDF-1 root-cause disposition:** all six HIGH findings and both MEDIUM notes from implementation review `3e2dbd3f-232b-465f-a075-a11dd4d4e7fa` are CONFIRMED against existing obligations. Section I supplies one bounded corrective work order: establish page/header context before projection, account for every extracted word, make continuation permission consumable, and reconcile totals against every later recognized role. No acceptance criterion, invariant, phase purpose/scope, supported bank layout or public contract changes; revision 3 stays current. Local helpers/data structures remain implementation choices. No new review or implementation acceptance is inferred or requested. |
 | 2026-11-10 | **Revision 8 UI correction — match count omitted:** operator instruction in the active Generalist session accepted "Leave the count out" after the second acceptance review's R3 note. The approved review-row response exposes no numeric suggestion match count, so the untouched-default marker uses the Suggested label without a count and no response field is added. Plan 2 R8.1 decision 8 and R8.6 are corrected accordingly. This is an operator-accepted correction within revision 8; no new plan review, code acceptance, or deployment is claimed. |
+| 2026-11-22 | **Real-file continuation-count correction accepted:** the independent private oracle counted 49/297 description-continuation lines on the two originals, not the recorded 66/356; the earlier structure probe counted 48/296 under a slightly different line-grouping definition. The higher figure matches the synthetic fixture parameters. The operator explicitly accepted the factual correction to 49/297, so PDF-A records that count and the original figure remains historical parameterisation. No row, page or value expectation changes; no new Plan review or implementation acceptance is claimed. |
+| 2026-11-22 | **Operator accepted narrowed production-PDF guarantees:** after the second code review confirmed HIGH 1 (owner-path extraction) and HIGH 2 (crafted-PDF source-word omission), the operator chose to accept both as documented residual risks rather than continue a protection redesign and typed-field rewrite. The accepted limits are self-injection into the uploading customer's own account and omission of crafted metadata/postal/postamble residue; the real-file rows/values remain exact, no cross-customer authority or permission change is introduced, and no owner password is supplied. This is an explicit semantic narrowing of the revision-10 owner-prohibition and every-word claims, recorded with operator provenance. A limited contract/evidence review is requested; the historical strict text remains as design rationale. |
 | 2026-11-06 | **Revision 5 approved (operator-directed):** Standard Bank PDF import is deferred to Thread #6 so the CSV/FNB and generic mapped CSV path can be completed and reviewed. PDF remains in the tree but is unreachable: the API returns `pdf_import_deferred` and the UI offers only CSV/ZIP. Proposed revision 4 / C-PDF-2 and the production-PDF brief amendment are deferred, not approved. The operator authorized this direct Plan amendment, the dormant-code treatment and one final CSV-only review. PDF-specific AC1/AC2/AC8 evidence is deferred; CPDF-N6's general prepared-source and seeded-data immutability gaps remain active and are covered by new regressions. |
 
 ## Planning validation and review record
@@ -1463,24 +1469,46 @@ by the six HIGH findings until corrected implementation/evidence exists; the
 two MEDIUM notes are included in the owning phases, not dropped or used to
 authorize another review.
 
-## Proposed revision 4 — C-PDF-2: production Standard Bank template
+## Revision 10 — Production Standard Bank PDF support (approved 2026-11-22)
 
-**PENDING OPERATOR APPROVAL. Not implementation authority.** This proposal
-belongs to Thread #3. Thread #6 remains the related finding tracker, not a new
-programme child or an independently executable plan. It adds no programme work
-unit, changes no child order, and clears no implementation finding or gate.
+**APPROVED IMPLEMENTATION AUTHORITY.** Thread #6 Decision
+`ed5224b4-c390-4912-b804-eeb170c7b956` approved Plan blob
+`d17f9136d919035bd74a21aad26d0bb132e29d98` and brief blob
+`a3ae4c3a92c891f71fd70c557fd6b779da68244f` and directed execution. The earlier
+"pending/proposed" wording is historical. Thread #6 owns this bounded follow-up
+to the resolved Thread #3 delivery. No programme child, child-order change,
+reopening or finding closure is created. The old name **C-PDF-2** means the
+deferred production-template proposal, not another work unit. This section
+replaces its unapproved revision-4 text in place; the original Plan proposal
+and brief proposal remain retrievable as blobs
+`1b2d2e3965243a1c0581b72bd8685eb895129153` and
+`edb223575923a2ad86e5fcfcb7620cc076bf36ba`.
 
-**Activation/precedence after approval:** record the operator's exact decision
-against the full-file Plan and brief blobs; set the current revision to 4 and
-mark the brief amendment accepted. The accepted brief appendix immediately
-takes precedence for its named clauses; later consolidation into the body is
-editorial, not a delay in authority. This proposal then governs the PDF-specific
-rules where they conflict with the original Section 4.2, C-PDF-1 C/D, and I's
-synthetic-only metadata/geometry/file restrictions. It extends only the named
-real productions; A–I's complete traversal, absence-of-side-effects and other
-unchanged rules remain binding. Section 9 below refines original AC1/AC2/AC8;
-other acceptance outcomes and CSV contracts do not change. Preserve prior
-versions and verdicts as history. No approval or activation occurs in this task.
+**Activation/precedence:** the operator's approval is recorded against the exact
+full-file Plan and brief blobs above. Revision 10 and the paired brief appendix
+are accepted; revision 9 remains the prior approved revision. The following
+clause map is exhaustive; earlier text remains preserved as history wherever
+superseded. Implementation must complete every phase before production PDF
+support can be accepted, and the fresh implementation review is still required.
+
+| Existing clause | Revision-10 disposition after approval |
+| --- | --- |
+| Revision 5 sections 2–4; PDF-deferral statements in revisions 6/7 and original sections 1/8/9 | Replace only PDF deferral, the mandatory `pdf_import_deferred` response and exclusion of PDF from the UI/acceptance targets. Keep all delivered CSV/ZIP/generic behavior and its acceptance history. Phase 2 restores backend reachability; Phase 3 restores the existing frontend path. |
+| Original section 4.2 encryption rule; Phase 1 blanket encrypted-PDF negative | Replace with unencrypted or verified empty-user Standard AES-256 V=5/R=6 only; nonempty-user, owner-only, malformed and unsupported protection reject. No password field, owner password or permission alteration. |
+| C-PDF-1 C and I.3 items 4/6: synthetic-only exclusions | Extend only by the complete real metadata, Available balance, legal/footer and terminal-postamble productions below. Unknown metadata still rejects before candidate promotion. Legacy suffix rules remain binding. |
+| C-PDF-1 D, I.3 item 7 and F/I.5 blanket raster negatives | Permit only the fixed, privately confirmed nonfinancial masthead identity/interpretation/placement on complete real-profile text/table pages. Keep all other raster negatives; no size heuristic. |
+| Original section 4.2 header bands; C-PDF-1 B.1/I.3 items 2/3 | Add the separate 612×792 production profile and real gutters. Fix complete-header recognition with residue, all-tolerance semantic checks and full page/crop bounds. Legacy A4 positives keep their own geometry. |
+| C-PDF-1 B.4/I.3 items 4/5; C balance placement/I.3 item 6 | Resolve aligned Summary-as-continuation without source loss, and evaluate closing balance against every later role, not only later candidates. This enforces the existing completeness meaning. |
+| C-PDF-1 E/I.4 phase/file restrictions and CPDF-N2 frontend-copy deferral | Replace only the old “no dispatcher/frontend changes” restriction with Phase 2's narrow dispatcher activation and Phase 3's selector/file-accept/error-copy work. No redesign of review, transport, auth or persistence. |
+| C-PDF-1 G/H/I.1/I.7–8 operational owner/blocking statements | Preserve their historical approval/verdict provenance, but route this follow-up and any wider-scope decision to Thread #6. Old statements blocking Threads #4/#5 are historical: those delivered Threads are not reopened, reblocked or rescheduled here. |
+| C-PDF-1 A–I otherwise | Retain complete word accounting, candidates before value validation, immutable raw fields/positions, bounded local continuations, whole-document reconciliation, rejection before review insertion, unchanged validators/resource bounds and all unmodified positive/negative obligations. Historical review and execution records are not acceptance of revision 10. |
+| Revisions 6–9 and later review pagination/filter record | Preserve the fresh-clock expiry correction, receipt-first replay, alias/confirmed-history/prefix suggestions, exact-date near duplicates, category defaults and `category_decided` → `category_confirmed` provenance, 100/200-row bounds and filters. None is reset to revision-3 behavior. |
+
+The paired brief appendix supersedes only PDF deferral and its expressly named
+PDF clauses. Salary-cycle defaults/retention, category confirmation, suggestion
+sources, reporting/display behavior and the four-child programme stay unchanged.
+Section 9 below refines AC1/AC2/AC8 and adds reachable-PDF evidence for AC9;
+AC3–AC7/AC10–AC13 retain their current approved meanings.
 
 ### 1. Desired outcome and current mismatch
 
@@ -1491,40 +1519,56 @@ losing source text, taking a Balance as a flow, leaking metadata or accepting
 unexplained content. Counts identify the two acceptance samples; they are not
 hardcoded limits for every future statement.
 
-The current parser rejects these inputs before extraction because they are
-encrypted. Its image and preamble policies would reject them next. Its
-header-midpoint bands also begin Payments too early for the real description
-width. Synthetic fixtures reproduce transaction semantics, but their separate
-cover, unencrypted container and A4 layout do not reproduce this production
-template. Both the legacy synthetic controls and new production-profile
-fixtures remain required; real files never become repository fixtures.
+> **Correction pointer (2026-11-22):** the real files were later found to contain
+> 49/297 description-continuation lines, not 66/356. The operator accepted that
+> factual correction; PDF-A and the decision log record it. The 66/356 figure is
+> retained here as the original synthetic-fixture parameterisation, not a
+> current real-file count. Transaction-row counts remain 49/297.
+
+The live product currently rejects every PDF as `pdf_import_deferred` before
+decode/child launch, and the UI prevents PDF selection. The dormant child/parser
+then has its own blanket encryption/raster rejection and synthetic-only forms.
+Its midpoint bands begin Payments too early for the real description width.
+Activating only the parser cannot deliver the outcome: both product gates must
+change in their owning phases. Preserve the legacy synthetic controls and add
+production-profile fixtures; real files never become repository fixtures.
 
 ### 2. Confirmed decisions, inspection and assumptions
 
-**Operator decision:** these two private PDFs are intended production inputs.
-Drafting their support is authorized; implementation and Plan approval are not.
+**Operator decisions:** these two private PDFs are intended production inputs.
+On 2026-11-22 the operator selected “Activate production PDF support
+(Recommended)” and “Yes, accept with empty user password (Recommended)”.
+Thread #6 Decision `a3cf86d7-c14b-40a1-8c3b-cfc3b1998858` explicitly permits
+verified empty-user R6 access, the one known masthead, real forms/geometry and
+the residual corrections, despite the disabled text-copy bit. It expressly
+does **not** approve this rebased Plan/brief or authorize implementation.
 **Existing decisions retained:** ZAR/account/period confirmation, immutable
 source fields, invalid-row skip, exact money/sign/direction, ignored balances,
 customer isolation, bounded child processing and atomic/idempotent persistence.
 
-**Inspected baseline:** branch `plan/02-statement-import`, HEAD
-`496f34ab39a792b090753ed4e2215562fe0ea15d`; parser
-`5215c496da50e33da59778eb444c011e13fdc166`; preceding Plan
-`316244d09c384714727202ee455a41433b8720ca`, runbook
-`2e9c589a7114a95a3bab9d57bc9b882f039b8646`, brief
-`32a45cf3f760112b2a520c4b327c45455427dd06`. Those documentation versions are
-preserved as local Git objects. No application changes were made for inspection.
+**Facts from the current source:** inspected HEAD `96f5888` (the clean starting
+tree on `main`); parser blob `6807b7273bb62a09a9d1145f054d73bd0ec19b25`,
+dispatch blob `743a6e2b482c9a249376780d8c666441390a3657`, runbook blob
+`f920fb07a3ac7b6a821467c0aaeae83cd1bbdfc7`. Work is now on local branch
+`plan/06-production-pdf-rebase`. Finished Explorer research
+`ses_dfd4859c7ffeBO2QtlOTGoABvY` preceded drafting; direct reads checked the
+following branches, tests, bounds and commit guards. This is source inspection,
+not runtime reproduction of the residual findings.
 
-Explorer `ses_e5319e71efferV3tB4g3JENixR` failed on a network lookup and supplies
-no findings. Finished direct reads covered the full current PDF parser,
-dispatch/child/runner, authenticated parse-before-store endpoints, current
-fixtures/parser/safety/process/contract tests, readback/count/log helpers, and
-the installed PdfPig 0.1.16 API documentation and version-tagged upstream source.
-This completes source inspection without relying on the failed scan.
+| Concern | Live evidence and consequence |
+| --- | --- |
+| Product entry and side effects | `StatementImportEndpoints.cs:90–187` authenticates, bounds multipart/options and checks owned active account before `StatementParser`; inspect is stateless and prepare calls the store only after a successful complete parse. Keep that order. |
+| PDF disabled | `StatementParser.cs:14–20,36,74` rejects before the existing `PdfParserRunner` switch arms. `import-workspace.tsx:128–140,374–396` rejects PDF selection and omits its format/accept entry. Both need narrow reactivation. |
+| Dormant recognition | `StandardBankPdfParser.cs:104–109,147–150,170–177` rejects encryption/raster. Its merged traversal already assigns source lines, checks headerless lines individually and retains flow-only candidates. Do not restore the earlier heuristic parser or old snapshot line references. |
+| Residual branches | Header discovery still requires exactly six/seven words (`713–869`); compatibility has the 0.01 early return (`769–805`); metadata checks an exact first token (`640–650`); pre-header Summary precedes continuation (`275–331`); bounds omit outer page edges (`190–193,637–638`); closing-balance placement uses final candidate indexes (`428–441`). These are the source-level targets, not newly cleared findings. |
+| Tests today | `StatementImportContractTests.cs:1248–1424` proves deferral, not active parser rejection or valid PDF review. Restore exact semantic assertions only after activation, retaining no-effect/privacy coverage. Existing general prepared-source/seeded-state regressions remain. |
+| Later contracts | `StatementImportStore.cs:2354–2373,2483–2504` validates tags/categories then uses fresh database time before new effects and final commit. Included-row insertion writes each row's category provenance. No store/schema change is needed. |
+| Stack and shared bounds | .NET 10, pinned PdfPig 0.1.16; Next.js 16.4.6/React 19, Vitest and Playwright. `ParserAdmission` already shares two slots across CSV/PDF and keeps a permit until worker termination. Preserve it, 30 seconds and all `ImportLimits`, including current 100-default/200-max page size. |
 
-Private read-only extraction used already installed PDF.js 4.10.38 outside the
-repository, without rendering, external uploads or output of source values or
-filenames. This is **structural extraction**, not product-parser acceptance:
+**Attributed private evidence, not repeated in this rebase:** the deferred
+proposal recorded a private PDF.js 4.10.38 structural extraction. The table below
+retains only its measurements, not new product acceptance or a claim that the
+Architect reopened private statements:
 
 | Structural property | Observed production template |
 | --- | --- |
@@ -1533,31 +1577,48 @@ filenames. This is **structural extraction**, not product-parser acceptance:
 | Raster | One identical 656×225 asset on every page, placed about X=18.4–175.8, Y=714.3–768.3. No other raster was observed. Asset sameness/placement is established; its decorative content still needs the private confirmation in Section 12. |
 | Columns | Date/Description start near X=38.3/95. Header right edges near X=358.6/429.4/500.2/579.6 for Payments/Deposits/Bank fees/Balance. Populated amount runs end near X=358.5/429.4. |
 | Description separation | Inspected main-line extents reach X=287.1 and X=251, past the old midpoint boundary but before the real amount area. Smallest inspected gap to a populated amount run was about 45.9 points. No overlapping-glyph amount guess is justified. |
-| Protection | Empty-password AES-256, Standard handler V=5/R=6, reported by the prior private inspection. New structural extraction opens with the empty password. It reports **text-copy permission disabled** on both inputs. |
+| Protection | Prior private inspection reported empty-password AES-256, Standard handler V=5/R=6, and **text-copy permission disabled** on both inputs. Independent empty-user verification through the product remains required. |
 | Page roles | First-page Account number/Account holder/Product name and five-line Address block; abbreviated metadata later; Available balance above each table; a terminal statement notice, Statement summary with Payments/Deposits totals, closing message and legal/page footers. |
 
-The request supplies the 66/356 continuation expectations. Product extraction
+The brief supplies the 66/356 continuation expectations. Product extraction
 of those counts, every date/description/flow and every source position remains
 **NOT RUN**. A prior diagnostic CSV is not an independent value oracle.
+
+> **Correction pointer (2026-11-22):** the 66/356 expectation above is the
+> original synthetic-fixture figure. The accepted real-file count is 49/297
+> description-continuation lines. See PDF-A and the decision log.
+
+**Assumptions, not evidence:** the two documented files represent only this
+finite profile, not every bank variant; prior measurements still need comparison
+with the pinned extractor's glyph baselines. **Missing evidence inputs:** exact
+nonfinancial asset encoding digests/parameters, fixed public literals and an
+independent private row oracle are not present in Git. Phase 1b begins with a
+private capture/confirmation gate before those profile constants are coded.
+These are prescribed evidence-gathering steps, not permission to invent values
+or an unresolved choice of broader layout/password policy. If private access,
+classification or independent comparison is unavailable, stop and record
+UNVERIFIED; the product cannot be accepted from this document alone.
 
 ### 3. Explicit scope and non-goals
 
 In scope: the existing six-column preset's production container/profile,
 residual C-PDF-1 findings, synthetic representations of this profile, private
-acceptance evidence and necessary brief/runbook corrections. Supporting real
-first-page metadata and terminal summary shapes is an explicit scope extension.
+acceptance evidence, narrow backend/UI reactivation and necessary operating
+documentation. Supporting real first-page metadata and terminal summary shapes
+is an explicit scope extension. This authoring task changes only the Plan/brief.
 
 No OCR, renderer, image interpretation, generic PDF mapping, source-object
-inventory, new service/dependency, replacement of PdfPig, frontend/schema,
-HTTP/child-protocol/password field, CSV policy, ledger/duplicate policy,
+inventory, new service/dependency, replacement of PdfPig, schema change,
+HTTP/child-protocol/password field, frontend redesign, CSV policy, ledger/duplicate policy,
 historical-data repair, publication or later-Thread work. Do not learn a new
 layout from whichever document happens to pass. The profile is finite code/data
 for this preset, not a registration framework or a customer-editable grammar.
 
 ### 4. Target invariants and architecture
 
-The original Plan Section 4.1 invariants remain intact. The following are
-**explicit semantic changes to the accepted input contract**, requiring approval:
+The original Plan Section 4.1 invariants and revisions 6–9 remain intact. The
+following input-policy changes were selected by the operator as scope and are
+proposed here as precise contracts requiring approval of these artifact versions:
 
 - Replace “reject all encryption, including empty password” with support for
   unencrypted inputs and **Standard AES-256 V=5/R=6 with verified empty USER
@@ -1577,7 +1638,22 @@ accounted for exactly once, or the entire document rejects. A recognized slot
 consumes its own spans only. Metadata is not transaction context. Balances and
 summary totals never become amount fallback, output or identity.
 
+> **2026-11-22 operator amendment:** the every-word guarantee is narrowed for
+> the production profile. The real-profile rows and values are exact, but
+> crafted extra words in metadata, opening-balance value, postal/address or postamble slots may be
+> omitted rather than rejecting. See the operator risk acceptance in the review
+> record. Unsupported layouts and unexplained text outside those slots still
+> reject.
+
 #### 4.1 Protection gate inside the existing child
+
+> **2026-11-22 operator amendment:** the strict "do not use owner access"
+> guarantee is narrowed. The guard verifies the empty-user U/UE/Perms profile,
+> but a crafted PDF with an empty owner password may be opened through the
+> owner path. This is an accepted self-injection limitation, not a
+> cross-customer authority. No owner password is supplied or permission changed.
+> The historical design rationale below remains for context; the current
+> accepted limitation is recorded in the operator risk acceptance.
 
 Remove raw `/Encrypt` substring rejection as the security authority. Use pinned
 PdfPig's structured encryption dictionary and an explicit empty-password open;
@@ -1623,13 +1699,13 @@ suite. A `/Encrypt` word in ordinary unencrypted text is not itself protection.
 Malformed ordinary structure may return `unsupported_layout`; actual required
 password/unsupported protection returns the existing `encrypted_pdf` code.
 
-**Approval decision about permission bits:** the target files disable text-copy
-permission. This proposal permits their account import after empty-user
+**Approved scope decision about permission bits:** the target files disable
+text-copy permission. The operator explicitly permitted account import after empty-user
 authentication despite that owner-set advisory flag. It does not change any PDF,
 recover an owner password or grant owner operations. Backend customer/account
 authorization still decides destination ownership; PDF metadata/permission bits
-never grant application authority. If the operator does not approve this
-specific decision, these exact files cannot be called supported under this plan.
+never grant application authority. This records the 2026-11-22 decision rather
+than asking it again; it is not approval of this Plan or proof of extraction.
 
 #### 4.2 Known decorative asset, not a size heuristic
 
@@ -1744,7 +1820,7 @@ form one raw flow cell. Numeric identifiers within the description stay there.
 Cell occupancy, not successful money recognition, establishes a candidate;
 garbage/missing/zero/multiple flow cells retain existing validation behavior.
 The existing magnitude validator already trims whitespace after a leading
-sign (`StatementText.cs:327–354`), so separated minus/number runs need no shared
+sign (`StatementText.cs:321–363`), so separated minus/number runs need no shared
 CSV/money contract change; preserve their raw mapped text.
 An amount that cannot be separated unambiguously from description text rejects
 the layout; do not select the first/last number, subtract balances, split a
@@ -1778,7 +1854,7 @@ last page's row count. Match the complete ordered text/field/spacing shape,
 not a standalone mid-page Summary label. No late transaction, continuation,
 header restart or unrelated text may disappear into this suffix.
 
-That complete production is a new approved exclusion if revision 4 is accepted;
+That complete production is a new approved exclusion if revision 10 is accepted;
 it does not make all headerless or mid-page summary text safe. Its totals are
 not retained or used to correct transactions. Legacy terminal-total and
 opening/closing-balance productions still obey their complete suffix rules;
@@ -1823,18 +1899,96 @@ policy is allowed. Re-entry/cancellation/retry semantics stay unchanged.
 
 ### 7. Phases, dependencies and exact scope
 
-Implementation starts **only after explicit approval** of revision 4 and its
-brief amendment. Correction order within this existing work unit is **Phase 1a
-→ Phase 1b → Phase 2 → Phase 4**. Phase 3 frontend work is not reopened. These
-are semantic dependencies, not worker assignments or new review points.
+Implementation starts **only after explicit approval** of revision 10 and its
+paired brief amendment and the operator's direction to execute. Dependencies
+are **Phase 1a → Phase 1b → Phase 2 → Phase 3 → Phase 4**. These local phase
+numbers describe the PDF follow-up, not a restart of completed original phases
+or revision 6's completed Phase 5. Each checkbox starts pending. Record actual
+implementation date, caller session ID, exact source/test/assembly identities,
+commands/results and final independent-review status in this Plan and Thread #6.
+No phase completion or green count grants publication, setup or deployment.
 
 **Phase 1a — close residual traversal defects.** Dependency: approval and the
-reviewed baseline. Production scope is `backend/Imports/StandardBankPdfParser.cs`.
+current baseline above. Production scope is `backend/Imports/StandardBankPdfParser.cs`.
 Test scope is `backend/tests/argus.Server.Tests/StatementParserTests.cs`,
 `StatementSafetyTests.cs`, `StatementParserProcessTests.cs` and
 `StatementFixtureBuilder.cs`. Establish the residual matrix in Section 9 before
 any widened container policy is considered complete. Do not mask these failures
 by rejecting all real-profile documents or disabling continuations.
+
+- [x] For the conflicting-header finding (CPDF-R1), enumerate complete ordered
+  header cores even with same-line residue and reject conflicts before stale
+  bands are used. Every tolerance, including shifts below/at/above 0.01 points,
+  must still check semantic assignment. Preserve deposit direction and prohibit
+  Balance-as-fees. A compatible header's unexplained Balance-only residue rejects;
+  deliberately correct the old process-test expectation rather than consuming
+  the header labels as a defective transaction.
+- [x] For the metadata finding (CPDF-R2), recognize attached/split label syntax
+  before pre-header candidate promotion. Unknown Account/Customer/Branch fields
+  reject even with a flow token. Ordinary body merchant text remains source text.
+- [x] For the lost-continuation finding (CPDF-R3), retain an aligned Summary
+  fragment eight points below the above-header candidate, or reject real
+  ambiguity. A true preamble Summary still closes the prior page's target.
+  Preserve the single consumable next-page bridge and ordinary local spacing.
+- [x] For the page-bounds finding (CPDF-R4), check finite full glyph and image
+  extents against both media/crop lower and upper bounds before any role is
+  consumed. Test out-of-frame top/footer labels and valid near-edge controls.
+- [x] For the closing-balance finding (CPDF-N5), inspect the entire ordered
+  suffix, including later Summary/period/header-only restarts. Only a complete
+  permitted terminal suffix may exclude a closing balance. Do not change the
+  later-candidate-only defect into a wildcard real-summary exception.
+- [x] Add independent real-byte regressions and capture before-fix failure and
+  after-fix success on the current parser, including the published child. Keep
+  A–I's other regressions; do not claim an old failure was rerun if it was not.
+
+**Phase 1a execution record (2026-11-22).** Execution session
+`ses_1795341550390478745_7519fedc`, branch `plan/06-production-pdf-rebase`,
+HEAD `96f58881869673b219ad4145a8370b5425ca65f6`. This is a progress annotation
+on approved Plan revision 10 (blob `d17f9136d919035bd74a21aad26d0bb132e29d98`);
+it changes no clause of the approved contract.
+
+Changed source and tests, with final blobs:
+
+- `backend/Imports/StandardBankPdfParser.cs` — `a0d33ef2fdb6a6df8f2f49d2483e95babda98764`.
+- `backend/tests/argus.Server.Tests/StatementParserTests.cs` — `c716c37df2c90c130277172ac512422cbdc4a0e9`.
+- `backend/tests/argus.Server.Tests/StatementSafetyTests.cs` — `d83e3f4c3eea4368be458403753edc40da10a59a`.
+- `backend/tests/argus.Server.Tests/StatementParserProcessTests.cs` — `9410c65293511ca56dd4bbe8573cfec47b9d525d`.
+- `backend/tests/argus.Server.Tests/StatementFixtureBuilder.cs` — unchanged (`de7743283293d92714508d8a4419e1c3d6cf0524`).
+
+What changed: a complete ordered header core is found inside a line and any
+same-line residue rejects; every header tolerance, including a shift that moves
+a boundary across a word, runs the semantic column check; attached or split
+Account/Customer/Branch labels reject before candidate promotion while body
+merchant text stays source text; an aligned description fragment is attached
+before structural Summary recognition while a true preamble Summary still closes
+the prior bridge; the media/crop frame intersection is validated for every glyph
+and image with a measured six-point glyph-ascent allowance; and a closing balance
+is terminal only when no later candidate, opening balance or structural role
+follows.
+
+Before-fix evidence: old parser blob
+`6807b7273bb62a09a9d1145f054d73bd0ec19b25`. Twelve new regression cases failed
+across eight methods, including both `ClosingBalanceBeforeALaterStructuralRoleRejects`
+inputs, the attached metadata forms, the lost continuation, the out-of-frame
+text, the 0.01 and 0.02 boundary shifts, and the published child. The split
+`Account :` control and the 0.03 boundary shift passed on both parsers and are
+retained as controls.
+
+After-fix evidence (working directory `backend/`):
+
+- `dotnet format argus.Server.csproj --verify-no-changes` — pass.
+- `dotnet format style argus.Server.csproj --diagnostics IDE0005 --severity info --verify-no-changes` — pass.
+- `dotnet format tests/argus.Server.Tests/argus.Server.Tests.csproj --verify-no-changes` — pass.
+- `dotnet format style tests/argus.Server.Tests/argus.Server.Tests.csproj --diagnostics IDE0005 --severity info --verify-no-changes` — pass.
+- `dotnet test tests/argus.Server.Tests -warnaserror --filter 'FullyQualifiedName~StatementParser|FullyQualifiedName~StatementSafety|FullyQualifiedName~ParserAdmissionTests'` — 161 passed, 0 failed.
+- `dotnet build -c Release -warnaserror` — 0 warnings, 0 errors.
+- `dotnet publish argus.Server.csproj -c Release --no-restore` — success.
+
+Limits: no private statement was opened; the Phase 1b private input gate has not
+started; no authenticated API/UI evidence, commit, push, publication or
+deployment was performed. CPDF-R1–R4 and N5 are corrected in the parser, but the
+previous PDF implementation NO-GO remains until a fresh independent
+implementation review of the active path.
 
 **Phase 1b — implement the production profile as one coherent parser change.**
 Dependency: the Phase 1a behaviors. Scope is the same parser, with explicitly
@@ -1849,76 +2003,637 @@ synthetic AES-256 R6 bytes and fixed known-answer vectors with provenance;
 runtime/CI must not install or invoke another PDF tool/dependency. Test asset
 identities are fixed constants, never a production test switch.
 
+- [x] **Private input gate, before coding profile constants:** after the
+  operator authorizes the designated files and private procedure, use only the
+  two documented samples. Privately confirm that the repeated asset is purely
+  nonfinancial decoration and distinguish fixed issuer literals from variable
+  fields. Capture the finite witnessed encoded digests/interpretation parameters
+  and exact public literals for the productions in Section 4.3; calibrate glyph
+  baselines inside its stated tolerances. Freeze a sanitized profile manifest
+  outside the repository, containing no customer strings or raw image/PDF; only
+  confirmed nonfinancial constants enter the fixed profile code. Record gate booleans and
+  safe profile/code identities on Thread #6. Unexpected encodings, financial
+  image content, wider tolerance or an unlisted production stops for a decision;
+  no upload-learned allowlist. This gate must pass before profile implementation.
+- [x] Implement the empty-user R6 guard, known-asset rule, complete real page
+  forms/gutters and terminal postamble together. Keep structured protection
+  validation before pages, full text accounting and whole-document success.
+- [x] Prove independent R6 known-answer/fixture controls, including empty-owner
+  with nonempty-user rejection and copy-disabled empty-user success. Ordinary
+  `/Encrypt` text is not an encryption detector. Preserve older unsupported
+  protection negatives. Deliberately replace the obsolete raw-substring safety
+  assertion with structured dictionary/protection and ordinary-text controls;
+  a malformed non-encrypted document need not be labelled encrypted. Runtime
+  uses only the pinned package/framework crypto.
+- [x] **Specialist Plan-review note 1 (MEDIUM, no gate blocked):** add
+  independently produced controls with correctly sized but corrupted encryption
+  fields, especially UE/Perms, including the library's owner-first opening path.
+  Record exactly which structural and consistency checks the bounded empty-user
+  guard establishes. Length checks plus U-hash validation do not prove integrity
+  of unexercised fields. If the existing malformed-protection rejection promise
+  requires responsibilities beyond the approved validation guard, stop for an
+  operator/Architect decision; do not silently add a decryptor or accept
+  unsupported protection. This instantiates the existing rejection/evidence
+  contract rather than claiming a reproduced bypass or changing the design.
+- [ ] **Partly complete — remaining evidence ledger required.** Add synthetic
+  612×792 4/18-page forms with invented field values, all-page tables, exact
+  row/continuation manifests, long numeric descriptions, separate signs,
+  valid/invalid/zero/multiple flows and complete postambles. Keep legacy A4
+  fixtures and their own geometry, never a fallback from failed real forms.
+  Test all asset replacements/placement/mask and missing-text negatives from
+  Section 9 through real bytes and the published child. Covered so far: the
+  4/18 forms, asset replacement/placement/orientation-input variants, missing
+  text and the published-child path. UNVERIFIED: duplicate-image, missing-font
+  and some last-page-image negatives; an exact independent synthetic manifest
+  rather than count/date assertions. See the remaining-evidence ledger below.
+
+**Phase 1b progress record (2026-11-22).** Execution session
+`ses_1795341550390478745_7519fedc`, branch `plan/06-production-pdf-rebase`,
+HEAD `96f58881869673b219ad4145a8370b5425ca65f6`. The private input gate
+passed after the operator confirmed the masthead asset and the fixed/private
+literal split. This is a progress annotation on approved Plan revision 10
+(blob `d17f9136d919035bd74a21aad26d0bb132e29d98`); it changes no clause.
+
+Changed source and tests, with final blobs:
+
+- `backend/Imports/StandardBankPdfParser.cs` — `ff89b6db0e6fb49532f10fa83010b195456b5b63`.
+- `backend/Imports/StandardBankPdfProfile.cs` — `c8e50b30d5b038fc9cae5746ce497877c266946c`.
+- `backend/Imports/PdfEmptyUserAccess.cs` — `147e3dbf28ed516986c7fee6f5d31d7ededca7fa`.
+- `backend/InternalsVisibleTo.cs` — `b4f024c5fe8d7af81e2c91be03c2451b2bd600d9`.
+- `backend/tests/argus.Server.Tests/PdfEmptyUserAccessTests.cs` — `8bdbafbc811e0aa8c5e6ed0cc3a4b9a365e17bc5`.
+- `backend/tests/argus.Server.Tests/StandardBankPdfProductionTests.cs` — `ac3ecf2e04913f5b13834406585918a7b2ae8cff`.
+- `backend/tests/argus.Server.Tests/StatementSafetyTests.cs` — `dbd2122a6b92cee3621d58cfba1d44fe0f67d2d7`.
+- `backend/tests/argus.Server.Tests/StatementParserTests.cs` — `c716c37df2c90c130277172ac512422cbdc4a0e9`.
+- `backend/tests/argus.Server.Tests/StatementParserProcessTests.cs` — `9410c65293511ca56dd4bbe8573cfec47b9d525d`.
+
+The empty-user guard validates the Standard V5/R6 AESV3 profile and the decoded
+U/O/UE/OE/Perms lengths, then applies Algorithm 2.B to the empty user password.
+Independent Python vectors reproduce both private U hashes; the guard verifies
+both private files. The production path validates the 612x792 frame, the one
+DCTDecode masthead (digest and bounds), the fixed header gutters, the
+first/later-page metadata sequence, the opening balance row, the table rows and
+continuations, and the complete terminal postamble/footer. Both private samples
+parse through it: 49/297 rows, all dates inside the printed period, no Balance
+retained, source pages 4/18.
+
+Pinned PdfPig 0.1.16's strict header parser rejects `%PDF-2.0`. The operator
+approved a temporary parse-copy normalization to `%PDF-1.7`; the original bytes
+are unchanged and strict body parsing remains. The real profile also established
+the exact `Address:` heading, colon-separated account labels, the later-page
+split title (`STANDARD BANK` plus `<n> month statement`), and the
+`STATEMENT OPENING BALANCE` row.
+
+Evidence: 167 focused tests pass; four `dotnet format` checks pass; Release
+build has 0 warnings and 0 errors; Release publish succeeds. Remaining Phase 1b
+controls are the synthetic 612x792 4/18-page fixtures, synthetic R6 PDFs with
+corrupted/owner-first protection controls, and the asset replacement,
+relocation, mask and missing-text negatives. Phases 2–4 and the final independent
+implementation review remain.
+
+Privacy correction: the first private end-to-end failure displayed row objects
+containing transaction descriptions in the local test transcript. The test was
+changed to count-only assertions, the transient shell output was deleted, and no
+value was written to Git, HiveMind or application logs. The private raw files
+remain outside Git in a restricted folder.
+
+**Phase 1b completion record (2026-11-22).** The R6 known-answer/vector controls,
+the synthetic R6 fixtures, the Specialist-note corrupted-field/owner-first
+controls, the synthetic 612x792 four-page and eighteen-page fixtures, and the
+asset replacement, placement, rotation, mask and missing-text negatives are
+implemented. The synthetic fixtures parse 49 and 297 rows through the direct
+parser; the four-page synthetic fixture and both real private samples also pass
+through the real parser child.
+
+The synthetic R6 set covers an accepted empty-user copy-disabled file, a
+nonempty-user/empty-owner file, corrupted U, corrupted UE, corrupted Perms and a
+wrong revision. The guard validates the user hash, the UE-derived file key and the
+Perms consistency block; the real files pass all three. Known-answer vectors come
+from an independent Python 3/cryptography implementation. The ordinary `/Encrypt`
+content word is not treated as protection, and the older RC4 fixtures remain
+rejections.
+
+Documented limitations for the final implementation review: the O and OE field
+contents are not validated because the owner password is never supplied, so a
+same-length corruption of those owner-path fields would not be detected by the
+empty-user guard; the duplicate, image-only/scanned-body, missing-font and
+last-page-image-residue negatives from PDF-C are not yet all individually
+covered. These are open evidence items, not Phase 2 activation blockers. The
+current source/test blobs, exact test counts and command results are recorded on
+Thread #6.
+
 Phase 1a/1b commands, working directory `backend/`:
 
 ```bash
 dotnet format argus.Server.csproj --verify-no-changes
+dotnet format style argus.Server.csproj --diagnostics IDE0005 --severity info --verify-no-changes
 dotnet format tests/argus.Server.Tests/argus.Server.Tests.csproj --verify-no-changes
-dotnet test tests/argus.Server.Tests --filter 'FullyQualifiedName~StatementParser|FullyQualifiedName~StatementSafety'
-dotnet build -c Release
+dotnet format style tests/argus.Server.Tests/argus.Server.Tests.csproj --diagnostics IDE0005 --severity info --verify-no-changes
+dotnet test tests/argus.Server.Tests -warnaserror --filter 'FullyQualifiedName~StatementParser|FullyQualifiedName~StatementSafety|FullyQualifiedName~ParserAdmissionTests'
+dotnet build -c Release -warnaserror
 dotnet publish argus.Server.csproj -c Release --no-restore
 ```
 
-**Phase 2 — authenticated synthetic boundary evidence.** Dependency: completed
-parser profile and residual regressions. Edit only
-`backend/tests/argus.Server.Tests/StatementImportContractTests.cs`; use existing
-count/readback/log helpers and test-local snapshot utilities. No production
-persistence/schema/auth change. Use only the configured isolated test database.
+**Phase 2 — reactivate the backend and prove authenticated synthetic behavior.**
+Dependency: Phase 1a/1b including the private input gate. Production scope is
+`backend/Imports/StatementParser.cs` only: remove the PDF deferral gate and use
+its existing PDF runner switch arms with the existing shared admission,
+cancellation and limits. Tests are
+`backend/tests/argus.Server.Tests/StatementImportContractTests.cs` and
+`ParserAdmissionTests.cs`, using their existing helpers/test-local snapshots.
+No endpoint, store, model, schema, identity, category or authentication edit.
+
+- [x] Replace the PDF-specific deferral assertions with real inspect/prepare
+  success, exact supported rejection codes, invalid-row review/skip/commit and
+  privacy outcomes through the actual child. Explain each obsolete assertion
+  against this explicitly changed contract; do not delete or skip the cases.
+  Supported uploads no longer return `pdf_import_deferred`; retain that legacy
+  error's enum/client compatibility without using it to satisfy PDF tests.
+- [x] Prove both endpoints reject unknown/foreign accounts identically before
+  parser invocation, preserve archived-account/ZAR/period checks and enforce all
+  multipart/customer-rate/shared-admission limits. Exercise cancellation and
+  worker-lifetime cleanup without changing `ParserAdmission` or the runner.
+- [x] Close the PDF evidence gap (CPDF-N6): seed statements, transactions,
+  receipts/identities/tag links, categories and an unrelated live review before
+  rejected inspect and prepare. Compare all seeded fields/counts/account
+  versions afterwards and require no new review payload. Session/rate accounting
+  is not a financial side effect. Capture immutable source rows/IDs, review
+  version and summary/hash before a refused invalid-row commit and compare
+  separate reads afterwards; then explicitly skip and commit with reconciled
+  counts. Preserve the already merged general immutability regressions.
+- [x] Vary ordinary Balance values in otherwise equal PDFs. Compare mapped and
+  interpreted fields plus canonical identity/fingerprint inputs, excluding newly
+  allocated row/review IDs. Also vary synthetic metadata, Available balance and
+  summary values; no canary may reach responses, stored rows or captured logs.
+  Absence-only/count-only assertions are insufficient.
+- [x] Exercise PDF review defaults, customer category change/clear, unavailable
+  selections and the existing per-row confirmation provenance; untouched or
+  undetermined rows stay unconfirmed, changed/cleared rows preserve their
+  `category_decided` provenance. Preserve exact-date near duplicates, cross-format
+  occurrence suppression, repeat override, expiry after waits, receipt replay,
+  hidden-record protection and deletion/reimport via existing regression suites.
+  No commit-wide category-confirmation requirement is introduced.
+
+Commands from the repository root, after privately verifying that the existing
+`ARGUS_TEST_DATABASE_URL` targets dedicated local `argus_test` (never print it):
 
 ```bash
-dotnet test tests/argus.Server.Tests --filter 'FullyQualifiedName~StatementImportContractTests'
-dotnet test tests/argus.Server.Tests
+node scripts/run-backend-tests.mjs --filter 'FullyQualifiedName~StatementImportContractTests|FullyQualifiedName~StatementImportConcurrencyTests|FullyQualifiedName~StatementImportFaultTests|FullyQualifiedName~StatementImportMatchingTests'
 ```
 
+The wrapper reads only the explicit isolation-test configuration, supplies the
+single test URL and adds `-warnaserror`. Missing prerequisites block evidence;
+they do not authorize bootstrap, role/schema setup or development-data reset.
+
+**Phase 2 execution record (2026-11-22).** Execution session
+`ses_1795341550390478745_7519fedc` removed the PDF rejection gate from
+`backend/Imports/StatementParser.cs`. The existing `PdfParserRunner` singleton
+held a second, private `ParserAdmission`, so `backend/Program.cs` now constructs
+that singleton with the same admission instance the import endpoints and CSV
+paths use. This registration change is a bounded wiring correction: the Plan
+named `StatementParser.cs` only, but the shared-admission clause could not hold
+without it. No endpoint, store, model, schema, identity, category or
+authentication behavior changed.
+
+The authenticated contract suite replaces every deferral assertion with real
+behavior. It covers PDF inspect and prepare through the actual child, exact
+`unsupported_layout`/`text_pdf_required` reasons, review and invalid-row skip
+before commit, a seeded no-effect comparison (statements, transactions,
+identity keys, commit receipts, tag links, categories, the account row and an
+unrelated live review), source-row/version/hash read-back after a refused
+invalid-row commit, balance/metadata/available-balance/summary canaries that
+must not reach responses, stored rows or logs, and PDF category defaults,
+change, clear, unavailable-selection rejection and commit provenance. A new
+admission test proves PDF dispatch uses the shared admission. The legacy
+`pdf_import_deferred` enum/client mapping remains for mixed-version
+compatibility, but the active backend no longer returns it.
+
+Evidence: full backend battery `node scripts/run-backend-tests.mjs` passed
+**522 tests with 1 existing performance-category skip**; the focused
+`StatementImportContractTests` suite passed **56/56**; all four `dotnet format`
+checks passed; Release build has 0 warnings/0 errors; Release publish succeeded.
+No commit, push or deployment occurred.
+
+**Phase 3 — restore the existing upload workflow, not redesign it.** Dependency:
+Phase 2's active backend contract. Exact application scope is
+`frontend/src/app/imports/import-workspace.tsx`, `import-options.ts` and
+`frontend/src/lib/server/import-actions.ts`. Exact test scope is
+`frontend/tests/app/imports/import-workspace.test.tsx`,
+`frontend/tests/app/imports/import-options.test.ts`,
+`frontend/tests/lib/server/{backend-client,import-actions}.test.ts` and
+`frontend/tests/app/imports/upload/route.test.ts`. No frontend dependency,
+transport/route implementation, server client DTO, review-workspace, auth,
+configuration or visual-refresh redesign is included.
+
+- [x] Add the Standard Bank PDF option and `.pdf`/`application/pdf` accept entry;
+  remove unconditional PDF selection rejection. Keep explicit source selection,
+  generated selected-file labels and safe multipart name, byte limits, busy/cancel
+  states, account choice and required ZAR/coverage confirmation. Selecting a PDF
+  is not authorization to use a different preset or guess a layout.
+- [x] Reuse `standard_bank_pdf` and existing `format: standard_bank` options.
+  Preserve printed-period proposals and explicit inclusive date confirmation.
+  Provide/send the existing optional `century` configuration when needed for
+  unresolved two-digit years, requiring re-inspection after a changed choice;
+  no generic PDF mapping, password input or new request field. Test initial
+  inspect, changed dates/century, re-inspect, prepare and review navigation.
+- [x] Correct the existing copy limitation (CPDF-N2) in both upload/action error
+  maps: `encrypted_pdf` means a nonempty user password or unsupported protection;
+  `text_pdf_required` covers missing readable text **or an unsupported image**,
+  not proof that every rejected file lacks a text layer. Update supported-format
+  guidance without promising arbitrary Standard Bank PDFs. Keep legacy deferred
+  error handling compatible for mixed versions, without advertising it as the
+  newly supported path. Include action/client classification and upload-route
+  success/error/Origin/limit/cancellation tests; credentials remain server-only.
+- [x] Keep review category controls/defaults/confirmation, tag intent, pagination,
+  duplicate decisions, stale/expiry/receipt behavior and the merged workspace
+  styling unchanged. Component/route tests are not an authenticated live import.
+
+Commands from `frontend/`:
+
+```bash
+npm run format:check
+npm run lint
+npm run test -- tests/app/imports/import-workspace.test.tsx tests/app/imports/import-options.test.ts tests/lib/server/backend-client.test.ts tests/lib/server/import-actions.test.ts tests/app/imports/upload/route.test.ts
+npm run build
+```
+
+**Phase 3 execution record (2026-11-22).** The Imports workspace now offers
+`Standard Bank PDF`, accepts `.pdf`/`application/pdf`, and selects the PDF
+source when a PDF is chosen; the unconditional rejection is removed. A
+PDF-only, pre-inspection optional century control sends the existing `century`
+parser option and clears the preview when changed, so the customer inspects
+again. The upload and server-action error maps now say that `encrypted_pdf`
+means a nonempty user password or unsupported protection, and that
+`text_pdf_required` covers missing readable text or an unsupported image. The
+legacy deferred message remains mapped but is no longer advertised. Review
+category, tag, pagination, duplicate and styling behavior is unchanged.
+
+Evidence: `npm run format:check` and `npm run lint` pass; the full frontend
+unit/component suite passed **369 tests in 40 files**; the production build
+succeeded; Playwright smoke passed **18/18**. Component tests cover PDF
+selection and the century/re-inspection flow; request-option tests cover the
+PDF parser configuration. These are component/route results, not an
+authenticated live import.
+
+**Post-review preview-date follow-up (2026-11-22).** A user report showed
+`date?` in the PDF import preview. The date cell was the unresolved
+`transaction_date`, which is null when a statement uses two-digit years and no
+century or confirmed coverage is supplied; the parser intentionally does not
+borrow the printed issue date as period authority. The UI now defaults the PDF
+two-digit-year century to 2000 with an explicit 1900 note, renders unresolved
+cells as `Date unresolved`, and shows a status message directing the user to
+check the century and inspect again. The `date?` placeholder is gone. A
+component test covers the unresolved preview; frontend format/lint, **370**
+tests, production build and **18/18** Playwright pass. This is UI guidance, not
+a change to the approval or review status; the strict-contract NO-GO remains
+historical. A second operator-requested layout change (2026-11-22) widened the
+review description column to 24rem and removed the `max-w-md` cap, and reordered
+the review table to Row, Date, Description, Amount, Tags, Category, Status,
+Actions so Tags precedes Category and Status follows it. The same frontend lint,
+**370** tests and production build pass.
+
+**Post-review table-width follow-up (2026-11-22).** Two user reports showed
+Category and then Status clipped at the right edge of the review table. The
+table now carries a `finance-review-record-table` class, uses 0.5rem horizontal
+cell padding, and budgets 66rem across its eight columns: Row 4.5rem, Date 6rem,
+Description 20rem, Amount 6rem, Tags 8.5rem, Category 10rem, Status 5.5rem and
+Actions 5.5rem. The 20rem description remains much wider than the pre-change
+automatic column but is 4rem narrower than the earlier 24rem request; that
+reduction is what brings Status and Actions inside the desktop frame. Above
+70rem viewport width the table frame also cancels the page's horizontal padding
+and removes its 100% width cap, letting the table use the full 6xl container
+width. At and below 70rem viewport width the review table instead reuses the
+stacked labelled-row layout, so no value or control is clipped. An authenticated
+Playwright 1440px assertion now checks that the Actions cell's right edge stays
+inside the table frame. Review decisions, validation, category defaults and tag
+intent are unaffected.
+`npm run format:check`, `npm run lint`, **370** tests in 40 files, the production
+build, and the full authenticated Playwright suite (**18 passed**, including
+light/dark 320px, 375px and 1440px journeys and the stacked review layout) all
+pass. These are local component/build and synthetic-backend results, not a live
+import or deployment.
+
 **Phase 4 — private sample acceptance and operating evidence.** Dependency:
-Phase 1/2 results and the operator's approved private access/evidence procedure.
-Update `docs/statement-import-runbook.md` and operational Plan/Thread records;
-consolidate the already accepted brief wording in `docs/product-brief.md`.
+Phases 1–3 results and the operator's approved private access/evidence procedure.
+Update `docs/statement-import-runbook.md`, `docs/repository-layout.md` and the
+PDF-current-scope paragraph in `docs/tls-deployment-contract.md`; record evidence
+in this Plan and Thread #6. The paired brief appendix already governs its named
+clauses after approval; consolidation must not change later brief amendments.
 Private harnesses and manifests stay outside the repository; no application
-utility, general script framework or new dependency is added. Run the original
-Plan Section 10's full backend/frontend battery. Record each actual command,
+utility, general script framework or new dependency is added. Run revision 10's
+Section 10 full current backend/frontend battery. Record each actual command,
 result and evidence level, not only test counts. No publication, setup or
 later-Thread permission is implied.
 
+- [ ] **Partly complete — viewer cross-check NOT RUN.** Complete Section 9's
+  private procedure against both originals with the published local Release
+  child and independent value/position oracle, not just counts. Keep private
+  values/filenames out of Git, HiveMind and tool output. The published child and
+  the independent word/line oracle were run against both files; the
+  operator-viewer cross-check was not performed, and the oracle uses a separate
+  PdfPig dump rather than a different PDF engine. See the remaining-evidence
+  ledger.
+- [x] **Specialist Plan-review note 2 (MEDIUM, no gate blocked):** the protected
+  external harness must use the existing published-child runner's normal
+  controls or explicitly reproduce its 256 MiB managed-heap setting, 384 MiB
+  resident monitor, 30-second deadline, bounded input/output, drained/discarded
+  stderr and process-tree termination/reaping. Record fidelity and resource
+  results separately. A bare DLL invocation is fidelity-only until those
+  parent-enforced controls are demonstrated; the child's watchdog alone is not
+  equivalent. No application utility, dependency or resource-limit change.
+- [ ] **Partly complete — browser evidence split.** Complete an authenticated
+  **synthetic** PDF browser walkthrough on already authorized local services:
+  select, inspect, confirm, prepare, retain/skip an invalid row, review category
+  default/change/clear and tags, commit, retry the receipt, see
+  history/Transactions, hide/restore/delete and newly reimport. Verify
+  keyboard/focus, 320/375 px and desktop in both themes, safe errors and
+  missing/foreign identifiers. Do not use real customer rows in shared tests.
+  Existing Playwright smoke alone cannot meet this criterion. Completed in the
+  earlier walkthrough: select/inspect/prepare, invalid-row skip, category
+  change/clear, tag creation, commit, hide/restore, History, Transactions,
+  320/375/1280 px, theme, delete/reimport and targeted Tab reachability.
+  **NOT RUN:** receipt retry in the browser; the changed printed-period/century
+  path on current code; a complete keyboard-only journey; browser
+  category-default, safe-error and missing/foreign-identifier checks. The old
+  walkthrough predates the period-authority correction. See the
+  remaining-evidence ledger.
+- [x] Preserve the wording correction (CPDF-N7): a source correction replaces an
+  implementation baseline, never an independent verdict. The current runbook
+  already says this; retain its chronology and record any later review against
+  the exact new implementation, not as a retroactive GO. Replace only obsolete
+  current-scope/blanket-raster/copy limitation claims with the approved policy.
+- [ ] **Partly complete — performance/audits carried forward.** Run Section 10's
+  full current battery and record commands, outcomes, evidence levels,
+  profile/source/test/assembly identities, runtime and bounds. Record the
+  18-page/private-child duration and synthetic bulk-import evidence without
+  promising a service level. No required failure/skip is counted clean. Request
+  one final independent implementation review only after the operator directs
+  execution and evidence exists; Plan review does not clear PDF NO-GO. The
+  post-correction backend/frontend battery ran; the 11/11 performance result and
+  dependency audits were not rerun on the final assembly and are recorded as
+  carried-forward evidence.
+
+**Phase 4 execution record (2026-11-22).** Private acceptance used the
+published local Release assembly (pre-correction `argus.Server.dll`, SHA-256
+`f2d47f6b74f116abd1e0ef6f24dd9d81f6ea945ec32bcd5e2388713103a9e47d`) through the
+child framing from a protected external harness. The harness reproduced the
+runner envelope: `DOTNET_GCHeapHardLimit=0x10000000`, 384 MiB resident monitor,
+30-second deadline, 20 MiB stdout bound, discarded stderr and process-group
+termination. The independent oracle was assembled from a separate PdfPig word
+dump and line/column geometry, not from the product parser or its output.
+
+Both originals passed. SB4 produced 4 pages and 49 rows; SB18 produced 18 pages
+and 297 rows. Every row's date, complete description, signed amount, page and
+source row number matched the oracle with **zero mismatches in every field** and
+zero invalid rows. No preamble, metadata or Balance value reached the output.
+The oracle counted 49 and 297 description-continuation lines (one per row). The
+recorded `66/356` note count was **not reproduced** by either the earlier visual
+extractor (48/296) or this oracle; it appears to belong to the synthetic fixture
+parameters, not the two originals. This is recorded as an evidence discrepancy
+for the final review, not silently redefined.
+
+The child durations were 695 ms (SB4) and 835 ms (SB18); maximum resident memory
+was 104 MiB and 118 MiB; stderr was 0 bytes in both runs. The synthetic
+`Category=Performance` backend suite passed 11/11 in 6 min 51 s.
+
+The authenticated synthetic PDF browser walkthrough ran on local services
+started for the purpose and then stopped. It covered PDF selection and the
+century control, inspect with the printed dates, prepare, a disabled commit for
+one invalid row, skip, category change/clear, tag creation (confirmed by a
+follow-up probe; the first full-run assertion raced the server action), commit,
+hide/restore, History, Transactions, 320/375/1280 px without horizontal overflow,
+the theme toggle, Delete, and a clean reimport. A separate Tab-order check
+reached the financial-account and format selects, file selection, the enabled
+Inspect button, the first review row's category and skip controls, and the
+enabled Commit button. Receipt replay was not separately exercised in the
+browser; the authenticated HTTP suite covers it. No real customer rows were used
+in shared tests, and the private files, oracle and manifests remain outside Git.
+
+Documentation updated: `docs/statement-import-runbook.md` (current scope,
+production profile, image/encryption policy, corrected CPDF-N2 copy, error
+codes, active child deployment), `docs/repository-layout.md`, and the current
+scope/timeouts in `docs/tls-deployment-contract.md`.
+
+Pre-correction gates: backend battery **522 passed / 1 existing
+performance-category skip**; contract suite **56/56**; performance **11/11**; four
+`dotnet format` checks; Release build 0 warnings/0 errors and publish; frontend
+Prettier and ESLint clean; **369** unit/component tests; production build;
+Playwright smoke **18/18**; NuGet vulnerability scan clean; npm audit 0
+high/critical (9 moderate allowed by the checked-in configuration). These are
+the pre-correction run and assembly; the final post-correction evidence block
+below supersedes them for the corrected tree. No commit, push or deployment
+occurred.
+
+**Post-review correction record (2026-11-22).** Independent implementation
+review `wbr-9a6f6fc849` returned **NO-GO** with 5 HIGH blockers, 4 MEDIUM notes
+and 1 LOW note. The blockers were protection-key binding, silent source-word
+consumption, conflicting-header reinterpretation, ambiguous flow-column
+separation, and bypassed page/character limits. Corrections applied under the
+operator's continued-execution instruction:
+
+1. **Protection binding.** The parser now strips the owner authentication fields
+   from a same-length temporary copy after the empty-user guard passes, and
+   parses that copy. PdfPig can therefore only use the verified empty-user key;
+   a content key that belongs to the owner path fails. Synthetic two-key
+   fixtures prove same-key success and different-key rejection.
+2. **Exact productions.** Titles, website/customer-care text, verification
+   notice, legal footer, later-page account right side, available balance,
+   totals, postamble and headers now use exact or anchored typed forms. Added
+   canary regressions for all six reported locations.
+3. **Headers.** Every complete six-label header core on the page is enumerated
+   before body projection; a second header with residue is rejected instead of
+   becoming a skippable row. Added a conflicting-header regression.
+4. **Cell separation.** Word supports must stay inside a column's content area
+   (allowing the narrow gutter), and a well-formed flow run must be right-aligned
+   to the measured column edge. Added cross-boundary and misaligned-flow
+   regressions; the synthetic fixture now right-aligns its flow runs.
+5. **Bounds.** The page cap is checked before profile discovery, and the
+   production traversal enforces the shared 2,000,000-character cap. Added
+   page-limit and character-limit regressions.
+
+MEDIUM corrections: the masthead now pins 8-bit interpretation, DeviceRGB/
+DeviceGray or ICCBased N=1/3 colour, and rejects explicit Decode, masks and
+inline/unapproved images; printed-period proposals require an explicit century
+or the confirmed coverage dates, and conflicting per-page From/To ranges clear
+the proposal; the seeded snapshot now digests complete tag-link and category
+rows; a positive PDF history-category default, a PDF DI shared-admission test,
+and a re-inspect-to-prepare century component path were added.
+
+Still open: the masthead rotation/orientation is not detectable through the
+available image bounds; the private tests are vacuous when no private folder is
+configured, so they are not counted as CI evidence; the duplicate-image,
+missing-font and some last-page-image negatives remain unverified; and browser
+receipt replay was **NOT RUN** (HTTP replay covers the backend invariant). The
+`66/356` continuation-line figure was a real-file criterion error: the
+independent oracle counted 49/297, while the earlier structure probe counted
+48/296 under a slightly different line-grouping definition. The operator
+accepted the factual correction to 49/297 on 2026-11-22. The original figure
+remains historical synthetic-fixture parameterisation. A fresh independent
+review is required before the implementation is called accepted. The historical
+PDF NO-GO is not relabelled.
+
+**Second independent code review — NO-GO (2026-11-22).** Review
+`wb-4b120c0988` examined the corrected tree (Plan blob `c7a5b34…`, Thread #6
+version 21, published DLL `cf2e0b2f…`) and returned **NO-GO** with 2 HIGH and 4
+MEDIUM findings. It is separate from the earlier evidence-only GO and does not
+relabel historical verdicts.
+
+- **HIGH 1 — owner-field strip bypass.** The raw-byte regex replacement can be
+  defeated by hexadecimal name escapes for the active owner fields plus
+  inactive canonical-looking strings in a comment; the published child then
+  accepted content decrypted with the owner key. Binding to the active security
+  dictionary or failing closed when that cannot be established is required.
+  This likely meets the Plan's protection-design stop rule and needs an
+  operator/Architect decision before a custom key-binding mechanism is added.
+- **HIGH 2 — source text omission.** Metadata Y positions are checked without
+  the required X boxes; issuer/subtitle and postal/address slots accept
+  arbitrary bounded text; the opening-balance check accepts a money suffix
+  rather than the whole value; postamble geometry is not enforced. Published-
+  child probes placed transaction-shaped words in those slots and a prefix in
+  the opening balance; the parser accepted the file with the words missing.
+- **MEDIUM:** missing production cross-page continuation bridge; a stale
+  inspect response can restore an old preview after the century changes;
+  masthead orientation/ICC identity is not pinned; some evidence assertions and
+  execution markers are weaker than their names.
+
+The date-preview UI follow-up is after this reviewed code baseline and does not
+touch either HIGH path. No code has been changed in response to this review
+yet. The strict-contract implementation gate was **NO-GO**; the evidence-only
+GO is not code acceptance. The operator then accepted the two HIGH findings as
+documented residual risks and narrowed the contract, as recorded immediately
+below. The historical NO-GO remains for the strict contract, but the narrowed
+contract is the current product decision and a limited contract review is
+requested.
+
+**Operator risk acceptance — narrowed production-PDF guarantees (2026-11-22).**
+After the second code review confirmed HIGH 1 and HIGH 2, the operator
+explicitly accepted both as documented residual risks for this product and
+narrowed the revision-10 claims accordingly. This is a semantic change with
+operator acceptance, not a silent weakening:
+
+- **Protection limitation.** The guard verifies the empty-user U/UE/Perms
+  profile and the empty-password user hash, but it does not prove that the PDF
+  library used that key to extract pages. A crafted PDF with an empty owner
+  password may be opened through the owner path. The practical effect is
+  self-injection into the uploading customer's own account; it is not a
+  cross-customer authority or privilege escalation. No owner password is
+  supplied, no permission bit is changed and no owner-access feature is added.
+- **Source-truth limitation.** The real-profile rows, dates, descriptions and
+  signed amounts match the real statements exactly. Crafted extra words placed
+  in metadata, opening-balance value, postal/address or postamble slots may be
+  omitted instead of rejecting; this includes a prefix inside an otherwise valid
+  opening-balance value. Unsupported layouts and unexplained text elsewhere
+  still reject. This limitation is accepted for crafted PDFs, not as a claim
+  that every possible source word is preserved.
+
+The implementation is proposed for acceptance against this narrowed contract.
+The earlier strict owner-prohibition and every-word claims are historical design
+rationale; the second code review's two HIGH findings are accepted limitations,
+not fixed defects. A limited contract/evidence review is requested against this
+amendment.
+
+**Implementation acceptance record (2026-11-22).** The operator accepted the
+implementation for the narrowed production-PDF contract with the two documented
+limitations: a crafted empty-owner PDF may be extracted through the owner path
+(self-injection into the uploading customer's own account), and crafted extra
+words in metadata, opening-balance value, postal/address or postamble slots may
+be omitted. This is implementation acceptance only. It is not commit, merge,
+push, deployment or publication authority, and it does not relabel the
+strict-contract NO-GO verdicts or the historical implementation NO-GO. The
+limited contract/evidence GO and the remaining MEDIUM/evidence ledger are
+preserved; the ledger items stay open and are not counted as complete
+acceptance evidence. No commit, push or deployment occurred.
+
+**Remaining-evidence ledger (2026-11-22, post-review correction).** These are
+not acceptance evidence and must not be counted as green:
+
+| Item | Status | Note |
+| --- | --- | --- |
+| Duplicate-image, missing-font, some last-page-image negatives | UNVERIFIED | Asset replacement/placement/orientation-input variants, missing text and the published-child path are covered; the listed negatives are not. |
+| Masthead orientation/rotation | UNVERIFIED limitation | The available image bounds fix position and dimensions but do not expose the placement matrix; orientation is not detected. The runbook must not claim otherwise. |
+| Browser receipt retry | NOT RUN | Authenticated HTTP replay covers the backend receipt invariant, but not the browser substep. |
+| Current period/century browser path | NOT RUN | The earlier walkthrough predates the period-authority correction; the component test covers century re-inspect → prepare, not the live browser path. |
+| Browser category-default, safe-error and missing/foreign-identifier checks | NOT RUN | The earlier walkthrough did not establish these as browser evidence. |
+| Complete keyboard-only journey | PARTIAL | A targeted Tab-order check reached account/format, file selection, enabled Inspect, first-row category/skip and enabled Commit; it is not a full keyboard-only end-to-end journey. |
+| Private tests without the private folder | VACUOUS | They return without reading a file when `ARGUS_PRIVATE_PDF_DIR` is absent; do not count them as CI evidence. The separate private-child run was executed with both designated files present. |
+| Operator-viewer cross-check | NOT RUN | The private oracle reconstructs words/lines from a separate PdfPig dump; it is not a different PDF engine and is not a manual viewer comparison. |
+| Performance suite and dependency audits on the final baseline | CARRIED FORWARD | 11/11 performance and the NuGet/npm audit results were recorded before the post-review corrections and were not rerun on the final assembly. State them as earlier-run evidence. |
+| Before-fix failure evidence for the six post-review regressions | NOT RECORDED | The regressions were added with the corrections; no durable run of them against the old tree exists. This is a limitation, not a claim of equivalent before/after coverage. |
+
+**Final post-correction baseline evidence (2026-11-22).** Backend battery
+`node scripts/run-backend-tests.mjs`: **538 passed, 1 existing
+performance-category skip**, 5m22s. Production profile suite filter
+`FullyQualifiedName~StandardBankPdfProductionTests`: **26/26**. Protection guard
+filter `FullyQualifiedName~PdfEmptyUserAccessTests`: **13/13**. Four
+`dotnet format` checks pass. `dotnet build -c Release -warnaserror`: 0 warnings,
+0 errors. `dotnet publish argus.Server.csproj -c Release --no-restore`: succeeds.
+Published DLL SHA-256
+`cf2e0b2f53913b4688a488d745fc2f33864a4a3dfdc6fbe284262d7c967338aa`.
+Source/test identities: PdfEmptyUserAccess `0974e2e71cb041f26523900e075c78198458d0b1`;
+StandardBankPdfParser `189b3fcb9d51a442086593d62c29efb91e93dbb0`;
+StandardBankPdfProfile `4018cdce28e2ee2015d85216579e2838dca0bf17`;
+PdfEmptyUserAccessTests `fa5cbfaa47a7dcbdcd70b20c5582ecaf965e6968`;
+StandardBankPdfProductionTests `d1f20a375fd01117d4d9542d73fa5c66d0ca6892`;
+ProductionPdfFixture `6609fa3b430daee4f61ef75788783ca520dfd909`;
+StatementImportContractTests `fba8b5504f822e15de4c4a3ddaad6a0320c2d0bd`;
+import-workspace.test `68547347337ebf98473744d0c501b731fb04bed0`.
+Private published-child: both designated files present; 49 and 297 rows; zero
+mismatches in date/description/amount/page/source-row; 662/813 ms; peak RSS
+108800/109256 KiB; stderr 0. Frontend: Prettier/ESLint clean, **369**
+unit/component tests at the post-correction baseline (**370** after the later
+preview-date follow-up), production build, Playwright **18/18**. Six regression
+outcomes: `OwnerStripBindsParsingToTheUserKey` passes with same-key success and
+different-key rejection; `SyntheticProductionFixedFieldsRejectResidue` 6/6;
+`SyntheticProductionConflictingHeaderRejects` passes;
+`SyntheticProductionAmbiguousFlowRejects` 2/2;
+`SyntheticProductionPageLimitRejects` passes;
+`SyntheticProductionCharacterLimitRejects` passes. Earlier evidence not rerun
+on this assembly is identified in the ledger above. No commit, push, merge,
+deployment or publication occurred.
+
 ### 8. Public contracts and briefing amendments
 
-No route, request/response field, DTO, schema, configuration or error code
-changes. The same `standard_bank_pdf` preset selects the supported profile.
+No new route, request/response field, DTO, schema, configuration or error code
+is introduced. Product reachability changes deliberately: the existing
+`standard_bank_pdf` preset selects the supported profile instead of always
+returning `pdf_import_deferred`. Existing `century` options can be confirmed by
+the PDF UI. The dormant enum/error mapping remains compatible for old responses.
 Existing `encrypted_pdf`, `text_pdf_required`, `unsupported_layout`,
 `processing_limit` and row validation codes retain their enumerated contract;
 their supported-input policy changes are explicit in Section 4.
 
-Approval must also approve the **Pending production-PDF amendment** appended
-to `docs/product-brief.md`. It replaces the blanket wording in IMP-17 and
+Approval must also select the **Proposed production-PDF amendment (rebased
+2026-11-22)** in `docs/product-brief.md`. It replaces the blanket wording in IMP-17 and
 clarifies references in Sections 1.1, 4.10, 5.2, SEC-3, financial rule 20,
 MVP-21, AC-IMP-15/16 and the error table. Password-protected means requiring
 a nonempty USER password for this preset, not merely carrying an owner
-permission/encryption dictionary. The approved umbrella Requirement already
-names text-based PDF import and rejection of password-required documents;
-this proposal does not silently revise a native Requirement or infer approval.
-If the operator intends that Requirement to prohibit even empty-user access,
-stop and obtain its explicit native correction before activating this Plan.
+permission/encryption dictionary. The accepted umbrella Requirement names
+text-based PDF import and rejection of password-protected documents. The
+operator's explicit 2026-11-22 empty-user/permission decision settles that
+interpretation for this preset; no native Requirement is silently edited or new
+child Requirement required. All other accepted constraints remain unchanged.
 
-The existing no-text-layer frontend copy can still misdescribe an unsupported
-raster rejection. Keep CPDF-N2 recorded as a limitation; no frontend scope is
-added. A correction changes an implementation baseline, not the historical
-independent verdict (CPDF-N7).
+Phase 3 corrects the formerly deferred no-text-layer copy limitation (CPDF-N2)
+as a named, bounded scope change. Phase 4 preserves the accurate verdict wording
+(CPDF-N7). A correction or Plan approval does not change the last independent
+PDF implementation NO-GO.
 
 ### 9. Acceptance criteria and required evidence
 
-These are **revision-4 acceptance refinements**, mapped to existing outcomes.
+These are **revision-10 acceptance refinements**, mapped to existing outcomes.
 AC1 format fidelity now includes the actual two private samples; AC2 rejection
 now distinguishes permitted empty-user encryption/asset/template from unsafe
-inputs. AC8 privacy now covers the full real metadata forms. Other acceptance
-criteria are unchanged. No criterion is marked PASS at proposal time.
+inputs. AC8 privacy now covers the full real metadata forms; AC9 now requires
+reachable PDF selection through the real workflow. AC3–AC7/AC10–AC13 and all
+CSV acceptance/provenance remain unchanged. No criterion is PASS at authoring.
 
 | Criterion / matrix | Required outcome and concrete evidence |
 | --- | --- |
-| P4-A — production fidelity (AC1) | Both actual private PDFs pass the **published product child**, yielding 49/297 rows and 66/356 notes with correct pages, every original date/description/flow and no preamble/Balance. Independent private value/position oracle, not the earlier heuristic CSV. New synthetic real-profile 4/18-page fixtures reproduce all-page tables and the measured 14/17/17/1 and 14/17…/11 row distribution. |
-| P4-B — protection (AC2) | Unencrypted and proper empty-USER AES-256 R6 controls pass; nonempty-user, empty-owner-only, malformed U/UE/O/OE/Perms, wrong filter/revision and unsupported older protection reject safely. Known-answer vectors and independently generated PDFs; real published child too. Do not test production guard against fixtures generated by that same guard. |
-| P4-C — asset/text coverage (AC2) | Exact approved decorative asset outside table plus complete text passes. Same-size different asset, correct asset relocated/duplicated/rotated into body, changed interpretation/mask, image-only page, text header over scanned body, missing text/font failure and last-page image residue reject the whole document. Unit real-byte and published-child evidence. No area threshold or “logo-looking” guess. |
-| P4-D — real form/privacy (AC1/8) | Complete first/later-page forms and terminal postamble consume only their named fields; varying every synthetic account/address/balance value changes no source row/identity. Missing labels, extra tokens/lines, wrong order/position, unknown Account/Customer/Branch fields or a transaction-shaped intruder reject or remain an unambiguous source row, never disappear. Authenticated inspect/prepare responses, stored review reads and captured server/child logs contain no canaries from excluded slots. |
-| P4-E — geometry/validation (AC1/2/3) | Long descriptions past the old midpoint remain intact; numbers inside them are not flows. Separate minus/amount runs, all three directions, zero, multiple/missing/malformed flow, overflow/precision, missing/invalid dates and cross-year periods retain exact existing outcomes. Deliberate overlap/ambiguous gutters reject, never borrow Balance. Shuffle streams without changing geometry. Unit and actual-child row/value/source-position assertions. |
+| PDF-A — production fidelity (AC1) | Both actual private PDFs pass the **published product child**, yielding 49/297 rows and 49/297 description-continuation lines with correct pages, every original date/description/flow and no preamble/Balance. The operator accepted this factual correction on 2026-11-22 from the originally recorded 66/356; that earlier figure remains historical synthetic-fixture parameters and is not a real-file count. Independent private value/position oracle, not the earlier heuristic CSV. New synthetic real-profile 4/18-page fixtures reproduce all-page tables and the measured 14/17/17/1 and 14/17…/11 row distribution. |
+| PDF-B — protection (AC2) | Unencrypted and proper empty-USER AES-256 R6 controls pass, including disabled text-copy permission; nonempty-user, empty-owner-only, malformed U/UE/O/OE/Perms, wrong filter/revision and unsupported older protection reject safely. Known-answer vectors and independently generated PDFs; real published child too. Do not test production guard against fixtures generated by that same guard. **2026-11-22 limitation:** a crafted empty-owner file may be extracted through the owner path; this is an accepted self-injection limitation. The controls prove the guard's empty-user field validation, not that the library used that key. |
+| PDF-C — asset/text coverage (AC2) | Exact approved decorative asset outside table plus complete text passes. Same-size different asset, correct asset relocated/duplicated/rotated into body, changed interpretation/mask, image-only page, text header over scanned body, missing text/font failure and last-page image residue reject the whole document. Unit real-byte and published-child evidence. No area threshold or “logo-looking” guess. |
+| PDF-D — real form/privacy (AC1/8) | Complete first/later-page forms and terminal postamble consume only their named fields; varying every synthetic account/address/balance value changes no source row/identity. Missing labels, extra tokens/lines, wrong order/position, unknown Account/Customer/Branch fields or a transaction-shaped intruder reject or remain an unambiguous source row, never disappear. Authenticated inspect/prepare responses, stored review reads and captured server/child logs contain no canaries from excluded slots. **2026-11-22 limitation:** crafted extra words in metadata, opening-balance value, postal/address or postamble slots may be omitted; the exact-row claim applies to the real files, not every crafted variant. |
+| PDF-E — geometry/validation (AC1/2/3) | Long descriptions past the old midpoint remain intact; numbers inside them are not flows. Separate minus/amount runs, all three directions, zero, multiple/missing/malformed flow, overflow/precision, missing/invalid dates and cross-year periods retain exact existing outcomes. Deliberate overlap/ambiguous gutters reject, never borrow Balance. Shuffle streams without changing geometry. Unit and actual-child row/value/source-position assertions. |
+| PDF-F — active product and compatibility (AC3–AC9/AC11–AC13) | Both real HTTP endpoints reach the child, not deferral, after unchanged authorization. Synthetic PDF review/skip/commit, default/change/clear category provenance, tag intent, receipt replay, hidden/delete/reimport and cross-format suppression preserve existing contracts. The PDF selector/accept/options and safe error copy work through the real synthetic browser journey; no password or financial metadata is sent to logs/client configuration. |
 | Compatibility positives | Keep legacy A4 4/49/66 and 18/297/356, hand-authored three-row/cover/terminal-total, safe period pages, ordinary Summary merchant/continuation and immediate cross-page continuation. Unapproved legacy raster/encryption controls still reject. Change obsolete assertions only against the explicit policy change, not to hide a failure. |
 | CPDF-R1 — **CONFIRMED**, Phase 1a, B.1/I.3 | Scan complete ordered header cores even with same-line residue. Conflicting core plus residue rejects before using stale bands. Test deposit reversal and Balance-as-fees plus shifts below/at/above 0.01 and normal tolerance; every tolerated case still checks semantic assignment. Compatible header plus unexplained Balance-only residue rejects, rather than emitting header labels as a defective row. Correct that existing process-test expectation explicitly. |
 | CPDF-R2 — **CONFIRMED**, Phase 1a/2, C/I.3 | Colon-attached/split labels (`Account:123`, `Customer:VALUE`, `Branch:VALUE`) outside the complete approved form reject before candidate promotion. Add a flow token to prove it cannot force promotion. Body merchant text remains text. Both authenticated endpoints: exact safe failure and no metadata in output/logs/reviews. |
@@ -1926,23 +2641,25 @@ criteria are unchanged. No criterion is marked PASS at proposal time.
 | CPDF-R4 — **CONFIRMED**, Phase 1a, B.1/C | Summary at Y=900, footer at Y=-100, X beyond page width, nonfinite/cropped/out-of-frame words and image placements reject before role consumption. Keep valid near-edge controls on both page sizes. Both page bounds are checked; a tolerance never admits off-page source content. |
 | CPDF-N5 — **CONFIRMED**, Phase 1a, C/I.3 | Legacy closing balance followed by Summary/period/header-only restart/nonterminal role rejects as nonterminal. Only the complete permitted suffix excludes it. Real production postamble is tested as its own complete newly authorized production, not a blanket exception to the legacy rule. |
 | CPDF-N6 — **CONFIRMED**, Phase 2, I.6 | Seed existing statements/transactions/receipt/identity/tag links and an unrelated live review, then rejected inspect/prepare must leave **all** seeded fields, counts and account versions unchanged, with no new import payload. Before refused invalid-row commit capture source rows/IDs, review version and summary/hash; reread afterwards and compare, then skip/commit and reconcile. Two otherwise equal PDFs with different ordinary Balance values must have equal mapped/interpreted fields and identity/fingerprint inputs, excluding allocated row/review IDs. Absence-only output tests are insufficient. |
-| CPDF-N7 — **ALREADY SATISFIED in current runbook wording**, Phase 4 preservation | Preceding runbook blob records the fresh NO-GO and corrects “correction supersedes verdict”. Retain that accurate chronology; do not claim a new GO or repeat a review. |
+| CPDF-N7 — **ALREADY SATISFIED in current runbook wording**, Phase 4 preservation | Current runbook correctly distinguishes a replaced implementation baseline from an independent verdict. Retain that chronology; record any new review against its actual new baseline, never a retroactive GO. |
 
-No residual finding is deferred to another work unit. Thread #6 tracks the same
-unresolved findings until real evidence exists; accepting this proposal does
-not close that tracker or Thread #3. Source inspection confirms R1 at parser
-`775–833,846–853`, R2 at `704–713`, R3 at `295–307`, R4 at
-`198–205,660–665,701–702`, and N5 at `468–483`. Current Phase 2 tests at
-`1083–1269` show N6's missing comparisons. None was runtime re-reviewed here.
+No residual finding is deferred to another work unit. Thread #6 owns the open
+PDF findings until correction, evidence and final review; proposal approval
+closes none of them. Thread #3 remains resolved. Current source targets are in
+Section 2; old snapshot line ranges are not implementation instructions. General
+immutability coverage added during CSV delivery is preserved; Phase 2 adds
+active-PDF and Balance-differential evidence rather than calling that merged
+coverage absent. No residual case was runtime re-reviewed during this rebase.
 
-**Private sample procedure (P4-A):**
+**Private sample procedure (PDF-A; Phase 1b input gate and Phase 4 acceptance):**
 
 1. Use only the operator-designated two source files, selected locally and
    referred to as SB4/SB18. Do not print filenames, PDF metadata, values or
    exceptions. Keep a private alias-to-file/SHA-256 binding with restricted
    permissions outside Git and HiveMind; no raw-file digest in public evidence.
    Do not move/alter the originals or use production/customer databases.
-2. Confirm locally that the one repeated asset is nonfinancial decoration and
+2. Complete Phase 1b's input gate: confirm locally that the one repeated asset
+   is nonfinancial decoration and
    distinguish fixed public bank wording from variable customer fields. Keep
    the actual asset and all customer strings private. Harvest only approved
    nonfinancial profile constants; never account/address/value fingerprints.
@@ -1953,13 +2670,19 @@ not close that tracker or Thread #3. Source inspection confirms R1 at parser
    actual values in memory or an explicitly protected private manifest, never
    test assertion dumps, tool transcripts, Git or server logs.
 4. Build the product's local Release publish output, without deployment or
-   repository publication. Feed the original encrypted bytes
-   through its unchanged framed stdin protocol to
-   `dotnet <published>/argus.Server.dll --parse-statement-pdf`. Confirmed dates
-   go in the private stdin options, not command arguments. Capture stdout in
-   memory, compare without printing it, inspect stderr without echoing content,
-   and emit only alias, page/row/note counts and boolean comparison results.
-   Record product assembly/source hashes, duration and bound results.
+   repository publication. Use the existing runner from protected external
+   harnessing, or reproduce its parent controls explicitly: set
+   `DOTNET_GCHeapHardLimit=0x10000000`, monitor/enforce 384 MiB resident memory,
+   apply the 30-second deadline, bound framed input and 20 MiB output, drain and
+   discard stderr, and terminate/reap the process tree on exhaustion/cancellation.
+   The child command remains
+   `dotnet <published>/argus.Server.dll --parse-statement-pdf`; merely invoking
+   it does not supply those parent controls. Feed original encrypted bytes and
+   confirmed dates through unchanged private framed stdin, not arguments.
+   Compare captured stdout in memory without printing it and emit only alias,
+   page/row/note counts and booleans. Record product assembly/source hashes,
+   duration, fidelity comparison and resource-envelope results separately. An
+   unwrapped run can establish fidelity only and cannot pass the resource gate.
 5. Exercise authenticated HTTP/real-store behavior with **synthetic replicas**
    carrying canaries and the same protection/layout/asset policy. Do not put
    actual customer transactions into the shared isolation database or CI.
@@ -1974,12 +2697,51 @@ not close that tracker or Thread #3. Source inspection confirms R1 at parser
 
 ### 10. Verification commands and stop conditions
 
-Run the phase commands above and the **original Plan's full Section 10 battery**:
-backend format (both projects), full tests, Release build/publish and actual
-vulnerability findings; frontend audit-ci, lint, tests, build and Playwright.
-No tests are run against development/production data. Use only the existing
-isolated `ARGUS_TEST_DATABASE_URL`; no bootstrap, database creation or secret
-output is authorized. Existing runtime/keyboard/concurrency obligations remain.
+Run focused phase commands during implementation; reserve the full battery for
+the final evidence gate, not every local correction. The current repository
+commands below add the style, formatting, warning and performance checks missing
+from the historical command list. No command in this section was run by the
+Architect. Do not use development/production data or print credentials. No
+bootstrap/database creation, dependency install or service restart is authorized
+by this planning task. Existing runtime/keyboard/concurrency obligations remain.
+
+From `backend/`:
+
+```bash
+dotnet format argus.Server.csproj --verify-no-changes
+dotnet format style argus.Server.csproj --diagnostics IDE0005 --severity info --verify-no-changes
+dotnet format tests/argus.Server.Tests/argus.Server.Tests.csproj --verify-no-changes
+dotnet format style tests/argus.Server.Tests/argus.Server.Tests.csproj --diagnostics IDE0005 --severity info --verify-no-changes
+dotnet build -c Release -warnaserror
+dotnet publish argus.Server.csproj -c Release --no-restore
+dotnet list argus.Server.csproj package --vulnerable --include-transitive
+```
+
+From the repository root, with the existing dedicated local `argus_test` URL:
+
+```bash
+node scripts/run-backend-tests.mjs
+node scripts/run-backend-tests.mjs --filter 'Category=Performance'
+git diff --check
+```
+
+From `frontend/`, with the existing committed-lockfile installation:
+
+```bash
+npm run format:check
+npx audit-ci@^7 --config ./audit-ci.jsonc
+npm run lint
+npm run test
+npm run build
+npm run test:e2e
+```
+
+Record actual vulnerability findings/data availability, not just tool exit
+status. Unavailable audit data is UNVERIFIED. The performance suite and live
+synthetic import remain required for this bulk-import change; a known timeout
+elsewhere does not authorize skipping, hiding or weakening it. Investigate a
+failure or record it as a blocker with its owner. Playwright smoke builds its
+own backend-independent server; it is not the authenticated synthetic walkthrough.
 
 Stop for failed/unavailable required evidence, mismatched private fields/counts,
 unexplained text/image/metadata, ambiguous columns or marker association,
@@ -2006,12 +2768,18 @@ Keep existing timeout/cancel/restart/idempotency and concurrency tests intact.
 
 ### 12. Risks, recovery and decisions requiring confirmation
 
-- **Explicit approval is required.** It must bind the exact proposed Plan and
-  brief amendment, permit empty-user R6 import despite the copy-permission
-  flag, and confirm the nonfinancial asset/fixed-wording classification in the
-  private template. The user may decline or change those choices. Current
-  revision 3 remains active until that decision is recorded; do not infer it
-  from this request, a peer delivery or a complete draft.
+- **Explicit approval of these artifacts is required.** The exact requested
+  decision is: “Approve Plan 2 revision 10 at the recorded full-file blob and
+  the paired 2026-11-22 production-PDF brief amendment at its recorded blob as
+  the governing contract for Thread #6, including the narrow backend/UI
+  activation and private input/acceptance procedure. Preserve the later CSV,
+  expiry, suggestion, category and reporting agreements. Retain my approved
+  empty-user R6 import despite the disabled text-copy bit; no owner password,
+  permission change or backend authorization change. This is not implementation
+  acceptance, publication or deployment.” The operator may approve, decline or
+  change that agreement. Until explicit approval, revision 9 and live PDF
+  rejection remain authoritative. Private file access and actual classification
+  are gated before profile coding, not presumed from a complete document.
 - This is a finite template contract, not certification of arbitrary Standard
   Bank variants or PDF authenticity. Different logos/templates/addresses,
   rotation, damaged fonts or true text/amount overlap may reject. Unknown
@@ -2023,27 +2791,42 @@ Keep existing timeout/cancel/restart/idempotency and concurrency tests intact.
 - No schema rollback or existing-record rewrite is needed. This proposal does
   not repair earlier omitted/leaked imports. Any real-data repair needs
   separate operator authority. Preserve receipts, source history and the
-  current uncommitted tree. A future application rollback must not delete data.
-- Latest independent verdict remains request `963d287e-c3e0-4214-ba9d-1aac0750ac9f`,
+  current uncommitted tree. A future operator-directed rollback may restore the
+  existing dispatcher rejection and frontend exclusion together, while keeping
+  read/review recovery, committed/deleted receipts, categories and all stored
+  source data intact. Do not replay/reparse old stored reviews under a new
+  interpretation, drop schema/data, or erase a rejected operation's evidence.
+- The latest **PDF implementation** verdict remains request `963d287e-c3e0-4214-ba9d-1aac0750ac9f`,
   NO-GO, immutable SHA-256
   `b10e23a04e326881ef402532c7b6c5ee5090f03f0bd72876c8b4119e64ff3b7b`.
-  No new review was requested or commissioned. Proposal approval changes scope,
-  not that verdict or the implementation acceptance gate. Publication and
-  Threads #4/#5 remain blocked. Programme order remains authoritative on
-  Thread #1; Thread #6 is not silently inserted into it.
+  The single revision-10 **Plan review** is a separate architectural gate,
+  recorded on Thread #6 against the exact document blobs. A GO there does not
+  clear this implementation verdict. After a Plan-review NO-GO, make one
+  corrective rewrite addressing every blocker; do not automatically commission
+  another review. The operator decides whether a changed agreement needs one.
+  Final implementation acceptance requires fresh evidence and one independent
+  review of the active PDF path, not dormant parser counts. No review grants
+  operator approval, execution routing or publication permission.
+- Thread #3 remains resolved; Threads #4/#5 are delivered, not blocked by this
+  proposal. Thread #1 retains its four-child topology/order and deployment gate;
+  Thread #6 is not inserted into that programme. No other Thread is mutated.
 
-**Architect self-check:** complete after the finished direct inspection. The
-invariant-consistency pass checked that empty-user authentication is distinct
-from owner opening; the permission-bit decision does not contradict supporting
-the actual files; a fixed outside-table asset replaces a size heuristic; real
-first-page metadata does not suppress its table; real gutters preserve existing
-flow/Balance meaning; full postambles and continuations have nonconflicting
-roles; every phase has named inputs/files/commands; and no new durable/public
-contract is needed. Scope/acceptance changes are listed explicitly above.
-Implementation, new tests and private **product** acceptance remain **NOT RUN**.
-Only planning/operating documents and a temporary redacted inspection utility
-outside the repository were authored. No application implementation, source
-test edits, new review, bootstrap, commit/push or publication occurred.
+**Revision-10 planning record:** source research finished before drafting.
+Architect self-review and exact baseline-preservation checks are recorded with
+the reviewed blobs on Thread #6. The single Specialist Plan review
+`wb-dcb7ea7ca8` returned **GO**, 0 blockers and two MEDIUM nonblocking notes,
+against Plan blob `4ce0a90175061de52fab67520a6973d9dfd03e71` and brief blob
+`a3ae4c3a92c891f71fd70c557fd6b779da68244f`, finally hash-checked by the reviewer
+at `2026-11-22T10:26:11Z`. Both notes are accepted as concrete evidence bullets
+in Phases 1b and 4 above. They refine evidence for existing malformed-protection
+and resource-bound promises, not input policy, architecture, scope or approval.
+Thread #6 records this reviewed version and the resulting annotated full-file
+blob separately; no second automatic review is requested or claimed.
+No private PDF/asset was opened during this
+rebase. Implementation, application tests, private product acceptance and
+runtime observation are **NOT RUN**. Only this Plan and the selected brief are
+edited, uncommitted, on `plan/06-production-pdf-rebase`; no stage, commit, push,
+pull request, dependency/runtime/configuration change or deployment is authorized.
 
 ## Revision 5 — CSV-only delivery scope (approved 2026-11-06)
 
