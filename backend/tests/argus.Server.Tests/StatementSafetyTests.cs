@@ -142,14 +142,21 @@ public sealed class StatementSafetyTests
     }
 
     [Fact]
-    public void EncryptedPdfIsRejectedBeforeExtraction()
+    public void OrdinaryEncryptWordInContentIsNotProtection()
     {
-        var pdf = StatementFixtureBuilder.BuildHandAuthoredSmallPdf();
-        var text = Encoding.ASCII.GetString(pdf);
-        var encrypted = text.Replace("trailer\n<< /Size", "trailer\n<< /Encrypt 99 0 R /Size", StringComparison.Ordinal);
-        Assert.NotEqual(text, encrypted);
+        List<PdfText> texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        {
+            new(40, 688, "04 Feb 25"),
+            new(100, 688, "/Encrypt merchant"),
+            new(300, 688, "10.00"),
+        };
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
+        pdf.AddPage(texts);
 
-        AssertRejected(Encoding.ASCII.GetBytes(encrypted), ParserReasons.EncryptedPdf);
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+
+        Assert.Equal(4, result.Rows.Count);
+        Assert.Contains(result.Rows, row => row.Description == "/Encrypt merchant");
     }
 
     [Fact]
@@ -805,6 +812,42 @@ public sealed class StatementSafetyTests
         AssertRejected(pdf.Build(), ParserReasons.UnsupportedLayout);
     }
 
+    [Theory]
+    [InlineData("Account:123 PRIVATE_ACCOUNT_7731")]
+    [InlineData("Account : 123 PRIVATE_ACCOUNT_7731")]
+    [InlineData("Customer:VALUE PRIVATE_ACCOUNT_7731")]
+    [InlineData("Branch:VALUE PRIVATE_ACCOUNT_7731")]
+    public void AttachedPreambleMetadataWithAFlowTokenRejects(string metadata)
+    {
+        List<PdfText> texts = new List<PdfText>
+        {
+            new(40, 840, "Synthetic Bank"),
+            new(40, 820, metadata),
+            new(300, 820, "10.00"),
+        };
+        AddPdfHeader(texts);
+        texts.AddRange([new PdfText(40, 760, "01 Feb 2025"), new PdfText(100, 760, "Valid row"), new PdfText(300, 760, "10.00"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
+        pdf.AddPage(texts);
+
+        AssertRejected(pdf.Build(), ParserReasons.UnsupportedLayout);
+    }
+
+    [Fact]
+    public void BodyMerchantAccountFeeTextRemainsATransaction()
+    {
+        List<PdfText> texts = new List<PdfText>();
+        AddPdfHeader(texts);
+        texts.AddRange([new PdfText(40, 760, "01 Feb 2025"), new PdfText(100, 760, "Account fee"), new PdfText(300, 760, "10.00"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
+        pdf.AddPage(texts);
+
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+
+        Assert.Single(result.Rows);
+        Assert.Equal("Account fee", result.Rows[0].Description);
+    }
+
     [Fact]
     public void NegativeXWordsNeverDisappear()
     {
@@ -848,6 +891,31 @@ public sealed class StatementSafetyTests
         MinimalPdfBuilder footerPdf = new MinimalPdfBuilder();
         footerPdf.AddPage(footerTexts);
         AssertRejected(footerPdf.Build(), ParserReasons.UnsupportedLayout);
+    }
+
+    [Fact]
+    public void OutOfFrameTextRejectsBeforeRoleConsumption()
+    {
+        MinimalPdfBuilder summary = new MinimalPdfBuilder();
+        summary.AddPage(StatementFixtureBuilder.HandAuthoredSmallPdfTexts());
+        summary.AddPage([new PdfText(100, 900, "Summary")]);
+        AssertRejected(summary.Build(), ParserReasons.UnsupportedLayout);
+
+        MinimalPdfBuilder footer = new MinimalPdfBuilder();
+        footer.AddPage(StatementFixtureBuilder.HandAuthoredSmallPdfTexts());
+        footer.AddPage([new PdfText(100, -100, "Page 2 of 2")]);
+        AssertRejected(footer.Build(), ParserReasons.UnsupportedLayout);
+
+        List<PdfText> outside = new List<PdfText>();
+        AddPdfHeader(outside);
+        outside.AddRange([new PdfText(40, 760, "01 Feb 2025"), new PdfText(100, 760, "Inside row"), new PdfText(300, 760, "10.00"), new PdfText(600, 760, "OUTSIDE"),]);
+        MinimalPdfBuilder outsidePdf = new MinimalPdfBuilder();
+        outsidePdf.AddPage(outside);
+        AssertRejected(outsidePdf.Build(), ParserReasons.UnsupportedLayout);
+
+        MinimalPdfBuilder image = new MinimalPdfBuilder();
+        image.AddPage(StatementFixtureBuilder.HandAuthoredSmallPdfTexts(), 1, 600, 900);
+        AssertRejected(image.Build(), ParserReasons.UnsupportedLayout);
     }
 
     [Fact]
@@ -903,6 +971,23 @@ public sealed class StatementSafetyTests
         texts.AddRange([new PdfText(40, 760, "01 Feb 2025"), new PdfText(100, 760, "First row"), new PdfText(300, 760, "10.00"),]);
         texts.AddRange(HeaderAt(700, 40, 100, 300, 404, 470, 500, 530));
         texts.AddRange([new PdfText(40, 680, "02 Feb 2025"), new PdfText(100, 680, "Shifted boundary"), new PdfText(359, 680, "10.00"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
+        pdf.AddPage(texts);
+
+        AssertRejected(pdf.Build(), ParserReasons.UnsupportedLayout);
+    }
+
+    [Theory]
+    [InlineData(0.01)]
+    [InlineData(0.02)]
+    [InlineData(0.03)]
+    public void HeaderBoundaryShiftBelowEveryToleranceStillChecksSemanticColumns(double shift)
+    {
+        List<PdfText> texts = new List<PdfText>();
+        texts.AddRange(HeaderAt(800, 40, 100, 300, 402.44, 470, 500, 530));
+        texts.AddRange([new PdfText(40, 760, "01 Feb 2025"), new PdfText(100, 760, "First row"), new PdfText(300, 760, "10.00"),]);
+        texts.AddRange(HeaderAt(700, 40, 100, 300, 402.44 + shift, 470, 500, 530));
+        texts.AddRange([new PdfText(40, 680, "02 Feb 2025"), new PdfText(100, 680, "Boundary word"), new PdfText(359, 680, "10.00"),]);
         MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 

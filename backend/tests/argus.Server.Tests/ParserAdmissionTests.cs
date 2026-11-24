@@ -202,4 +202,29 @@ public sealed class ParserAdmissionTests
         release.SetResult(true);
         await blocker;
     }
+
+    [Fact]
+    public async Task PdfDispatchUsesTheSharedAdmission()
+    {
+        using ParserAdmission admission = new ParserAdmission(capacity: 1, deadline: TimeSpan.FromSeconds(5));
+        var entered = Signal();
+        var release = Signal();
+        var blocker = admission.RunAsync(
+            async token =>
+            {
+                entered.SetResult(true);
+                await release.Task.WaitAsync(token);
+                return 1;
+            },
+            CancellationToken.None);
+        await entered.Task;
+
+        using PdfParserRunner runner = new PdfParserRunner(admission: admission);
+        byte[] file = ProductionPdfFixture.Build(4);
+        var exception = await Assert.ThrowsAsync<StatementRejectedException>(() => StatementParser.InspectAsync(file, StatementSourceKind.StandardBankPdf, null, null, null, runner, admission));
+        Assert.Equal(ParserReasons.ImportBusy, exception.Reason);
+
+        release.SetResult(true);
+        await blocker;
+    }
 }

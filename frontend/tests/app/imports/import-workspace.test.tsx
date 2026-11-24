@@ -158,7 +158,7 @@ describe("import workspace", () => {
     expect(inspectBodies.every((body) => body.confirm_zar === true)).toBe(true);
   });
 
-  it("does not offer PDF import and rejects a selected PDF", () => {
+  it("offers PDF import and selects the PDF format for a chosen PDF", () => {
     const { container } = render(
       <ImportWorkspace
         accounts={[account]}
@@ -173,20 +173,144 @@ describe("import workspace", () => {
     const format = screen.getByLabelText("Statement format") as HTMLSelectElement;
     expect(Array.from(format.options).map((option) => option.textContent)).toEqual([
       "FNB CSV or ZIP",
+      "Standard Bank PDF",
       "Generic CSV with mapping",
     ]);
 
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    expect(fileInput.accept).not.toContain("pdf");
+    expect(fileInput.accept).toContain(".pdf");
     fireEvent.change(fileInput, {
       target: {
         files: [new File(["%PDF-1.7"], "statement.pdf", { type: "application/pdf" })],
       },
     });
 
-    expect(screen.getByRole("alert").textContent).toBe(
-      "PDF import is coming later. Use an FNB CSV/ZIP or a mapped CSV for now.",
+    expect(format.value).toBe("standard_bank_pdf");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText(/Selected PDF statement/)).toBeInTheDocument();
+  });
+
+  it("sends the PDF century and requires reinspection after it changes", async () => {
+    const inspectBodies: Record<string, unknown>[] = [];
+    const prepareBodies: Record<string, unknown>[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const mode = new URL(url, "http://localhost").searchParams.get("mode");
+        const body = JSON.parse(String((init?.body as FormData).get("options"))) as Record<
+          string,
+          unknown
+        >;
+        if (mode === "prepare") {
+          prepareBodies.push(body);
+          return jsonResponse({ summary: { id: "review-id" }, page: { rows: [] } });
+        }
+        expect(mode).toBe("inspect");
+        inspectBodies.push(body);
+        return jsonResponse({
+          ...inspectResult("1"),
+          detected_source_kind: "standard_bank_pdf",
+          mapping: {},
+        });
+      }),
     );
-    expect(screen.getByText("No statement selected.")).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    const { container } = render(
+      <ImportWorkspace
+        accounts={[account]}
+        reviews={[]}
+        history={[]}
+        initialTab="new"
+        loadError={null}
+        nextCursor={null}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("Statement format"), "standard_bank_pdf");
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: {
+        files: [new File(["%PDF-1.7"], "statement.pdf", { type: "application/pdf" })],
+      },
+    });
+
+    const centuryInput = screen.getByLabelText("Two-digit-year century");
+    expect(centuryInput).toHaveValue("2000");
+    await user.clear(centuryInput);
+    await user.type(centuryInput, "1900");
+    await user.click(screen.getByRole("button", { name: "Inspect statement" }));
+    await waitFor(() => expect(inspectBodies).toHaveLength(1));
+    expect(inspectBodies[0].parser_config).toEqual({ format: "standard_bank", century: 1900 });
+    expect(
+      screen.getByText("Inspection complete. Confirm the mapping and statement dates."),
+    ).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("Two-digit-year century"));
+    expect(
+      screen.queryByText("Inspection complete. Confirm the mapping and statement dates."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Prepare review" })).toBeNull();
+
+    await user.type(screen.getByLabelText("Two-digit-year century"), "2000");
+    await user.click(screen.getByRole("button", { name: "Inspect statement" }));
+    await waitFor(() => expect(inspectBodies).toHaveLength(2));
+    await user.click(screen.getByRole("button", { name: "Prepare review" }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/imports/review/review-id"));
+    expect(prepareBodies).toHaveLength(1);
+    expect(prepareBodies[0].parser_config).toEqual({ format: "standard_bank", century: 2000 });
+  });
+
+  it("explains unresolved preview dates instead of showing a bare date placeholder", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          ...inspectResult("1"),
+          detected_source_kind: "standard_bank_pdf",
+          mapping: {},
+          preview: [
+            {
+              row_id: "row-1",
+              source_line: 1,
+              source_page: 1,
+              source_row_number: 1,
+              raw_values: {},
+              transaction_date: null,
+              description: "Synthetic unresolved row",
+              amount: "-10.00",
+              validation_codes: [],
+              warnings: ["century_required"],
+            },
+          ],
+          preview_truncated: false,
+        }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    const { container } = render(
+      <ImportWorkspace
+        accounts={[account]}
+        reviews={[]}
+        history={[]}
+        initialTab="new"
+        loadError={null}
+        nextCursor={null}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("Statement format"), "standard_bank_pdf");
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: {
+        files: [new File(["%PDF-1.7"], "statement.pdf", { type: "application/pdf" })],
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Inspect statement" }));
+    await waitFor(() => expect(screen.getByText("Date unresolved")).toBeInTheDocument());
+    expect(
+      screen.getByText("Some dates use two-digit years and could not be resolved.", {
+        exact: false,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("date?")).not.toBeInTheDocument();
   });
 });

@@ -597,6 +597,28 @@ public sealed class StatementParserTests
     }
 
     [Fact]
+    public void SummaryAlignedBelowAnAboveHeaderCandidateRemainsAContinuation()
+    {
+        List<PdfText> texts = new List<PdfText>
+        {
+            new(40, 820, "01 Feb 2025"),
+            new(100, 820, "Above row"),
+            new(300, 820, "10.00"),
+            new(100, 812, "Summary"),
+        };
+        texts.AddRange(Header(800, 40, 100, 300, 400, 470, 500, 530));
+        texts.AddRange([new PdfText(40, 760, "02 Feb 2025"), new PdfText(100, 760, "Body row"), new PdfText(300, 760, "20.00"),]);
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
+        pdf.AddPage(texts);
+
+        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+
+        Assert.Equal(2, result.Rows.Count);
+        Assert.Equal("Above row Summary", result.Rows[0].Description);
+        Assert.Equal("Body row", result.Rows[1].Description);
+    }
+
+    [Fact]
     public void CrossPageContinuationAttachesBeforeTheNextPagesFirstRow()
     {
         List<PdfText> first = new List<PdfText>
@@ -672,20 +694,19 @@ public sealed class StatementParserTests
     }
 
     [Fact]
-    public void HeaderResidueCannotBeConsumedAsACompleteHeader()
+    public void CompatibleHeaderWithResidueRejects()
     {
         var texts = Header(800, 40, 100, 300, 400, 470, 500, 530);
         texts.AddRange([new PdfText(40, 760, "01 Feb 2025"), new PdfText(100, 760, "First row"), new PdfText(300, 760, "10.00"),]);
         texts.AddRange(Header(700, 40, 100, 300, 400, 470, 500, 530));
-        texts.Add(new PdfText(560, 700, "RESIDUE"));
+        texts.Add(new PdfText(560, 700, "X"));
         texts.AddRange([new PdfText(40, 680, "02 Feb 2025"), new PdfText(100, 680, "Second row"), new PdfText(300, 680, "20.00"),]);
         MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
 
-        var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
+        var exception = Assert.Throws<StatementRejectedException>(() => StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null));
 
-        Assert.Equal(3, result.Rows.Count);
-        Assert.Contains(result.Rows, row => row.ValidationCodes.Contains(ValidationCodes.InvalidDate) && row.RawValues["description"] == "Description");
+        Assert.Equal(ParserReasons.UnsupportedLayout, exception.Reason);
     }
 
     [Fact]
@@ -834,6 +855,46 @@ public sealed class StatementParserTests
         var result = StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null);
 
         Assert.Equal(3, result.Rows.Count);
+    }
+
+    [Theory]
+    [InlineData("Summary")]
+    [InlineData("Statement period: 01 Jan 2025 to 31 Jan 2025")]
+    public void ClosingBalanceBeforeALaterStructuralRoleRejects(string content)
+    {
+        List<PdfText> first = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        {
+            new(100, 706, "Total payments"),
+            new(300, 706, "1,234.56"),
+            new(100, 688, "Closing balance"),
+            new(530, 688, "1,234.56"),
+        };
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
+        pdf.AddPage(first);
+        pdf.AddPage([new PdfText(40, 780, content)]);
+
+        var exception = Assert.Throws<StatementRejectedException>(() => StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null));
+
+        Assert.Equal(ParserReasons.UnsupportedLayout, exception.Reason);
+    }
+
+    [Fact]
+    public void ClosingBalanceBeforeAHeaderOnlyRestartRejects()
+    {
+        List<PdfText> first = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
+        {
+            new(100, 706, "Total payments"),
+            new(300, 706, "1,234.56"),
+            new(100, 688, "Closing balance"),
+            new(530, 688, "1,234.56"),
+        };
+        MinimalPdfBuilder pdf = new MinimalPdfBuilder();
+        pdf.AddPage(first);
+        pdf.AddPage(Header(800, 40, 100, 300, 400, 470, 500, 530));
+
+        var exception = Assert.Throws<StatementRejectedException>(() => StandardBankPdfParser.Parse(pdf.Build(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), null));
+
+        Assert.Equal(ParserReasons.UnsupportedLayout, exception.Reason);
     }
 
     [Theory]

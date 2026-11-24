@@ -1,8 +1,10 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
 using argus.Server.Imports;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace argus.Server.Tests;
 
@@ -57,16 +59,55 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         return await BodyAsync(response);
     }
 
+    private static JsonElement Summary(JsonElement review) =>
+        review.TryGetProperty("summary", out var summary) ? summary : review;
+
     private static int Version(JsonElement review) =>
-        (review.TryGetProperty("summary", out var summary) ? summary : review)
-        .GetProperty("version").GetInt32();
+        Summary(review).GetProperty("version").GetInt32();
 
     private static string Hash(JsonElement review) =>
-        (review.TryGetProperty("summary", out var summary) ? summary : review)
-        .GetProperty("summary_hash").GetString()!;
+        Summary(review).GetProperty("summary_hash").GetString()!;
 
     private static JsonElement[] Rows(JsonElement review) =>
         review.GetProperty("page").GetProperty("rows").EnumerateArray().ToArray();
+
+    private static string[] ImmutableRowSignatures(JsonElement review) =>
+        Rows(review)
+            .Select(row =>
+            {
+                JsonElement raw = row.GetProperty("raw_values");
+                static string Raw(JsonElement values, string name) =>
+                    values.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String
+                        ? value.GetString()!
+                        : string.Empty;
+                static string Codes(JsonElement row, string name) =>
+                    string.Join(
+                        ",",
+                        row.GetProperty(name).EnumerateArray()
+                            .Select(value => value.GetString() ?? string.Empty)
+                            .Order(StringComparer.Ordinal));
+
+                return string.Join(
+                    '\u001f',
+                    row.GetProperty("row_id").GetString(),
+                    row.GetProperty("source_line").GetInt32().ToString(CultureInfo.InvariantCulture),
+                    row.GetProperty("source_page").ValueKind == JsonValueKind.Null
+                        ? "null"
+                        : row.GetProperty("source_page").GetInt32().ToString(CultureInfo.InvariantCulture),
+                    row.GetProperty("source_row_number").GetInt32().ToString(CultureInfo.InvariantCulture),
+                    Raw(raw, "date"),
+                    Raw(raw, "description"),
+                    Raw(raw, "amount"),
+                    Raw(raw, "flow_column"),
+                    row.GetProperty("transaction_date").GetRawText(),
+                    row.GetProperty("description").GetString(),
+                    row.GetProperty("amount").GetRawText(),
+                    Codes(row, "validation_codes"),
+                    Codes(row, "warnings"),
+                    row.GetProperty("skip").GetBoolean().ToString(),
+                    row.GetProperty("override").GetBoolean().ToString());
+            })
+            .ToArray();
 
     private static object CommitBody(JsonElement review) => new
     {
@@ -1255,7 +1296,7 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
 
         var inspect = await SendAsync(MultipartPost(InspectPath, file, inspectOptions, session: session));
         Assert.Equal(HttpStatusCode.BadRequest, inspect.StatusCode);
-        Assert.Equal("pdf_import_deferred", await ErrorKindAsync(inspect));
+        Assert.Equal("unsupported_layout", await ErrorKindAsync(inspect));
         var inspectText = await inspect.Content.ReadAsStringAsync();
         Assert.DoesNotContain("CanaryOmitted_7731", inspectText, StringComparison.Ordinal);
         Assert.DoesNotContain("BAD-DATE", inspectText, StringComparison.Ordinal);
@@ -1264,7 +1305,7 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var prepareOptions = Json(new { financial_account_id = accountId, source_kind = "standard_bank_pdf", start_date = "2025-01-01", end_date = "2025-01-31", currency = "ZAR", confirm_zar = true, });
         var prepare = await SendAsync(MultipartPost(ReviewsPath, file, prepareOptions, session: session));
         Assert.Equal(HttpStatusCode.BadRequest, prepare.StatusCode);
-        Assert.Equal("pdf_import_deferred", await ErrorKindAsync(prepare));
+        Assert.Equal("unsupported_layout", await ErrorKindAsync(prepare));
         var prepareText = await prepare.Content.ReadAsStringAsync();
         Assert.DoesNotContain("CanaryOmitted_7731", prepareText, StringComparison.Ordinal);
         Assert.False(Factory.LogCapture.Contains("CanaryOmitted_7731"));
@@ -1274,6 +1315,87 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         Assert.Equal(0L, await CountRowsAsync("statement_imports"));
         Assert.Equal(0L, await CountRowsAsync("transactions"));
         Assert.Equal(0L, await CountRowsAsync("import_commit_receipts"));
+    }
+
+    [Fact]
+    public async Task PdfRejectionLeavesSeededFinanceStateUntouched()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var tagResponse = await SendAsync(Post("/v1/finance/merchant-tags", Json(new { display_name = "SeededTag" }), session: session));
+        Assert.Equal(HttpStatusCode.Created, tagResponse.StatusCode);
+        var tagId = (await BodyAsync(tagResponse)).GetProperty("id").GetGuid();
+        var categoriesBody = await BodyAsync(await SendAsync(Get("/v1/finance/categories", session: session)));
+        var groceriesId = categoriesBody.GetProperty("categories").EnumerateArray()
+            .First(item => item.GetProperty("display_name").GetString() == "Groceries").GetProperty("id").GetGuid();
+        const string header = "one\ntwo\nthree\nfour\nfive\nsix\nDate,Amount,Balance,Description\n";
+        var seedReview = await PrepareAsync(
+            session,
+            accountId,
+            Encoding.UTF8.GetBytes(header + "2025/03/01,-10.00,0.00,Seeded merchant one\n2025/03/02,-20.00,0.00,Seeded merchant two\n"),
+            new DateOnly(2025, 3, 1),
+            new DateOnly(2025, 3, 31));
+        var seedReviewId = seedReview.GetProperty("summary").GetProperty("id").GetGuid();
+        var seedRow = Rows(seedReview)[0];
+        var tagged = await BodyAsync(await SendAsync(Patch(
+            $"{ReviewsPath}/{seedReviewId}",
+            Json(new
+            {
+                expected_review_version = Version(seedReview),
+                decisions = new[]
+                {
+                    new
+                    {
+                        row_id = seedRow.GetProperty("row_id").GetGuid(),
+                        selected_tag_ids = new[] { tagId },
+                        selected_category_id = groceriesId,
+                    },
+                },
+            }),
+            session: session)));
+        var seedCommit = await SendAsync(Post($"{ReviewsPath}/{seedReviewId}/commit", Json(CommitBody(tagged)), session: session));
+        Assert.Equal(HttpStatusCode.Created, seedCommit.StatusCode);
+        Assert.Equal(2L, await CountRowsAsync("transactions"));
+        Assert.Equal(1L, await CountRowsAsync("statement_imports"));
+        Assert.Equal(1L, await CountRowsAsync("import_commit_receipts"));
+        Assert.Equal(1L, await CountRowsAsync("transaction_merchant_tags"));
+
+        var live = await PrepareAsync(
+            session,
+            accountId,
+            Encoding.UTF8.GetBytes(header + "2025/04/01,-30.00,0.00,Live merchant\n"),
+            new DateOnly(2025, 4, 1),
+            new DateOnly(2025, 4, 30));
+        var liveReviewId = live.GetProperty("summary").GetProperty("id").GetGuid();
+        string before = await CustomerFinanceSnapshotAsync(customerId, accountId);
+
+        var file = ProductionPdfFixture.Build(4, asset: ProductionAssetVariant.DifferentBytes, balance: ProductionPdfFixture.PrivacyBalance);
+        var inspect = await SendAsync(MultipartPost(
+            InspectPath,
+            file,
+            Json(new { financial_account_id = accountId, source_kind = "standard_bank_pdf", }),
+            session: session));
+        Assert.Equal(HttpStatusCode.BadRequest, inspect.StatusCode);
+        Assert.Equal("unsupported_layout", await ErrorKindAsync(inspect));
+        string inspectText = await inspect.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(ProductionPdfFixture.PrivacyBalance, inspectText, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"summary\"", inspectText, StringComparison.Ordinal);
+
+        var prepare = await SendAsync(MultipartPost(
+            ReviewsPath,
+            file,
+            Json(new { financial_account_id = accountId, source_kind = "standard_bank_pdf", start_date = "2025-01-01", end_date = "2025-01-31", currency = "ZAR", confirm_zar = true, }),
+            session: session));
+        Assert.Equal(HttpStatusCode.BadRequest, prepare.StatusCode);
+        Assert.Equal("unsupported_layout", await ErrorKindAsync(prepare));
+        string prepareText = await prepare.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(ProductionPdfFixture.PrivacyBalance, prepareText, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"summary\"", prepareText, StringComparison.Ordinal);
+
+        Assert.Equal(before, await CustomerFinanceSnapshotAsync(customerId, accountId));
+        var liveRead = await SendAsync(Get($"{ReviewsPath}/{liveReviewId}", session: session));
+        Assert.Equal(HttpStatusCode.OK, liveRead.StatusCode);
+        Assert.Equal(Version(live), Version(await BodyAsync(liveRead)));
     }
 
     [Fact]
@@ -1288,12 +1410,12 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
 
         var inspect = await SendAsync(MultipartPost(InspectPath, file, inspectOptions, session: session));
         Assert.Equal(HttpStatusCode.BadRequest, inspect.StatusCode);
-        Assert.Equal("pdf_import_deferred", await ErrorKindAsync(inspect));
+        Assert.Equal("text_pdf_required", await ErrorKindAsync(inspect));
 
         var prepareOptions = Json(new { financial_account_id = accountId, source_kind = "standard_bank_pdf", start_date = "2025-01-01", end_date = "2025-01-31", currency = "ZAR", confirm_zar = true, });
         var prepare = await SendAsync(MultipartPost(ReviewsPath, file, prepareOptions, session: session));
         Assert.Equal(HttpStatusCode.BadRequest, prepare.StatusCode);
-        Assert.Equal("pdf_import_deferred", await ErrorKindAsync(prepare));
+        Assert.Equal("text_pdf_required", await ErrorKindAsync(prepare));
 
         Assert.Equal(0L, await CountRowsAsync("import_reviews"));
         Assert.Equal(0L, await CountRowsAsync("import_review_rows"));
@@ -1303,13 +1425,36 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
     }
 
     [Fact]
-    public async Task PdfInvalidCandidateIsDeferredBeforeReview()
+    public async Task PdfInvalidCandidateCreatesAReviewAndRequiresSkip()
     {
-        await AssertPdfRejectionHasNoEffectsAsync("Invalid merchant", BuildPdfWithRecoverableInvalidRow());
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var review = await PrepareAsync(
+            session,
+            accountId,
+            BuildPdfWithRecoverableInvalidRow(),
+            new DateOnly(2025, 2, 1),
+            new DateOnly(2025, 2, 28),
+            sourceKind: "standard_bank_pdf");
+        var summary = review.GetProperty("summary");
+        var reviewId = summary.GetProperty("id").GetGuid();
+        Assert.Equal(2, summary.GetProperty("total_rows").GetInt32());
+        Assert.Equal(1, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        var invalid = Assert.Single(Rows(review), row => row.GetProperty("validation_codes").GetArrayLength() > 0);
+
+        var blocked = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
+        Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
+        Assert.Equal("invalid_rows", await ErrorKindAsync(blocked));
+
+        var patched = await SkipRowAsync(session, reviewId, review, invalid);
+        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(patched)), session: session));
+        Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
+        Assert.Equal(1L, await CountRowsAsync("transactions"));
+        Assert.Equal(1L, await CountRowsAsync("statement_imports"));
     }
 
     [Fact]
-    public async Task PdfDeferredResponseDoesNotExposeBalances()
+    public async Task PdfResponseDoesNotExposeBalances()
     {
         List<PdfText> texts = new List<PdfText>(StatementFixtureBuilder.HandAuthoredSmallPdfTexts())
         {
@@ -1320,7 +1465,22 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         };
         MinimalPdfBuilder pdf = new MinimalPdfBuilder();
         pdf.AddPage(texts);
-        await AssertPdfRejectionHasNoEffectsAsync("9,999.99", pdf.Build());
+
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var review = await PrepareAsync(
+            session,
+            accountId,
+            pdf.Build(),
+            new DateOnly(2025, 2, 1),
+            new DateOnly(2025, 2, 28),
+            sourceKind: "standard_bank_pdf");
+
+        string reviewText = review.GetRawText();
+        Assert.DoesNotContain("9,999.99", reviewText, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"balance\"", reviewText, StringComparison.Ordinal);
+        Assert.Equal(3, review.GetProperty("summary").GetProperty("total_rows").GetInt32());
+        Assert.Equal(0L, await CountRowsAsync("statement_imports"));
     }
 
     private static byte[] BuildPdfWithHeaderlessCanaryPage()
@@ -1362,40 +1522,74 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
     [Fact]
     public async Task PdfMetadataPreambleIsRejectedWithoutEffects()
     {
-        await AssertPdfRejectionHasNoEffectsAsync("PRIVATE_ACCOUNT_7731", BuildPdfWithMetadataPreamble());
+        await AssertPdfRejectionHasNoEffectsAsync("PRIVATE_ACCOUNT_7731", BuildPdfWithMetadataPreamble(), "unsupported_layout");
     }
 
     [Fact]
     public async Task PdfConflictingHeaderBalanceIsRejectedWithoutEffects()
     {
-        await AssertPdfRejectionHasNoEffectsAsync("9,999.99", BuildPdfWithConflictingHeaderBalance());
+        await AssertPdfRejectionHasNoEffectsAsync("9,999.99", BuildPdfWithConflictingHeaderBalance(), "unsupported_layout");
     }
 
     [Fact]
     public async Task PdfNegativeXRowIsRejectedWithoutEffects()
     {
-        await AssertPdfRejectionHasNoEffectsAsync("UNMAPPED_CANARY_4421", BuildPdfWithNegativeXRow());
+        await AssertPdfRejectionHasNoEffectsAsync("UNMAPPED_CANARY_4421", BuildPdfWithNegativeXRow(), "unsupported_layout");
     }
 
     [Fact]
     public async Task PdfNegativeXTotalIsRejectedWithoutEffects()
     {
-        await AssertPdfRejectionHasNoEffectsAsync("UNMAPPED_CANARY_4421", BuildPdfWithNegativeXTotal());
+        await AssertPdfRejectionHasNoEffectsAsync("UNMAPPED_CANARY_4421", BuildPdfWithNegativeXTotal(), "unsupported_layout");
     }
 
     [Fact]
-    public async Task PdfZeroDayCandidateIsDeferredBeforeReview()
+    public async Task PdfZeroDayCandidateCreatesAReviewAndRequiresSkip()
     {
-        await AssertPdfRejectionHasNoEffectsAsync("Zero day", BuildPdfWithZeroDayRow());
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var review = await PrepareAsync(session, accountId, BuildPdfWithZeroDayRow(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), sourceKind: "standard_bank_pdf");
+        var summary = review.GetProperty("summary");
+        var reviewId = summary.GetProperty("id").GetGuid();
+        Assert.Equal(2, summary.GetProperty("total_rows").GetInt32());
+        Assert.Equal(1, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        var invalid = Assert.Single(Rows(review), row => row.GetProperty("validation_codes").GetArrayLength() > 0);
+
+        var blocked = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
+        Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
+        Assert.Equal("invalid_rows", await ErrorKindAsync(blocked));
+
+        var patched = await SkipRowAsync(session, reviewId, review, invalid);
+        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(patched)), session: session));
+        Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
+        Assert.Equal(1L, await CountRowsAsync("transactions"));
+        Assert.Equal(1L, await CountRowsAsync("statement_imports"));
     }
 
     [Fact]
-    public async Task PdfDisqualifiedTotalIsDeferredBeforeReview()
+    public async Task PdfDisqualifiedTotalCreatesAReviewAndRequiresSkip()
     {
-        await AssertPdfRejectionHasNoEffectsAsync("Total payments", BuildPdfWithTotalBeforeSummary());
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var review = await PrepareAsync(session, accountId, BuildPdfWithTotalBeforeSummary(), new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28), sourceKind: "standard_bank_pdf");
+        var summary = review.GetProperty("summary");
+        var reviewId = summary.GetProperty("id").GetGuid();
+        Assert.Equal(4, summary.GetProperty("total_rows").GetInt32());
+        Assert.Equal(1, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        var invalid = Assert.Single(Rows(review), row => row.GetProperty("validation_codes").GetArrayLength() > 0);
+
+        var blocked = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
+        Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
+        Assert.Equal("invalid_rows", await ErrorKindAsync(blocked));
+
+        var patched = await SkipRowAsync(session, reviewId, review, invalid);
+        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(patched)), session: session));
+        Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
+        Assert.Equal(3L, await CountRowsAsync("transactions"));
+        Assert.Equal(1L, await CountRowsAsync("statement_imports"));
     }
 
-    private async Task AssertPdfRejectionHasNoEffectsAsync(string canary, byte[] file)
+    private async Task AssertPdfRejectionHasNoEffectsAsync(string canary, byte[] file, string reason)
     {
         var (session, _) = await NewCustomerAsync();
         var accountId = await CreateAccountAsync(session);
@@ -1406,7 +1600,7 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var inspect = await SendAsync(MultipartPost(InspectPath, file, inspectOptions, session: session));
         Assert.Equal(HttpStatusCode.BadRequest, inspect.StatusCode);
         var inspectText = await inspect.Content.ReadAsStringAsync();
-        Assert.Contains("pdf_import_deferred", inspectText, StringComparison.Ordinal);
+        Assert.Equal(reason, await ErrorKindAsync(inspect));
         Assert.DoesNotContain(canary, inspectText, StringComparison.Ordinal);
         Assert.DoesNotContain("\"preview\"", inspectText, StringComparison.Ordinal);
         Assert.DoesNotContain("\"summary\"", inspectText, StringComparison.Ordinal);
@@ -1419,7 +1613,7 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var prepare = await SendAsync(MultipartPost(ReviewsPath, file, prepareOptions, session: session));
         Assert.Equal(HttpStatusCode.BadRequest, prepare.StatusCode);
         var prepareText = await prepare.Content.ReadAsStringAsync();
-        Assert.Contains("pdf_import_deferred", prepareText, StringComparison.Ordinal);
+        Assert.Equal(reason, await ErrorKindAsync(prepare));
         Assert.DoesNotContain(canary, prepareText, StringComparison.Ordinal);
         Assert.DoesNotContain("\"summary\"", prepareText, StringComparison.Ordinal);
         Assert.Equal(importVersion, await ScalarAsync($"SELECT import_version FROM financial_accounts WHERE id = '{accountId}'"));
@@ -1838,6 +2032,43 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         Assert.Equal(1L, await ScalarAsync($"SELECT COUNT(*) FROM import_reviews WHERE customer_id = '{customerId}' AND id = '{reviewId}'"));
     }
 
+    private async Task<string> CustomerFinanceSnapshotAsync(Guid customerId, Guid accountId)
+    {
+        string transactions = (await StringScalarAsync($"""
+            SELECT COALESCE(md5(string_agg(row_to_json(t)::text, '|' ORDER BY t.id)), 'empty')
+            FROM transactions t WHERE t.customer_id = '{customerId}'
+            """))!;
+        string imports = (await StringScalarAsync($"""
+            SELECT COALESCE(md5(string_agg(row_to_json(t)::text, '|' ORDER BY t.id)), 'empty')
+            FROM statement_imports t WHERE t.customer_id = '{customerId}'
+            """))!;
+        string receipts = (await StringScalarAsync($"""
+            SELECT COALESCE(md5(string_agg(row_to_json(t)::text, '|' ORDER BY t.id)), 'empty')
+            FROM import_commit_receipts t WHERE t.customer_id = '{customerId}'
+            """))!;
+        string tagLinks = (await StringScalarAsync($"""
+            SELECT COALESCE(md5(string_agg(row_to_json(t)::text, '|' ORDER BY t.transaction_id, t.merchant_tag_id)), 'empty')
+            FROM transaction_merchant_tags t WHERE t.customer_id = '{customerId}'
+            """))!;
+        string reviews = (await StringScalarAsync($"""
+            SELECT COALESCE(md5(string_agg(row_to_json(t)::text, '|' ORDER BY t.id)), 'empty')
+            FROM import_reviews t WHERE t.customer_id = '{customerId}'
+            """))!;
+        string reviewRows = (await StringScalarAsync($"""
+            SELECT COALESCE(md5(string_agg(row_to_json(t)::text, '|' ORDER BY t.row_id)), 'empty')
+            FROM import_review_rows t WHERE t.customer_id = '{customerId}'
+            """))!;
+        string account = (await StringScalarAsync($"""
+            SELECT md5(row_to_json(t)::text) FROM financial_accounts t WHERE t.id = '{accountId}'
+            """))!;
+        string categories = (await StringScalarAsync("""
+            SELECT COALESCE(md5(string_agg(row_to_json(t)::text, '|' ORDER BY t.id)), 'empty')
+            FROM categories t
+            """))!;
+
+        return string.Join("|", transactions, imports, receipts, tagLinks, reviews, reviewRows, account, categories);
+    }
+
     private async Task AssertNoImportEffectsAsync()
     {
         Assert.Equal(0L, await CountRowsAsync("import_reviews"));
@@ -1975,10 +2206,323 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
     }
 
     [Fact]
-    public async Task PdfFixtureImportIsDeferredBeforeReview()
+    public async Task PdfLegacyFixtureCreatesAReview()
     {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
         var fixture = StatementFixtureBuilder.BuildStandardBankPdf(4, 49, 66);
-        await AssertPdfRejectionHasNoEffectsAsync("Synthetic merchant", fixture.Bytes);
+        var review = await PrepareAsync(session, accountId, fixture.Bytes, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), sourceKind: "standard_bank_pdf");
+        var summary = review.GetProperty("summary");
+        Assert.Equal(49, summary.GetProperty("total_rows").GetInt32());
+        Assert.Equal(42, summary.GetProperty("imported_count").GetInt32());
+        Assert.Equal(7, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        Assert.Equal(0, summary.GetProperty("suppressed_count").GetInt32());
+    }
+
+    [Fact]
+    public async Task PdfProductionFixtureCreatesAReviewAndCommits()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var file = ProductionPdfFixture.Build(4);
+        var inspect = await InspectAsync(session, accountId, file, "standard_bank_pdf");
+        Assert.Equal("standard_bank_pdf", inspect.GetProperty("detected_source_kind").GetString());
+        Assert.Equal(20, inspect.GetProperty("preview").GetArrayLength());
+        Assert.True(inspect.GetProperty("preview_truncated").GetBoolean());
+        Assert.True(inspect.GetProperty("can_prepare").GetBoolean());
+
+        var review = await PrepareAsync(session, accountId, file, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), sourceKind: "standard_bank_pdf");
+        var summary = review.GetProperty("summary");
+        var reviewId = summary.GetProperty("id").GetGuid();
+        Assert.Equal(49, summary.GetProperty("total_rows").GetInt32());
+        Assert.Equal(49, summary.GetProperty("imported_count").GetInt32());
+
+        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
+        Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
+        Assert.Equal(49L, await CountRowsAsync("transactions"));
+        Assert.Equal(1L, await CountRowsAsync("statement_imports"));
+    }
+
+    [Fact]
+    public async Task PdfReviewAppliesCategoryDefaultsChangesClearsAndProvenance()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var categoriesBody = await BodyAsync(await SendAsync(Get("/v1/finance/categories", session: session)));
+        var categoryList = categoriesBody.GetProperty("categories").EnumerateArray().ToArray();
+        var groceriesId = categoryList.First(item => item.GetProperty("display_name").GetString() == "Groceries").GetProperty("id").GetGuid();
+        var travelId = categoryList.First(item => item.GetProperty("display_name").GetString() == "Travel").GetProperty("id").GetGuid();
+        var systemId = categoryList.First(item => item.GetProperty("is_system").GetBoolean()).GetProperty("id").GetGuid();
+        var review = await PrepareAsync(session, accountId, ProductionPdfFixture.Build(4), new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), sourceKind: "standard_bank_pdf");
+        var summary = review.GetProperty("summary");
+        var reviewId = summary.GetProperty("id").GetGuid();
+        Assert.Equal(0, summary.GetProperty("categorised_count").GetInt32());
+        var initialRows = Rows(review);
+        Assert.All(initialRows, row =>
+        {
+            Assert.Equal(JsonValueKind.Null, row.GetProperty("selected_category_id").ValueKind);
+            Assert.False(row.GetProperty("category_decided").GetBoolean());
+        });
+
+        var alpha = initialRows.Single(row => row.GetProperty("description").GetString() == "Synthetic row 1");
+        var beta = initialRows.Single(row => row.GetProperty("description").GetString() == "Synthetic row 2");
+        var patched = await BodyAsync(await SendAsync(Patch(
+            $"{ReviewsPath}/{reviewId}",
+            Json(new
+            {
+                expected_review_version = Version(review),
+                decisions = new[]
+                {
+                    new { row_id = alpha.GetProperty("row_id").GetGuid(), selected_category_id = (Guid?)groceriesId },
+                    new { row_id = beta.GetProperty("row_id").GetGuid(), selected_category_id = (Guid?)travelId },
+                },
+            }),
+            session: session)));
+        Assert.Equal(2, patched.GetProperty("categorised_count").GetInt32());
+
+        var cleared = await BodyAsync(await SendAsync(Patch(
+            $"{ReviewsPath}/{reviewId}",
+            Json(new
+            {
+                expected_review_version = Version(patched),
+                decisions = new[] { new { row_id = beta.GetProperty("row_id").GetGuid(), selected_category_id = (Guid?)null } },
+            }),
+            session: session)));
+        Assert.Equal(1, cleared.GetProperty("categorised_count").GetInt32());
+
+        var current = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session)));
+        var currentRows = Rows(current);
+        var currentAlpha = currentRows.Single(row => row.GetProperty("description").GetString() == "Synthetic row 1");
+        var currentBeta = currentRows.Single(row => row.GetProperty("description").GetString() == "Synthetic row 2");
+        var currentGamma = currentRows.Single(row => row.GetProperty("description").GetString() == "Synthetic row 3");
+        Assert.Equal(groceriesId, currentAlpha.GetProperty("selected_category_id").GetGuid());
+        Assert.True(currentAlpha.GetProperty("category_decided").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, currentBeta.GetProperty("selected_category_id").ValueKind);
+        Assert.True(currentBeta.GetProperty("category_decided").GetBoolean());
+        Assert.False(currentGamma.GetProperty("category_decided").GetBoolean());
+
+        var unavailable = await SendAsync(Patch(
+            $"{ReviewsPath}/{reviewId}",
+            Json(new
+            {
+                expected_review_version = Version(current),
+                decisions = new[] { new { row_id = currentAlpha.GetProperty("row_id").GetGuid(), selected_category_id = (Guid?)systemId } },
+            }),
+            session: session));
+        Assert.Equal(HttpStatusCode.Conflict, unavailable.StatusCode);
+        Assert.Equal("category_unavailable", await ErrorKindAsync(unavailable));
+
+        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(current)), session: session));
+        Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
+        Assert.Equal(groceriesId, Guid.Parse((await StringScalarAsync($"SELECT category_id::text FROM transactions WHERE description = 'Synthetic row 1'"))!));
+        Assert.True(bool.Parse((await StringScalarAsync($"SELECT category_confirmed::text FROM transactions WHERE description = 'Synthetic row 1'"))!));
+        Assert.Equal(systemId, Guid.Parse((await StringScalarAsync($"SELECT category_id::text FROM transactions WHERE description = 'Synthetic row 2'"))!));
+        Assert.True(bool.Parse((await StringScalarAsync($"SELECT category_confirmed::text FROM transactions WHERE description = 'Synthetic row 2'"))!));
+        Assert.Equal(systemId, Guid.Parse((await StringScalarAsync($"SELECT category_id::text FROM transactions WHERE description = 'Synthetic row 3'"))!));
+        Assert.False(bool.Parse((await StringScalarAsync($"SELECT category_confirmed::text FROM transactions WHERE description = 'Synthetic row 3'"))!));
+    }
+
+    [Fact]
+    public async Task PdfProductionInvalidRowsRequireSkipBeforeCommit()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var review = await PrepareAsync(session, accountId, ProductionPdfFixture.Build(4, "mixed"), new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), sourceKind: "standard_bank_pdf");
+        var summary = review.GetProperty("summary");
+        var reviewId = summary.GetProperty("id").GetGuid();
+        Assert.Equal(49, summary.GetProperty("total_rows").GetInt32());
+        Assert.Equal(25, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        var invalidRows = Rows(review).Where(row => row.GetProperty("validation_codes").GetArrayLength() > 0).ToArray();
+        Assert.Equal(25, invalidRows.Length);
+        string[] rowsBefore = ImmutableRowSignatures(review);
+        int versionBefore = Version(review);
+        string hashBefore = Hash(review);
+        long reviewRowsBefore = await CountRowsAsync("import_review_rows");
+
+        var blocked = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
+        Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
+        Assert.Equal("invalid_rows", await ErrorKindAsync(blocked));
+
+        var unchanged = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session)));
+        Assert.Equal(versionBefore, Version(unchanged));
+        Assert.Equal(hashBefore, Hash(unchanged));
+        Assert.Equal(rowsBefore, ImmutableRowSignatures(unchanged));
+        Assert.Equal(reviewRowsBefore, await CountRowsAsync("import_review_rows"));
+        Assert.Equal(0L, await CountRowsAsync("transactions"));
+        Assert.Equal(0L, await CountRowsAsync("statement_imports"));
+
+        var patched = review;
+        foreach (var row in invalidRows)
+        {
+            patched = await SkipRowAsync(session, reviewId, patched, row);
+        }
+        Assert.Equal(25, Summary(patched).GetProperty("skipped_count").GetInt32());
+        Assert.Equal(24, Summary(patched).GetProperty("imported_count").GetInt32());
+        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(patched)), session: session));
+        Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
+        Assert.Equal(24L, await CountRowsAsync("transactions"));
+        Assert.Equal(1L, await CountRowsAsync("statement_imports"));
+    }
+
+    [Fact]
+    public async Task PdfProductionBalancesAndMetadataAreNotExposed()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var file = ProductionPdfFixture.Build(4, balance: ProductionPdfFixture.PrivacyBalance, privacyMetadata: true);
+        var review = await PrepareAsync(session, accountId, file, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31), sourceKind: "standard_bank_pdf");
+
+        string reviewText = review.GetRawText();
+        string[] canaries =
+        [
+            ProductionPdfFixture.PrivacyHolder,
+            ProductionPdfFixture.PrivacyStreet,
+            ProductionPdfFixture.PrivacySuburb,
+            ProductionPdfFixture.PrivacyProduct,
+            ProductionPdfFixture.PrivacyCity,
+            ProductionPdfFixture.PrivacyOpeningBalance,
+            ProductionPdfFixture.PrivacyAvailableBalance,
+            ProductionPdfFixture.PrivacyPaymentsTotal,
+            ProductionPdfFixture.PrivacyDepositsTotal,
+            ProductionPdfFixture.PrivacyBalance,
+        ];
+        foreach (string canary in canaries)
+        {
+            Assert.DoesNotContain(canary, reviewText, StringComparison.Ordinal);
+            Assert.False(Factory.LogCapture.Contains(canary));
+        }
+
+        Assert.DoesNotContain("\"balance\"", reviewText, StringComparison.Ordinal);
+        Assert.Equal(49, review.GetProperty("summary").GetProperty("total_rows").GetInt32());
+        long storedCanaries = await CountWhereAsync(
+            "import_review_rows",
+            $"customer_id = '{customerId}' AND raw_values::text LIKE '%CANARY%'");
+        Assert.Equal(0L, storedCanaries);
+        long storedBalanceCanary = await CountWhereAsync(
+            "import_review_rows",
+            $"customer_id = '{customerId}' AND raw_values::text LIKE '%{ProductionPdfFixture.PrivacyBalance}%'");
+        Assert.Equal(0L, storedBalanceCanary);
+    }
+
+    [Fact]
+    public void PdfProductionBalanceAndMetadataVariationsHaveEqualMappedRows()
+    {
+        var first = StandardBankPdfParser.Parse(
+            ProductionPdfFixture.Build(4, balance: "1,000.00"),
+            new DateOnly(2025, 1, 1),
+            new DateOnly(2025, 1, 31),
+            2000);
+        var second = StandardBankPdfParser.Parse(
+            ProductionPdfFixture.Build(4, balance: "9,999.99", privacyMetadata: true),
+            new DateOnly(2025, 1, 1),
+            new DateOnly(2025, 1, 31),
+            2000);
+
+        Assert.Equal(first.Rows.Count, second.Rows.Count);
+        for (int index = 0; index < first.Rows.Count; index++)
+        {
+            var left = first.Rows[index];
+            var right = second.Rows[index];
+            Assert.Equal(left.TransactionDate, right.TransactionDate);
+            Assert.Equal(left.Description, right.Description);
+            Assert.Equal(left.AmountCents, right.AmountCents);
+            Assert.Equal(left.RawValues["date"], right.RawValues["date"]);
+            Assert.Equal(left.RawValues["description"], right.RawValues["description"]);
+            Assert.Equal(left.RawValues["amount"], right.RawValues["amount"]);
+            Assert.Equal(left.RawValues["flow_column"], right.RawValues["flow_column"]);
+            Assert.NotEqual(left.RowId, right.RowId);
+            Assert.Equal(left.SourceLine, right.SourceLine);
+            Assert.Equal(left.SourceRowNumber, right.SourceRowNumber);
+            Assert.Equal(
+                StatementIdentity.ComputeIdentityKey(left.TransactionDate!.Value, left.AmountCents!.Value, left.NormalizedDescription),
+                StatementIdentity.ComputeIdentityKey(right.TransactionDate!.Value, right.AmountCents!.Value, right.NormalizedDescription));
+        }
+
+        Assert.Equal(
+            StatementIdentity.ComputeStatementFingerprint(first.Rows, first.ProposedStartDate!.Value, first.ProposedEndDate!.Value),
+            StatementIdentity.ComputeStatementFingerprint(second.Rows, second.ProposedStartDate!.Value, second.ProposedEndDate!.Value));
+    }
+
+    [Fact]
+    public async Task PdfReviewPreselectsConfirmedHistoryCategory()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var categoriesBody = await BodyAsync(await SendAsync(Get("/v1/finance/categories", session: session)));
+        var groceriesId = categoriesBody.GetProperty("categories").EnumerateArray()
+            .First(item => item.GetProperty("display_name").GetString() == "Groceries").GetProperty("id").GetGuid();
+        Guid statementId = Guid.NewGuid();
+        Guid historicalId = Guid.NewGuid();
+        await ExecuteSqlAsync($"""
+            INSERT INTO statement_imports (
+                id, customer_id, financial_account_id, source_type, statement_label,
+                statement_fingerprint, start_date, end_date, created_at, updated_at)
+            VALUES (
+                '{statementId}', '{customerId}', '{accountId}', 'pdf', 'History',
+                'pdf-history-fingerprint', DATE '2024-01-01', DATE '2024-01-31', NOW(), NOW());
+            INSERT INTO transactions (
+                id, customer_id, financial_account_id, statement_import_id, transaction_date,
+                description, normalized_description, amount, category_id, category_confirmed,
+                source_type, source_row_number, identity_key, occurrence_index, created_at, updated_at)
+            VALUES (
+                '{historicalId}', '{customerId}', '{accountId}', '{statementId}', DATE '2024-01-05',
+                'Synthetic row 1', 'synthetic row 1', -10.00, '{groceriesId}', TRUE,
+                'pdf', 1, 'pdf-history-row-1', 1, NOW(), NOW());
+            """);
+
+        var review = await PrepareAsync(
+            session,
+            accountId,
+            ProductionPdfFixture.Build(4),
+            new DateOnly(2025, 1, 1),
+            new DateOnly(2025, 1, 31),
+            sourceKind: "standard_bank_pdf");
+        var row = Rows(review).Single(item => item.GetProperty("description").GetString() == "Synthetic row 1");
+        Assert.Equal(groceriesId, row.GetProperty("suggested_category_id").GetGuid());
+        Assert.Equal(groceriesId, row.GetProperty("selected_category_id").GetGuid());
+        Assert.False(row.GetProperty("category_decided").GetBoolean());
+    }
+
+    [Fact]
+    public async Task PdfInspectUsesTheProgramSharedAdmission()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        ParserAdmission admission = Factory.Services.GetRequiredService<ParserAdmission>();
+        await admission.EnterAsync(CancellationToken.None);
+        await admission.EnterAsync(CancellationToken.None);
+        try
+        {
+            var file = ProductionPdfFixture.Build(4);
+            var inspect = await SendAsync(MultipartPost(
+                InspectPath,
+                file,
+                Json(new { financial_account_id = accountId, source_kind = "standard_bank_pdf", }),
+                session: session));
+
+            Assert.Equal(HttpStatusCode.TooManyRequests, inspect.StatusCode);
+            Assert.Equal("import_busy", await ErrorKindAsync(inspect));
+        }
+        finally
+        {
+            admission.Exit();
+            admission.Exit();
+        }
+    }
+
+    private async Task<JsonElement> SkipRowAsync(string session, Guid reviewId, JsonElement review, JsonElement row)
+    {
+        var patched = await SendAsync(Patch(
+            $"{ReviewsPath}/{reviewId}",
+            Json(new
+            {
+                expected_review_version = Version(review),
+                decisions = new[] { new { row_id = row.GetProperty("row_id").GetGuid(), skip = true } },
+            }),
+            session: session));
+        Assert.Equal(HttpStatusCode.OK, patched.StatusCode);
+
+        return await BodyAsync(patched);
     }
 
     [Fact]

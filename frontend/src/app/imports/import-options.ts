@@ -49,6 +49,7 @@ export function buildUploadOptions(
   confirmZar: boolean,
   mapping: Record<string, string>,
   mode: "inspect" | "prepare",
+  century = "",
 ): ImportParseOptions {
   const options: ImportParseOptions = {
     financial_account_id: accountId,
@@ -63,10 +64,16 @@ export function buildUploadOptions(
     if (mode === "prepare" || Object.keys(mapping).length > 0) {
       options.parser_config = buildParserConfig(mapping);
     }
-  } else {
+  } else if (sourceKind === "standard_bank_pdf") {
+    const trimmed = century.trim();
     options.parser_config = {
-      format: sourceKind === "standard_bank_pdf" ? "standard_bank" : "fnb",
+      format: "standard_bank",
+      ...(/^\d+$/.test(trimmed) && Number.isSafeInteger(Number(trimmed))
+        ? { century: Number(trimmed) }
+        : {}),
     };
+  } else {
+    options.parser_config = { format: "fnb" };
   }
   return options;
 }

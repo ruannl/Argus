@@ -38,15 +38,19 @@ const SESSION_EXPIRED_MESSAGE = "Your session has expired. Please sign in again.
 const ERROR_MESSAGES: Record<ImportErrorKind, string> = {
   invalid_request: "That request could not be accepted. Refresh the review and try again.",
   file_too_large: "That statement is larger than the 10 MB limit.",
-  unsupported_format: "That file type is not supported. Use an FNB CSV/ZIP or a mapped CSV.",
+  unsupported_format:
+    "That file type is not supported. Use an FNB CSV/ZIP, a Standard Bank PDF, or a mapped CSV.",
   unsupported_encoding: "That CSV is not valid UTF-8. Re-export it as UTF-8 and try again.",
   unsafe_archive: "That archive is unsafe or contains something other than one root-level CSV.",
-  encrypted_pdf: "That PDF is password-protected. Import a text-based PDF without encryption.",
-  text_pdf_required: "That PDF has no text layer. Scanned statements are outside the MVP.",
+  encrypted_pdf:
+    "That PDF requires a password or uses unsupported protection. No records were changed.",
+  text_pdf_required:
+    "That PDF is not a supported text-based statement. Scanned or image-only PDFs, and unrecognised images, are outside the MVP.",
   unsupported_layout: "That statement layout is not recognised. No records were changed.",
   processing_limit: "That statement exceeds a processing limit. No records were changed.",
   format_confirmation_required: "Confirm the format mapping and statement dates before continuing.",
-  pdf_import_deferred: "PDF import is coming later. Use an FNB CSV/ZIP or a mapped CSV for now.",
+  pdf_import_deferred:
+    "PDF import is not available in this build. Use an FNB CSV/ZIP or a mapped CSV.",
   import_busy: "Another statement is being processed. Try again in a moment.",
   not_found: "That item no longer exists. Refresh the page and try again.",
   review_expired: "That review has expired. Upload the statement again to prepare a new review.",

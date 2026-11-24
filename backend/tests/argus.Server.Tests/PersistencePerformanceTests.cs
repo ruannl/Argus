@@ -590,6 +590,17 @@ public sealed class PersistencePerformanceTests(KitFactory factory, ITestOutputH
             customers.Add((session, customerId, accountId));
         }
 
+        // The fixture inserts 150,000 rows after the table was truncated. Give
+        // the planner current statistics so a slow or fresh database does not
+        // choose a plan based on the empty-table estimate.
+        await ExecuteSqlAsync("""
+            ANALYZE transactions;
+            ANALYZE statement_imports;
+            ANALYZE categories;
+            ANALYZE merchant_tags;
+            ANALYZE transaction_merchant_tags;
+            """);
+
         for (var round = 1; round <= WriteRounds; round++)
         {
             for (var index = 1; index <= WriteSamplesPerRound; index++)

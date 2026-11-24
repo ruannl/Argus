@@ -650,21 +650,23 @@ export default function ReviewWorkspace({
           </label>
         </nav>
 
-        <div className={TABLE_WRAPPER_CLASS}>
+        <div className={`${TABLE_WRAPPER_CLASS} finance-review-table-frame`}>
           <table
             role="table"
             aria-label="Import review rows"
-            className={`${TABLE_CLASS} min-w-[58rem] table-fixed`}
+            className={`${TABLE_CLASS} finance-review-record-table min-w-[58rem] table-fixed`}
           >
             <colgroup>
+              {/* The widths total 66rem so Category, Status and Actions all stay
+                  inside the desktop frame; the table stacks at 70rem and below. */}
+              <col className="w-[4.5rem]" />
               <col className="w-[6rem]" />
-              <col className="w-[7rem]" />
-              <col />
-              <col className="w-[6.5rem]" />
-              <col className="w-[13rem]" />
-              <col className="w-[9rem]" />
-              <col className="w-[13rem]" />
-              <col className="w-[8rem]" />
+              <col className="w-[20rem]" />
+              <col className="w-[6rem]" />
+              <col className="w-[8.5rem]" />
+              <col className="w-[10rem]" />
+              <col className="w-[5.5rem]" />
+              <col className="w-[5.5rem]" />
             </colgroup>
             <thead className={TABLE_HEAD_CLASS}>
               <tr>
@@ -681,13 +683,13 @@ export default function ReviewWorkspace({
                   Amount
                 </th>
                 <th className={TH_CLASS} scope="col">
+                  Tags
+                </th>
+                <th className={TH_CLASS} scope="col">
                   Category
                 </th>
                 <th className={TH_CLASS} scope="col">
                   Status
-                </th>
-                <th className={TH_CLASS} scope="col">
-                  Tags
                 </th>
                 <th className={`${TH_CLASS} text-right`} scope="col">
                   Actions
@@ -739,8 +741,8 @@ export default function ReviewWorkspace({
                       <td data-label="Date" className={`${TD_CLASS} whitespace-nowrap text-muted`}>
                         {row.transaction_date ?? "Date unresolved"}
                       </td>
-                      <td data-label="Description" className={`${TD_CLASS} max-w-md`}>
-                        <p className="break-words text-sm font-semibold text-ink">
+                      <td data-label="Description" className={TD_CLASS}>
+                        <p className="whitespace-normal break-words text-sm font-semibold text-ink">
                           {row.description}
                         </p>
                       </td>
@@ -749,6 +751,117 @@ export default function ReviewWorkspace({
                         className={`${TD_CLASS} text-right font-mono font-semibold whitespace-nowrap tabular-nums text-ink`}
                       >
                         {row.amount ?? "—"}
+                      </td>
+                      <td data-label="Tags" className={`${TD_CLASS} max-w-sm`}>
+                        <div className="flex flex-wrap gap-1.5 text-xs">
+                          {selected.map(({ id, tag }) => (
+                            <span
+                              className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border border-success-line bg-page px-2 py-1 font-semibold break-words text-ink"
+                              key={id}
+                            >
+                              {tag ? tag.display_name : `Unavailable tag ${id.slice(0, 8)}`}
+                              {tag?.is_archived ? " (archived)" : ""}
+                              <button
+                                className="text-muted underline underline-offset-2"
+                                disabled={busy}
+                                onClick={() => removeTag(row, id)}
+                                type="button"
+                              >
+                                Remove
+                              </button>
+                            </span>
+                          ))}
+                          {selected.length === 0 ? (
+                            <span className="font-semibold text-warning-text">
+                              No tags selected.
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {suggestions.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+                            <span className="font-semibold text-muted">Suggestions:</span>
+                            {suggestions.map((tag) => (
+                              <button
+                                className="max-w-full rounded-full border border-suggestion-line bg-suggestion-soft px-2 py-1 font-semibold break-words text-suggestion-ink disabled:opacity-60"
+                                disabled={busy}
+                                key={tag.id}
+                                onClick={() => addTag(row, tag.id)}
+                                type="button"
+                              >
+                                Add {tag.display_name}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {missingSelected.length > 0 ? (
+                          <p className="mt-2 text-xs font-semibold text-warning-ink">
+                            A selected tag is no longer available. Remove it or choose another
+                            before committing.
+                          </p>
+                        ) : null}
+
+                        <label className="mt-2 grid max-w-[13rem] gap-1 text-xs font-semibold text-ink">
+                          Choose another tag
+                          <select
+                            className="w-full rounded-lg border border-line bg-page px-2 py-1.5 text-sm font-normal text-ink"
+                            disabled={busy}
+                            onChange={(event) => {
+                              if (event.target.value) addTag(row, event.target.value);
+                              event.target.value = "";
+                            }}
+                            value=""
+                          >
+                            <option value="">Select a tag…</option>
+                            {tags
+                              .filter(
+                                (tag) => !tag.is_archived && !row.selected_tag_ids.includes(tag.id),
+                              )
+                              .map((tag) => (
+                                <option key={tag.id} value={tag.id}>
+                                  {tag.display_name}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+
+                        <form
+                          action={async (formData) => {
+                            const result = await createMerchantTagAction(formData);
+                            if (!result.ok || !result.value) {
+                              setMessage({ tone: "error", text: result.message });
+                              return;
+                            }
+                            setTagList((current) =>
+                              current.some((tag) => tag.id === result.value!.id)
+                                ? current
+                                : [...current, result.value!],
+                            );
+                            addTag(row, result.value.id);
+                          }}
+                          className="mt-2 grid max-w-[13rem] gap-2"
+                        >
+                          <label className="grid min-w-0 gap-1 text-xs font-semibold text-ink">
+                            New tag
+                            <input
+                              aria-label={`New tag name for row ${rowNumber}`}
+                              className="rounded-lg border border-line bg-page px-2 py-1.5 text-sm font-normal text-ink"
+                              disabled={busy}
+                              name="display_name"
+                              placeholder="e.g. Landlord"
+                              required
+                            />
+                          </label>
+                          <button
+                            aria-label={`Create and add a tag for row ${rowNumber}`}
+                            className="w-fit rounded-full border border-line px-3 py-1.5 text-xs font-bold text-ink disabled:opacity-60"
+                            disabled={busy}
+                            type="submit"
+                          >
+                            Create and add
+                          </button>
+                        </form>
                       </td>
                       <td data-label="Category" className={TD_CLASS}>
                         <div className="flex flex-col gap-2 text-xs">
@@ -905,117 +1018,6 @@ export default function ReviewWorkspace({
                             <span className="text-muted">OK</span>
                           )}
                         </div>
-                      </td>
-                      <td data-label="Tags" className={`${TD_CLASS} max-w-sm`}>
-                        <div className="flex flex-wrap gap-1.5 text-xs">
-                          {selected.map(({ id, tag }) => (
-                            <span
-                              className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border border-success-line bg-page px-2 py-1 font-semibold break-words text-ink"
-                              key={id}
-                            >
-                              {tag ? tag.display_name : `Unavailable tag ${id.slice(0, 8)}`}
-                              {tag?.is_archived ? " (archived)" : ""}
-                              <button
-                                className="text-muted underline underline-offset-2"
-                                disabled={busy}
-                                onClick={() => removeTag(row, id)}
-                                type="button"
-                              >
-                                Remove
-                              </button>
-                            </span>
-                          ))}
-                          {selected.length === 0 ? (
-                            <span className="font-semibold text-warning-text">
-                              No tags selected.
-                            </span>
-                          ) : null}
-                        </div>
-
-                        {suggestions.length > 0 ? (
-                          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
-                            <span className="font-semibold text-muted">Suggestions:</span>
-                            {suggestions.map((tag) => (
-                              <button
-                                className="max-w-full rounded-full border border-suggestion-line bg-suggestion-soft px-2 py-1 font-semibold break-words text-suggestion-ink disabled:opacity-60"
-                                disabled={busy}
-                                key={tag.id}
-                                onClick={() => addTag(row, tag.id)}
-                                type="button"
-                              >
-                                Add {tag.display_name}
-                              </button>
-                            ))}
-                          </div>
-                        ) : null}
-
-                        {missingSelected.length > 0 ? (
-                          <p className="mt-2 text-xs font-semibold text-warning-ink">
-                            A selected tag is no longer available. Remove it or choose another
-                            before committing.
-                          </p>
-                        ) : null}
-
-                        <label className="mt-2 grid max-w-[13rem] gap-1 text-xs font-semibold text-ink">
-                          Choose another tag
-                          <select
-                            className="w-full rounded-lg border border-line bg-page px-2 py-1.5 text-sm font-normal text-ink"
-                            disabled={busy}
-                            onChange={(event) => {
-                              if (event.target.value) addTag(row, event.target.value);
-                              event.target.value = "";
-                            }}
-                            value=""
-                          >
-                            <option value="">Select a tag…</option>
-                            {tags
-                              .filter(
-                                (tag) => !tag.is_archived && !row.selected_tag_ids.includes(tag.id),
-                              )
-                              .map((tag) => (
-                                <option key={tag.id} value={tag.id}>
-                                  {tag.display_name}
-                                </option>
-                              ))}
-                          </select>
-                        </label>
-
-                        <form
-                          action={async (formData) => {
-                            const result = await createMerchantTagAction(formData);
-                            if (!result.ok || !result.value) {
-                              setMessage({ tone: "error", text: result.message });
-                              return;
-                            }
-                            setTagList((current) =>
-                              current.some((tag) => tag.id === result.value!.id)
-                                ? current
-                                : [...current, result.value!],
-                            );
-                            addTag(row, result.value.id);
-                          }}
-                          className="mt-2 grid max-w-[13rem] gap-2"
-                        >
-                          <label className="grid min-w-0 gap-1 text-xs font-semibold text-ink">
-                            New tag
-                            <input
-                              aria-label={`New tag name for row ${rowNumber}`}
-                              className="rounded-lg border border-line bg-page px-2 py-1.5 text-sm font-normal text-ink"
-                              disabled={busy}
-                              name="display_name"
-                              placeholder="e.g. Landlord"
-                              required
-                            />
-                          </label>
-                          <button
-                            aria-label={`Create and add a tag for row ${rowNumber}`}
-                            className="w-fit rounded-full border border-line px-3 py-1.5 text-xs font-bold text-ink disabled:opacity-60"
-                            disabled={busy}
-                            type="submit"
-                          >
-                            Create and add
-                          </button>
-                        </form>
                       </td>
                       <td data-label="Actions" className={TD_CLASS}>
                         <div className="flex flex-col items-end gap-2">

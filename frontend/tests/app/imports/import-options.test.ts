@@ -72,4 +72,15 @@ describe("import upload options", () => {
         .parser_config,
     ).toEqual({ format: "standard_bank" });
   });
+
+  it("sends a valid PDF century and omits an invalid one", () => {
+    expect(
+      buildUploadOptions("standard_bank_pdf", "account", "", "", false, {}, "inspect", "2000")
+        .parser_config,
+    ).toEqual({ format: "standard_bank", century: 2000 });
+    expect(
+      buildUploadOptions("standard_bank_pdf", "account", "", "", false, {}, "inspect", "20x0")
+        .parser_config,
+    ).toEqual({ format: "standard_bank" });
+  });
 });

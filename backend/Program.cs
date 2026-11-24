@@ -98,7 +98,8 @@ builder.Services.AddSingleton<IMailer, ResendMailer>();
 builder.Services.AddSingleton<AccountApi>();
 builder.Services.AddSingleton<FinanceApi>();
 builder.Services.AddSingleton<argus.Server.Imports.ParserAdmission>();
-builder.Services.AddSingleton<argus.Server.Imports.PdfParserRunner>();
+builder.Services.AddSingleton<argus.Server.Imports.PdfParserRunner>(provider =>
+    new argus.Server.Imports.PdfParserRunner(admission: provider.GetRequiredService<argus.Server.Imports.ParserAdmission>()));
 builder.Services.AddSingleton<argus.Server.Imports.IImportFaultInjector>(argus.Server.Imports.NoopImportFaultInjector.Instance);
 builder.Services.AddSingleton<StatementImportStore>();
 builder.Services.AddSingleton<StatementImportApi>();
