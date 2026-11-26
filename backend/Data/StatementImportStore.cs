@@ -119,6 +119,12 @@ public sealed record ImportStatementSummary(Guid Id,
                                             DateTime CreatedAt,
                                             DateTime UpdatedAt);
 
+public sealed record ImportPreviousStatement(Guid Id,
+                                             string SourceType,
+                                             DateOnly StartDate,
+                                             DateOnly EndDate,
+                                             DateTime CreatedAt);
+
 public sealed record ImportTagRecord(Guid Id, string DisplayName);
 
 public sealed record ImportStatementRowRecord(Guid Id,
@@ -328,11 +334,7 @@ public sealed class StatementImportStore
         await CategoryDefaults.EnsureSeededAsync(context, customerId, customerLocked: true, cancellationToken);
 
         var snapshot = await ComputeDuplicateSnapshotAsync(context, customerId, accountId, parsed.Rows, null, cancellationToken);
-        var rows = snapshot.Rows.Select(row => row with
-        {
-            SelectedCategoryId = row.SuggestedCategoryId,
-            CategoryDecided = false,
-        }).ToArray();
+        var rows = snapshot.Rows.Select(WithReviewDefaults).ToArray();
         long payloadBytes = EstimatePayload(parsed, config, rows);
         if (usedPayloadBytes + payloadBytes > ImportLimits.MaxOpenReviewPayloadBytes)
         {
@@ -380,7 +382,7 @@ public sealed class StatementImportStore
             counts.Suppressed,
             counts.Skipped,
             rows.Count(row => row.ValidationCodes.Length > 0 && !row.Skip),
-            rows.Count(row => row.WithinFileState == "pending"),
+            rows.Count(row => row.WithinFileState == "pending" && !row.Skip),
             counts.PossibleDuplicates,
             0,
             CountCategorised(rows),
@@ -685,7 +687,7 @@ public sealed class StatementImportStore
             SuppressedCount = counts.Suppressed,
             SkippedCount = counts.Skipped,
             InvalidUnskippedCount = updatedRows.Count(row => row.ValidationCodes.Length > 0 && !row.Skip),
-            WithinFilePendingCount = updatedRows.Count(row => row.WithinFileState == "pending"),
+            WithinFilePendingCount = updatedRows.Count(row => row.WithinFileState == "pending" && !row.Skip),
             PossibleDuplicateCount = counts.PossibleDuplicates,
             ExactOverrideCount = counts.ExactOverrides,
             CategorisedCount = CountCategorised(updatedRows),
@@ -799,7 +801,7 @@ public sealed class StatementImportStore
             SuppressedCount = counts.Suppressed,
             SkippedCount = counts.Skipped,
             InvalidUnskippedCount = refreshed.Count(row => row.ValidationCodes.Length > 0 && !row.Skip),
-            WithinFilePendingCount = refreshed.Count(row => row.WithinFileState == "pending"),
+            WithinFilePendingCount = refreshed.Count(row => row.WithinFileState == "pending" && !row.Skip),
             PossibleDuplicateCount = counts.PossibleDuplicates,
             ExactOverrideCount = counts.ExactOverrides,
             CategorisedCount = CountCategorised(refreshed),
@@ -1479,7 +1481,8 @@ public sealed class StatementImportStore
                     WHERE r.review_id = import_reviews.id
                       AND jsonb_array_length(r.validation_codes) > 0 AND r.skip = FALSE) AS "InvalidUnskippedCount",
                    (SELECT COUNT(*) FROM import_review_rows r
-                    WHERE r.review_id = import_reviews.id AND r.within_file_state = 'pending') AS "WithinFilePendingCount",
+                    WHERE r.review_id = import_reviews.id
+                      AND r.within_file_state = 'pending' AND r.skip = FALSE) AS "WithinFilePendingCount",
                    possible_duplicate_count AS "PossibleDuplicateCount",
                    exact_override_count AS "ExactOverrideCount",
                    (SELECT COUNT(*) FROM import_review_rows r
@@ -2112,6 +2115,35 @@ public sealed class StatementImportStore
         }
     }
 
+    private static bool IsSuppressedRow(ImportReviewRowRecord row) =>
+        row.DuplicateState is "suppressed" or "suppressed_within_file";
+
+    /// <summary>
+    /// New reviews start with unusable rows excluded: invalid rows would block
+    /// commit, and exact duplicates are already suppressed. The customer can
+    /// untick either decision.
+    /// </summary>
+    private static bool DefaultsToSkipped(ImportReviewRowRecord row) =>
+        row.ValidationCodes.Length > 0 || IsSuppressedRow(row);
+
+    /// <summary>
+    /// Applies the initial review decisions. A default-skipped repeat is stored
+    /// with an explicit per-row skip state so it no longer counts as an
+    /// unresolved group.
+    /// </summary>
+    private static ImportReviewRowRecord WithReviewDefaults(ImportReviewRowRecord row)
+    {
+        bool skip = DefaultsToSkipped(row);
+
+        return row with
+        {
+            SelectedCategoryId = row.SuggestedCategoryId,
+            CategoryDecided = false,
+            Skip = skip,
+            WithinFileState = row.WithinFileGroup is not null && skip ? "skip" : row.WithinFileState,
+        };
+    }
+
     private static RowCounts CountRows(IReadOnlyList<ImportReviewRowRecord> rows)
     {
         int imported = 0;
@@ -2120,9 +2152,13 @@ public sealed class StatementImportStore
         int exactOverrides = 0;
         foreach (var row in rows)
         {
-            bool isSuppressed = row.DuplicateState is "suppressed" or "suppressed_within_file";
+            bool isSuppressed = IsSuppressedRow(row);
             if (row.Skip)
             {
+                if (isSuppressed)
+                {
+                    suppressed++;
+                }
                 continue;
             }
 
@@ -2315,7 +2351,7 @@ public sealed class StatementImportStore
         {
             throw new ImportStoreException(ImportErrorCodes.InvalidRows);
         }
-        if (rows.Any(row => row.WithinFileState == "pending"))
+        if (rows.Any(row => row.WithinFileState == "pending" && !row.Skip))
         {
             throw new ImportStoreException(ImportErrorCodes.DuplicateDecisionRequired);
         }
@@ -2324,7 +2360,7 @@ public sealed class StatementImportStore
             throw new ImportStoreException(ImportErrorCodes.InvalidRequest);
         }
         var validRows = rows.Where(row => row.TransactionDate is not null && row.AmountCents is not null).ToList();
-        if (validRows.Count == 0 || validRows.All(row => row.Skip))
+        if (validRows.Count == 0 || validRows.All(row => row.Skip && !IsSuppressedRow(row)))
         {
             throw new ImportStoreException(ImportErrorCodes.NoIncludedRows);
         }
@@ -2522,6 +2558,52 @@ public sealed class StatementImportStore
         var summary = await ReadStatementSummaryAsync(context, customerId, receipt.StatementImportId!.Value, cancellationToken) ?? throw new ImportStoreException(ImportErrorCodes.NotFound);
 
         return new ImportCommitResult(summary, true);
+    }
+
+    /// <summary>
+    /// Returns the most recently committed statements for one owned account and
+    /// source format. FNB CSV and ZIP share a format family so the upload screen
+    /// shows the last FNB coverage regardless of which archive form was used.
+    /// </summary>
+    public async Task<IReadOnlyList<ImportPreviousStatement>> ListPreviousStatementsAsync(FinanceAuthority authority,
+                                                                                          Guid financialAccountId,
+                                                                                          string sourceType,
+                                                                                          int limit,
+                                                                                          CancellationToken cancellationToken = default)
+    {
+        if (!StatementSourceKinds.TryParse(sourceType, out StatementSourceKind sourceKind))
+        {
+            return [];
+        }
+
+        string[] sourceTypes = sourceKind switch
+        {
+            StatementSourceKind.Fnb => ["fnb_csv", "fnb_zip"],
+            StatementSourceKind.StandardBankPdf => ["standard_bank_pdf"],
+            _ => ["generic_csv"],
+        };
+        int boundedLimit = Math.Clamp(limit, 1, 10);
+        Guid customerId = authority.CustomerId;
+
+        await using var scope = await CustomerDbScope.OpenSharedAsync(_contextFactory, authority, cancellationToken);
+        List<ImportPreviousStatement> statements = await scope.Context.StatementImports
+            .AsNoTracking()
+            .Where(statement => statement.CustomerId == customerId &&
+                                statement.FinancialAccountId == financialAccountId &&
+                                sourceTypes.Contains(statement.SourceType))
+            .OrderByDescending(statement => statement.CreatedAt)
+            .ThenByDescending(statement => statement.Id)
+            .Take(boundedLimit)
+            .Select(statement => new ImportPreviousStatement(
+                statement.Id,
+                statement.SourceType,
+                statement.StartDate,
+                statement.EndDate,
+                statement.CreatedAt))
+            .ToListAsync(cancellationToken);
+        await scope.CommitAsync(cancellationToken);
+
+        return statements;
     }
 
     public async Task<ImportHistoryPage> ListHistoryAsync(FinanceAuthority authority,

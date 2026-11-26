@@ -741,6 +741,7 @@ export type TransactionQuery = {
 export type TransactionAccountRef = {
   id: string;
   display_name: string;
+  institution: string | null;
   is_archived: boolean;
 };
 
@@ -786,6 +787,7 @@ export type TransactionRow = {
 export type TransactionSuggestion = {
   transaction_id: string;
   suggested_tags: TransactionTagRef[];
+  suggested_category?: TransactionCategoryRef | null;
   has_more_suggestions: boolean;
 };
 
@@ -1244,9 +1246,18 @@ export type ImportPreviewRow = {
   warnings: string[];
 };
 
+export type ImportPreviousStatement = {
+  id: string;
+  source_type: string;
+  start_date: string;
+  end_date: string;
+  created_at: string;
+};
+
 export type ImportInspectResult = {
   detected_source_kind: string;
   limits: ImportLimits;
+  previous_imports: ImportPreviousStatement[];
   proposed_start_date: string | null;
   proposed_end_date: string | null;
   mapping: Record<string, string>;

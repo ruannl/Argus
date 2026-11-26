@@ -371,6 +371,11 @@ public sealed class TransactionQueryTests(KitFactory factory, ITestOutputHelper 
         var suggested = body.GetProperty("suggested_tags").EnumerateArray().ToArray();
         Assert.Contains(suggested, tag => tag.GetProperty("id").GetGuid() == woolworthsTag);
         Assert.Equal(expenseId, body.GetProperty("suggested_category").GetProperty("id").GetGuid());
+
+        var page = await QueryAsync(session, new { page = 1, page_size = 25 });
+        var pageSuggestion = page.GetProperty("suggestions").EnumerateArray()
+            .Single(item => item.GetProperty("transaction_id").GetGuid() == rowId);
+        Assert.Equal(expenseId, pageSuggestion.GetProperty("suggested_category").GetProperty("id").GetGuid());
     }
 
     [Fact]

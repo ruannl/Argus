@@ -75,6 +75,7 @@ function inspectResult() {
     preview: [],
     preview_truncated: false,
     can_prepare: true,
+    previous_imports: [],
   };
 }
 

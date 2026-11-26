@@ -261,6 +261,7 @@ export default function ImportWorkspace({
   }
 
   const ready = Boolean(accountId && selectedFile && inspect?.can_prepare);
+  const previousImports = inspect?.previous_imports;
   const unresolvedDates = Boolean(inspect?.preview.some((row) => !row.transaction_date));
   const amountMode = mapping.amount_mode ?? "signed";
   const working = busy !== "idle" || pending;
@@ -482,6 +483,46 @@ export default function ImportWorkspace({
                             you adjust the dates or skip them.
                           </p>
                         </div>
+
+                        {previousImports === undefined ? null : (
+                          <div className="rounded-2xl border border-line bg-page p-4">
+                            <h3 className="text-sm font-semibold text-ink">
+                              Previous imports for this account and format
+                            </h3>
+                            {previousImports.length === 0 ? (
+                              <p className="mt-1 text-sm text-muted">
+                                No previous imports for this account and format.
+                              </p>
+                            ) : (
+                              <>
+                                <p className="mt-1 text-sm text-muted">
+                                  Most recent first. Check the coverage before choosing the new
+                                  statement&apos;s start date.
+                                </p>
+                                <ul className="mt-3 space-y-2">
+                                  {previousImports.map((item) => (
+                                    <li
+                                      className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+                                      key={item.id}
+                                    >
+                                      <span className="font-mono text-ink">
+                                        {item.start_date} to {item.end_date}
+                                      </span>
+                                      <span className="text-muted">
+                                        Imported {item.created_at.slice(0, 10)} ·{" "}
+                                        {sourceKindLabel(item.source_type)}
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                                <p className="mt-3 text-xs leading-5 text-muted">
+                                  Rows that match an earlier import are flagged during review,
+                                  before anything is committed.
+                                </p>
+                              </>
+                            )}
+                          </div>
+                        )}
 
                         <div className="grid gap-4 sm:grid-cols-2">
                           <label className="grid gap-2 text-sm font-semibold text-ink">

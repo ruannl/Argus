@@ -6,6 +6,7 @@ import { saveTransactionAction } from "@/lib/server/transaction-actions";
 import type {
   Category,
   MerchantTag,
+  TransactionCategoryRef,
   TransactionRow,
   TransactionTagRef,
 } from "@/lib/server/backend-client";
@@ -13,8 +14,9 @@ import type {
 import { formatCategoryLabel } from "@/lib/category-label";
 import { sortByDisplayName } from "@/lib/display-order";
 
-export type TransactionTagSuggestions = {
+export type TransactionRowSuggestions = {
   tags: TransactionTagRef[];
+  category: TransactionCategoryRef | null;
   hasMore: boolean;
 };
 
@@ -24,10 +26,10 @@ type TransactionInlineEditorProps = {
   tags: MerchantTag[];
   classificationDisabled?: boolean;
   /**
-   * Suggestions for this row: null while they load, an empty list when there
+   * Suggestions for this row: null while they load, empty lists when there
    * are none. They stay proposals until the user accepts one.
    */
-  suggestedTags?: TransactionTagSuggestions | null;
+  suggestions?: TransactionRowSuggestions | null;
   onSaved: (transaction: TransactionRow, closeEditor?: boolean) => void;
   onStale: (message: string) => void;
 };
@@ -37,7 +39,7 @@ export default function TransactionInlineEditor({
   categories,
   tags,
   classificationDisabled = false,
-  suggestedTags = null,
+  suggestions = null,
   onSaved,
   onStale,
 }: TransactionInlineEditorProps) {
@@ -65,7 +67,7 @@ export default function TransactionInlineEditor({
   const addOptions = sortByDisplayName(
     tags.filter((tag) => !tag.is_archived && !assignedIds.has(tag.id)),
   );
-  const visibleSuggestions = (suggestedTags?.tags ?? [])
+  const visibleSuggestions = (suggestions?.tags ?? [])
     .filter(
       (suggestion) =>
         !suggestion.is_archived &&
@@ -73,6 +75,28 @@ export default function TransactionInlineEditor({
         !addIds.includes(suggestion.id),
     )
     .slice(0, 8);
+  const suggestedCategory = suggestions?.category ?? null;
+  // Mirror the detail rule: offer a category only while the row is
+  // unconfirmed or still Uncategorised, and only when the suggestion is an
+  // active category that differs from the current selection.
+  const categorySuggestion =
+    suggestedCategory &&
+    !suggestedCategory.is_archived &&
+    (!row.category_confirmed || row.category.kind === "Uncategorised") &&
+    suggestedCategory.id !== categoryId &&
+    assignable.some((category) => category.id === suggestedCategory.id)
+      ? suggestedCategory
+      : null;
+
+  function stageSuggestedCategory() {
+    if (!categorySuggestion) {
+      return;
+    }
+    setCategoryId(categorySuggestion.id);
+    setMessage(
+      `Suggested category “${categorySuggestion.display_name}” selected. Save inline changes to apply it.`,
+    );
+  }
 
   async function acceptSuggestion(tag: TransactionTagRef) {
     if (controlsDisabled || acceptingId !== null) {
@@ -261,7 +285,9 @@ export default function TransactionInlineEditor({
               </option>
             ))}
           </select>
-          {!row.category_confirmed && row.category.kind !== "Uncategorised" ? (
+          {!row.category_confirmed &&
+          row.category.kind !== "Uncategorised" &&
+          categoryId === row.category.id ? (
             <button
               className="mt-2 rounded-full border border-suggestion-line bg-suggestion-soft px-3 py-1.5 text-xs font-bold text-suggestion-ink disabled:opacity-60"
               disabled={controlsDisabled}
@@ -291,7 +317,32 @@ export default function TransactionInlineEditor({
           </select>
         </label>
       </div>
-      {suggestedTags !== null ? (
+      {categorySuggestion ? (
+        <section aria-labelledby={`inline-category-suggestion-${row.id}`} className="mt-3">
+          <h4
+            className="text-xs font-semibold text-suggestion-ink"
+            id={`inline-category-suggestion-${row.id}`}
+          >
+            Suggested classification for {row.description || "this transaction"}
+          </h4>
+          <p className="mt-1 text-xs leading-5 text-muted">
+            “{categorySuggestion.display_name}” comes from your aliases or history. Nothing is
+            applied until you save the inline change.
+          </p>
+          <div className="mt-1 flex flex-wrap gap-2">
+            <button
+              aria-label={`Use suggested category ${categorySuggestion.display_name}`}
+              className="inline-suggestion-chip rounded-full border border-suggestion-line bg-suggestion-soft px-3 py-1 text-xs font-bold text-suggestion-ink disabled:opacity-60"
+              disabled={controlsDisabled}
+              onClick={stageSuggestedCategory}
+              type="button"
+            >
+              Suggested: {formatCategoryLabel(categorySuggestion)}
+            </button>
+          </div>
+        </section>
+      ) : null}
+      {suggestions !== null ? (
         <section aria-labelledby={`inline-suggestions-${row.id}`} className="mt-3">
           <h4
             className="text-xs font-semibold text-suggestion-ink"
@@ -303,7 +354,7 @@ export default function TransactionInlineEditor({
             Suggestions come from your aliases, history, and active tags for this description.
             Nothing is applied until you accept it.
           </p>
-          {suggestedTags.tags.length === 0 ? (
+          {suggestions.tags.length === 0 ? (
             <p className="mt-1 text-xs text-muted">No suggestions for this description.</p>
           ) : visibleSuggestions.length === 0 ? (
             <p className="mt-1 text-xs text-muted">
@@ -327,7 +378,7 @@ export default function TransactionInlineEditor({
               ))}
             </div>
           )}
-          {suggestedTags.hasMore ? (
+          {suggestions.hasMore ? (
             <p className="mt-1 text-xs text-muted">
               More suggestions exist; assigning or removing a tag refreshes this list.
             </p>

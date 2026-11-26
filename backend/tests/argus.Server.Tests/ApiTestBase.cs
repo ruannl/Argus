@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using argus.Server.Security;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace argus.Server.Tests;
@@ -35,6 +37,7 @@ public abstract class ApiTestBase(KitFactory factory) : IClassFixture<KitFactory
         await command.ExecuteNonQueryAsync();
         Factory.Mailer.Clear();
         Factory.LogCapture.Clear();
+        Factory.Services.GetRequiredService<RateLimiter>().ResetForTests();
     }
 
     protected static string Json(object value) => JsonSerializer.Serialize(value);

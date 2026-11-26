@@ -93,10 +93,28 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
         (Guid Id, string[] Tokens)[] tagInputs = activeTags.Select(tag => (tag.Id, tag.Tokens)).ToArray();
         Dictionary<Guid, (Guid Id, string DisplayName, string[] Tokens)> tagsById = activeTags.ToDictionary(tag => tag.Id);
 
-        return rows.Select(row =>
+        (TransactionReadQueries.TransactionRowData Row, SuggestionResult Suggestion)[] built = rows
+            .Select(row => (Row: row, Suggestion: MerchantSuggestions.Build(row.NormalizedDescription, tagInputs, suggestionData)))
+            .ToArray();
+
+        Guid[] suggestedCategoryIds = built
+            .Select(entry => entry.Suggestion.CategoryId)
+            .Where(id => id.HasValue)
+            .Select(id => id.GetValueOrDefault())
+            .Distinct()
+            .ToArray();
+        Dictionary<Guid, TransactionCategoryRef> categoriesById = suggestedCategoryIds.Length == 0
+            ? new Dictionary<Guid, TransactionCategoryRef>()
+            : await context.Categories
+                .AsNoTracking()
+                .Where(category => category.CustomerId == customerId && suggestedCategoryIds.Contains(category.Id))
+                .Select(category => new TransactionCategoryRef(category.Id, category.DisplayName, category.Kind, category.IsSystem, category.IsArchived))
+                .ToDictionaryAsync(category => category.Id, cancellationToken);
+
+        return built.Select(entry =>
         {
-            SuggestionResult suggestion = MerchantSuggestions.Build(row.NormalizedDescription, tagInputs, suggestionData);
-            HashSet<Guid> assigned = row.TagIds.ToHashSet();
+            SuggestionResult suggestion = entry.Suggestion;
+            HashSet<Guid> assigned = entry.Row.TagIds.ToHashSet();
             Guid[] matches = suggestion.TagIds
                 .Where(id => !assigned.Contains(id) && tagsById.ContainsKey(id))
                 .Take(TransactionLimits.MaxRowSuggestions + 1)
@@ -106,7 +124,11 @@ public sealed class TransactionStore(IDbContextFactory<ArgusDbContext> contextFa
                 .Select(id => tagsById[id])
                 .Select(tag => new TransactionTagRef(tag.Id, tag.DisplayName, false))
                 .ToArray();
-            return new TransactionSuggestionResponse(row.Response.Id, suggestedTags, matches.Length > TransactionLimits.MaxRowSuggestions);
+            TransactionCategoryRef? suggestedCategory =
+                suggestion.CategoryId is Guid categoryId && categoriesById.TryGetValue(categoryId, out TransactionCategoryRef? category)
+                    ? category
+                    : null;
+            return new TransactionSuggestionResponse(entry.Row.Response.Id, suggestedTags, suggestedCategory, matches.Length > TransactionLimits.MaxRowSuggestions);
         }).ToArray();
     }
 

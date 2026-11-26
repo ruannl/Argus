@@ -20,6 +20,7 @@ public sealed class StatementImportApi(FinanceGuard guard,
                                        RateLimiter rateLimiter,
                                        ILoggerFactory loggerFactory)
 {
+    private const int PreviousImportLimit = 3;
     private readonly ILogger _audit = loggerFactory.CreateLogger("audit");
     private readonly ILogger _logger = loggerFactory.CreateLogger("finance");
 
@@ -124,6 +125,7 @@ public sealed class StatementImportApi(FinanceGuard guard,
             if (account.IsArchived) return StoreError(ImportErrorCodes.AccountArchived);
 
             var result = await StatementParser.InspectAsync(multipart.FileBytes, sourceKind, options.ParserConfig, start, end, pdfRunner, parserAdmission, cancellationToken);
+            var previousImports = await store.ListPreviousStatementsAsync(authority!, options.FinancialAccountId.Value, result.SourceType, PreviousImportLimit, cancellationToken);
 
             return Results.Json(new
             {
@@ -135,6 +137,7 @@ public sealed class StatementImportApi(FinanceGuard guard,
                     max_pdf_pages = ImportLimits.MaxPdfPages,
                     max_description_scalars = ImportLimits.MaxDescriptionScalars,
                 },
+                previous_imports = previousImports.Select(PreviousImportResponse.From).ToArray(),
                 proposed_start_date = DateString(result.ProposedStartDate),
                 proposed_end_date = DateString(result.ProposedEndDate),
                 mapping = result.MappingSuggestions,
@@ -559,6 +562,20 @@ public sealed record PreviewRowResponse(Guid RowId,
         row.AmountCents is null ? null : StatementText.FormatCents(row.AmountCents.Value),
         row.ValidationCodes.ToArray(),
         row.Warnings.ToArray());
+}
+
+public sealed record PreviousImportResponse(Guid Id,
+                                            string SourceType,
+                                            string StartDate,
+                                            string EndDate,
+                                            string CreatedAt)
+{
+    public static PreviousImportResponse From(ImportPreviousStatement statement) => new(
+        statement.Id,
+        statement.SourceType,
+        statement.StartDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        statement.EndDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        Timestamps.Format(statement.CreatedAt));
 }
 
 public sealed record ReviewResponse(ReviewSummaryResponse Summary, ReviewPageResponse Page)

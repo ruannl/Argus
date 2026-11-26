@@ -351,6 +351,74 @@ describe("import review page", () => {
     expect(testRouter.refresh).not.toHaveBeenCalled();
   });
 
+  it("starts invalid and suppressed rows skipped and includes a suppressed row when unticked", async () => {
+    const user = userEvent.setup();
+    const defaultSkippedRows = rows.map((row) =>
+      row.row_id === "row-2" || row.row_id === "row-3" ? { ...row, skip: true } : row,
+    );
+    vi.mocked(getImportReview).mockResolvedValue({
+      ok: true,
+      value: {
+        summary: { ...summary, invalid_unskipped_count: 0 },
+        page: { rows: defaultSkippedRows, total: 4, page: 1, page_size: 50 },
+      },
+    });
+    vi.mocked(patchImportReviewAction).mockResolvedValue({
+      ok: true,
+      message: "Review updated.",
+      review: { ...summary, invalid_unskipped_count: 0, version: 4 },
+    });
+
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    const invalidRow = screen.getAllByText("Broken amount")[0].closest("tr") as HTMLElement;
+    const suppressedRow = screen.getAllByText("Existing coffee")[0].closest("tr") as HTMLElement;
+    expect(within(invalidRow).getByRole("checkbox", { name: "Skip row 2" })).toBeChecked();
+    expect(within(suppressedRow).getByRole("checkbox", { name: "Skip row 3" })).toBeChecked();
+
+    await user.click(within(suppressedRow).getByRole("checkbox", { name: "Skip row 3" }));
+
+    await waitFor(() =>
+      expect(patchImportReviewAction).toHaveBeenCalledWith(
+        "review-id",
+        3,
+        [{ row_id: "row-3", skip: false, override: true }],
+        undefined,
+      ),
+    );
+  });
+
+  it("does not block commit for a skipped pending repeat row", async () => {
+    const skippedRows = rows.map((row) =>
+      row.row_id === "row-2" || row.row_id === "row-4" ? { ...row, skip: true } : row,
+    );
+    vi.mocked(getImportReview).mockResolvedValue({
+      ok: true,
+      value: {
+        summary: { ...summary, invalid_unskipped_count: 0, within_file_pending_count: 0 },
+        page: { rows: skippedRows, total: 4, page: 1, page_size: 50 },
+      },
+    });
+
+    render(
+      await ReviewPage({
+        params: Promise.resolve({ id: "review-id" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    const repeatRow = screen.getAllByText("Same coffee")[0].closest("tr") as HTMLElement;
+    expect(within(repeatRow).getByRole("checkbox", { name: "Skip row 4" })).toBeChecked();
+    expect(within(repeatRow).queryByText("Blocks import")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Repeated-row group/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Commit import" })).toBeEnabled();
+  });
+
   it("marks possible duplicates in the row status", async () => {
     const nearCandidate = {
       candidate_id: "candidate-id",

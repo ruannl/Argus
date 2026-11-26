@@ -232,6 +232,15 @@ for (const theme of ["light", "dark"]) {
           await expect(
             transactionsTable.getByText("Synthetic corner shop", { exact: true }),
           ).toBeVisible();
+          if (width > 700) {
+            const lastCellFitsFrame = await transactionsTable.evaluate((table) => {
+              const cell = table.querySelector('td[data-label="Actions"]');
+              const frame = table.closest(".finance-table-frame");
+              if (!cell || !frame) return false;
+              return cell.getBoundingClientRect().right <= frame.getBoundingClientRect().right;
+            });
+            expect(lastCellFitsFrame).toBe(true);
+          }
           const rowSuggestion = page.getByRole("button", {
             name: /Add suggested tag Synthetic row suggestion/,
           });

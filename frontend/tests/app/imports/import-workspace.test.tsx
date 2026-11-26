@@ -55,6 +55,7 @@ function inspectResult(headerLine: string) {
     preview: [],
     preview_truncated: false,
     can_prepare: true,
+    previous_imports: [],
   };
 }
 
@@ -312,5 +313,67 @@ describe("import workspace", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.queryByText("date?")).not.toBeInTheDocument();
+  });
+
+  it("shows the last committed coverage for the inspected account and format", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          ...inspectResult("1"),
+          detected_source_kind: "fnb_csv",
+          previous_imports: [
+            {
+              id: "previous-2",
+              source_type: "fnb_zip",
+              start_date: "2024-01-05",
+              end_date: "2024-02-05",
+              created_at: "2024-02-06T09:30:00.0000000Z",
+            },
+            {
+              id: "previous-1",
+              source_type: "fnb_csv",
+              start_date: "2024-01-01",
+              end_date: "2024-01-31",
+              created_at: "2024-02-01T09:30:00.0000000Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    const { container } = render(
+      <ImportWorkspace
+        accounts={[account]}
+        reviews={[]}
+        history={[]}
+        initialTab="new"
+        loadError={null}
+        nextCursor={null}
+      />,
+    );
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: {
+        files: [
+          new File(["Date,Description,Amount\n2025-01-02,Shop,-10.00\n"], "statement.csv", {
+            type: "text/csv",
+          }),
+        ],
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Inspect statement" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: "Previous imports for this account and format" }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText("2024-01-05 to 2024-02-05")).toBeInTheDocument();
+    expect(screen.getByText("2024-01-01 to 2024-01-31")).toBeInTheDocument();
+    expect(screen.getByText("Imported 2024-02-06 · FNB CSV or ZIP")).toBeInTheDocument();
+    expect(
+      screen.queryByText("No previous imports for this account and format."),
+    ).not.toBeInTheDocument();
   });
 });
