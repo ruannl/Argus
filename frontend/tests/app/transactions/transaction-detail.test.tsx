@@ -65,7 +65,12 @@ function makeDetail(overrides: Partial<TransactionDetail["transaction"]> = {}): 
       amount: "-12.34",
       currency: "ZAR",
       direction: "out",
-      financial_account: { id: "acc-1", display_name: "Cheque", is_archived: false },
+      financial_account: {
+        id: "acc-1",
+        display_name: "Cheque",
+        institution: "Example Bank",
+        is_archived: false,
+      },
       category: {
         id: "cat-1",
         display_name: "Groceries",

@@ -62,6 +62,14 @@ const otherCategory = {
   display_name: "Travel",
 };
 
+const suggestedTravel = {
+  id: otherCategory.id,
+  display_name: otherCategory.display_name,
+  kind: otherCategory.kind,
+  is_system: otherCategory.is_system,
+  is_archived: otherCategory.is_archived,
+};
+
 const row = {
   id: "txn-1",
   version: 1,
@@ -70,7 +78,12 @@ const row = {
   amount: "-10.00",
   currency: "ZAR" as const,
   direction: "out" as const,
-  financial_account: { id: "acc-1", display_name: "Cheque", is_archived: false },
+  financial_account: {
+    id: "acc-1",
+    display_name: "Cheque",
+    institution: "Example Bank",
+    is_archived: false,
+  },
   category: {
     id: "cat-1",
     display_name: "Groceries",
@@ -273,6 +286,9 @@ describe("transactions workspace", () => {
     expect(screen.getByText(/1 visible and 0 hidden match these filters/)).toBeInTheDocument();
     expect(screen.getByText("1 transaction filtered")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Tags" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Institution" })).toBeInTheDocument();
+    const institutionCell = screen.getByText("Example Bank").closest("td");
+    expect(institutionCell).toHaveAttribute("data-label", "Institution");
     expect(screen.getByText("No tags")).toBeInTheDocument();
     expect(screen.getByText("Row one")).toBeInTheDocument();
     expect(screen.getByText("-10.00 ZAR")).toBeInTheDocument();
@@ -537,6 +553,197 @@ describe("transactions workspace", () => {
       changes: { add_tag_ids: ["tag-suggested"] },
     });
     expect(await screen.findByText(/Suggested tag “Suggested Cafe” added\./)).toBeInTheDocument();
+  });
+
+  it("offers the advisory category in the inline editor and stages it without saving", async () => {
+    const user = userEvent.setup();
+    const unconfirmed = { ...row, category_confirmed: false };
+    const saved = {
+      ...unconfirmed,
+      version: 2,
+      category: {
+        ...row.category,
+        id: suggestedTravel.id,
+        display_name: suggestedTravel.display_name,
+      },
+      category_confirmed: true,
+    };
+    vi.mocked(loadTransactionAction).mockResolvedValue({
+      ok: true,
+      value: { ...detailFor(unconfirmed), suggested_category: suggestedTravel },
+    });
+    vi.mocked(saveTransactionAction).mockResolvedValue({
+      ok: true,
+      value: {
+        transaction: saved,
+        selected_count: 1,
+        changed_count: 1,
+        unchanged_count: 0,
+      },
+    });
+    vi.mocked(queryTransactionsAction).mockResolvedValue({
+      ok: true,
+      value: { ...pageData, transactions: [saved] },
+    });
+    renderWorkspace({ initialPage: { ...pageData, transactions: [unconfirmed] } });
+
+    await user.click(screen.getByRole("button", { name: "Edit inline" }));
+
+    const suggestion = await screen.findByRole("button", {
+      name: "Use suggested category Travel",
+    });
+    expect(saveTransactionAction).not.toHaveBeenCalled();
+    expect(screen.getByText(/comes from your aliases or history/)).toBeInTheDocument();
+
+    await user.click(suggestion);
+
+    expect(screen.getByLabelText("Inline category for Row one")).toHaveValue("cat-2");
+    expect(saveTransactionAction).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/Suggested category “Travel” selected\. Save inline changes to apply it\./),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save inline changes" }));
+    expect(saveTransactionAction).toHaveBeenCalledWith({
+      id: "txn-1",
+      expected_version: 1,
+      changes: { category_id: "cat-2" },
+    });
+  });
+
+  it("re-assesses classification after a suggested tag is accepted in the editor", async () => {
+    const user = userEvent.setup();
+    const unconfirmed = { ...row, category_confirmed: false };
+    const suggestedTag = {
+      id: merchantTag.id,
+      display_name: merchantTag.display_name,
+      is_archived: false,
+    };
+    const saved = {
+      ...unconfirmed,
+      version: 2,
+      merchant_tags: [suggestedTag],
+    };
+    vi.mocked(loadTransactionAction)
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { ...detailFor(unconfirmed), suggested_tags: [suggestedTag] },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: {
+          ...detailFor(unconfirmed),
+          suggested_tags: [suggestedTag],
+          suggested_category: suggestedTravel,
+        },
+      });
+    vi.mocked(saveTransactionAction).mockResolvedValue({
+      ok: true,
+      value: {
+        transaction: saved,
+        selected_count: 1,
+        changed_count: 1,
+        unchanged_count: 0,
+      },
+    });
+    vi.mocked(queryTransactionsAction).mockResolvedValue({
+      ok: true,
+      value: { ...pageData, transactions: [saved] },
+    });
+    renderWorkspace({
+      initialPage: { ...pageData, transactions: [unconfirmed] },
+      tags: [merchantTag],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Edit inline" }));
+    expect(
+      await screen.findByRole("button", { name: "Add suggested tag Coffee" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Use suggested category Travel" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add suggested tag Coffee" }));
+
+    expect(saveTransactionAction).toHaveBeenCalledWith({
+      id: "txn-1",
+      expected_version: 1,
+      changes: { add_tag_ids: [merchantTag.id] },
+    });
+    expect(
+      await screen.findByRole("button", { name: "Use suggested category Travel" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close inline editor" })).toBeInTheDocument();
+    expect(loadTransactionAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("hides the category suggestion for an already confirmed classification", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadTransactionAction).mockResolvedValue({
+      ok: true,
+      value: { ...detailFor(row), suggested_category: suggestedTravel },
+    });
+    renderWorkspace();
+
+    await user.click(screen.getByRole("button", { name: "Edit inline" }));
+
+    expect(await screen.findByText("Suggested tags for Row one")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Use suggested category Travel" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the advisory category in the row and opens the inline editor from it", async () => {
+    const user = userEvent.setup();
+    const unconfirmed = { ...row, category_confirmed: false };
+    vi.mocked(loadTransactionAction).mockResolvedValue({
+      ok: true,
+      value: detailFor(unconfirmed),
+    });
+    renderWorkspace({
+      initialPage: {
+        ...pageData,
+        transactions: [unconfirmed],
+        suggestions: [
+          {
+            transaction_id: unconfirmed.id,
+            suggested_tags: [],
+            suggested_category: suggestedTravel,
+            has_more_suggestions: false,
+          },
+        ],
+      },
+    });
+
+    const suggestion = screen.getByRole("button", {
+      name: "Review suggested category Travel for Row one",
+    });
+    expect(suggestion).toHaveTextContent("Suggested: Travel");
+    expect(suggestion.closest("td")).toHaveAttribute("data-label", "Classification");
+
+    await user.click(suggestion);
+
+    expect(screen.getByLabelText("Inline category for Row one")).toBeInTheDocument();
+  });
+
+  it("does not show a row category suggestion for a confirmed classification", () => {
+    renderWorkspace({
+      initialPage: {
+        ...pageData,
+        suggestions: [
+          {
+            transaction_id: row.id,
+            suggested_tags: [],
+            suggested_category: suggestedTravel,
+            has_more_suggestions: false,
+          },
+        ],
+      },
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "Review suggested category Travel for Row one" }),
+    ).not.toBeInTheDocument();
   });
 
   it("prepares a bulk category confirmation without changing categories", async () => {

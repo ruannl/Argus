@@ -1,7 +1,7 @@
 namespace argus.Server.Security;
 
 /// <summary>
-/// In-process sliding-window rate limiting with the frozen bucket numbers.
+/// In-process sliding-window rate limiting with the contract bucket numbers.
 /// This is deliberately per-process and in-memory; that residual limit is
 /// documented behaviour, not an oversight.
 /// </summary>
@@ -36,9 +36,13 @@ public sealed class RateLimiter
     public bool CheckSalaryMutation(Guid customerId) =>
         Check($"salary_mutation:{customerId:N}", 30);
 
-    /// <summary>Inspect/prepare is ten requests per customer per window.</summary>
+    /// <summary>
+    /// Inspect/prepare is sixty requests per customer per window. Parser
+    /// concurrency and the file/row/page bounds remain the expensive-operation
+    /// controls; this bucket only bounds repeated uploads by one customer.
+    /// </summary>
     public bool CheckImportCustomer(Guid customerId) =>
-        Check($"import_customer:{customerId:N}", 10);
+        Check($"import_customer:{customerId:N}", 60);
 
     public bool CheckEmail(string canonicalEmail) =>
         Check($"email:{canonicalEmail}", 5) && Check("email_global", 60);
@@ -81,6 +85,15 @@ public sealed class RateLimiter
 
             timestamps.Enqueue(now);
             return true;
+        }
+    }
+
+    /// <summary>Test-only reset so one test's abuse budget does not leak into another.</summary>
+    internal void ResetForTests()
+    {
+        lock (_gate)
+        {
+            _buckets.Clear();
         }
     }
 

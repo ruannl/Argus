@@ -45,7 +45,12 @@ const row = {
   amount: "10000.00",
   currency: "ZAR" as const,
   direction: "in" as const,
-  financial_account: { id: "account", display_name: "Cheque", is_archived: false },
+  financial_account: {
+    id: "account",
+    display_name: "Cheque",
+    institution: "Example Bank",
+    is_archived: false,
+  },
   category: {
     id: "category",
     display_name: "Salary",

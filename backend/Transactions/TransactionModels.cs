@@ -112,7 +112,7 @@ public enum MerchantTagFilterKind
     Untagged,
 }
 
-public sealed record TransactionAccountRef(Guid Id, string DisplayName, bool IsArchived);
+public sealed record TransactionAccountRef(Guid Id, string DisplayName, string? Institution, bool IsArchived);
 
 public sealed record TransactionCategoryRef(Guid Id,
                                             string DisplayName,
@@ -161,12 +161,14 @@ public sealed record TransactionPageResult(TransactionResponse[] Transactions,
                                            TransactionSuggestionResponse[] Suggestions);
 
 /// <summary>
-/// Row-level suggestion summary for the transactions list. Only unassigned
-/// tag candidates are included, capped so the table stays compact; the detail
-/// response keeps the full bounded list.
+/// Row-level suggestion summary for the transactions list. Unassigned tag
+/// candidates are capped so the table stays compact, and one advisory category
+/// is included when the suggestion sources resolve one; the detail response
+/// keeps the full bounded list.
 /// </summary>
 public sealed record TransactionSuggestionResponse(Guid TransactionId,
                                                    TransactionTagRef[] SuggestedTags,
+                                                   TransactionCategoryRef? SuggestedCategory,
                                                    bool HasMoreSuggestions);
 
 public sealed record TransactionMoneyDiagnostic(long Count,

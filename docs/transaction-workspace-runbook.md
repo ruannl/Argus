@@ -24,7 +24,12 @@ and the approved product brief.
   same alias/history sources and exclude unconfirmed history. Nothing is applied
   automatically: accepting a tag chip sends an explicit versioned add-tag edit,
   and a suggested category is applied only by an explicit versioned save or
-  confirmation.
+  confirmation. The transaction row and the inline editor show the advisory
+  category alongside the tag suggestions; the row chip opens the inline editor
+  for an explicit review and save, and the list reloads after a save so the row
+  reflects the latest suggestions. The inline editor re-reads both sets after a
+  suggestion write that keeps it open; an explicit Save closes the editor, and
+  the next open reads the current suggestions.
 - Every row exposes `category_confirmed`. Imported untouched defaults are
   unconfirmed; existing rows default to confirmed. An unconfirmed non-
   Uncategorised category shows a blue "Unconfirmed" chip; the list no longer

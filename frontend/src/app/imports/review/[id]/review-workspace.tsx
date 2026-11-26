@@ -79,7 +79,7 @@ function blockingReason(row: ImportReviewRow): string | null {
   if (row.validation_codes.length > 0 && !row.skip) {
     return "Invalid row: mark it skipped or fix the source before importing.";
   }
-  if (row.within_file_state === "pending") {
+  if (row.within_file_state === "pending" && !row.skip) {
     return "Repeated row: choose keep-all, skip-all, or a per-row decision.";
   }
   if (row.skip && row.override) {
@@ -281,7 +281,9 @@ export default function ReviewWorkspace({
     const decision: ImportReviewDecision = {
       row_id: row.row_id,
       skip: next,
-      override: false,
+      // Unticking a suppressed duplicate is the customer's explicit include
+      // decision; ticking it again clears that override.
+      override: next ? false : suppressed(row),
     };
     if (row.within_file_group) {
       decision.within_file_state = next ? "skip" : "keep";

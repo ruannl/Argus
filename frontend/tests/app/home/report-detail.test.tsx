@@ -179,7 +179,12 @@ function report(overrides: Record<string, unknown> = {}): ReportResponse {
           amount: "-100.00",
           currency: "ZAR",
           direction: "out",
-          financial_account: { id: "account", display_name: "Cheque", is_archived: false },
+          financial_account: {
+            id: "account",
+            display_name: "Cheque",
+            institution: "Example Bank",
+            is_archived: false,
+          },
           category: {
             id: "22222222-2222-2222-2222-222222222222",
             display_name: "Groceries",

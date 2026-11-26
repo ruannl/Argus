@@ -61,6 +61,7 @@ const transaction = {
   financial_account: {
     id: ids.account,
     display_name: financialAccount.display_name,
+    institution: financialAccount.institution,
     is_archived: false,
   },
   category,

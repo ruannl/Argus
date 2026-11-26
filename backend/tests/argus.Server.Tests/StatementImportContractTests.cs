@@ -165,6 +165,39 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
     }
 
     [Fact]
+    public async Task InspectReportsTheLastCommittedCoverageForTheOwnedAccountAndFormat()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var zip = StatementFixtureBuilder.BuildFnbZip(3, chequeAccount: false).Bytes;
+        var csv = StatementFixtureBuilder.BuildFnbCsv(3, chequeAccount: false).Bytes;
+
+        var initial = await InspectAsync(session, accountId, csv);
+        Assert.Equal(0, initial.GetProperty("previous_imports").GetArrayLength());
+
+        var review = await PrepareAsync(session, accountId, zip, new DateOnly(2024, 1, 1), new DateOnly(2024, 1, 31));
+        var reviewId = review.GetProperty("summary").GetProperty("id").GetGuid();
+        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
+        Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
+
+        var reinspect = await InspectAsync(session, accountId, csv);
+        var previous = reinspect.GetProperty("previous_imports");
+        Assert.Equal(1, previous.GetArrayLength());
+        Assert.Equal("fnb_zip", previous[0].GetProperty("source_type").GetString());
+        Assert.Equal("2024-01-01", previous[0].GetProperty("start_date").GetString());
+        Assert.Equal("2024-01-31", previous[0].GetProperty("end_date").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(previous[0].GetProperty("created_at").GetString()));
+
+        var otherAccount = await CreateAccountAsync(session, "Savings");
+        var otherInspect = await InspectAsync(session, otherAccount, csv);
+        Assert.Equal(0, otherInspect.GetProperty("previous_imports").GetArrayLength());
+
+        var genericFile = Encoding.UTF8.GetBytes("Date,Description,Amount\n2025-01-02,Coffee,-12.34\n");
+        var genericInspect = await InspectAsync(session, accountId, genericFile, "generic_csv");
+        Assert.Equal(0, genericInspect.GetProperty("previous_imports").GetArrayLength());
+    }
+
+    [Fact]
     public async Task ReviewHonoursTheRequestedPageSize()
     {
         var (session, _) = await NewCustomerAsync();
@@ -557,6 +590,8 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var second = await PrepareAsync(session, accountId, file, new DateOnly(2024, 1, 1), new DateOnly(2024, 1, 31));
         Assert.Equal(0, second.GetProperty("summary").GetProperty("imported_count").GetInt32());
         Assert.Equal(3, second.GetProperty("summary").GetProperty("suppressed_count").GetInt32());
+        Assert.Equal(0, second.GetProperty("summary").GetProperty("skipped_count").GetInt32());
+        Assert.All(Rows(second), row => Assert.True(row.GetProperty("skip").GetBoolean()));
 
         var reviewId = second.GetProperty("summary").GetProperty("id").GetGuid();
         var repeat = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(second)), session: session));
@@ -573,6 +608,109 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         Assert.Equal(3, statement.GetProperty("suppressed_count").GetInt32());
         Assert.Equal(3L, await CountRowsAsync("transactions"));
         Assert.Equal(2L, await CountRowsAsync("statement_imports"));
+    }
+
+    [Fact]
+    public async Task UnskippingADefaultSkippedDuplicateIncludesItWithAnOverride()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var preamble = "one\ntwo\nthree\nfour\nfive\nsix\n" + "Date,Amount,Balance,Description\n";
+        var firstFile = Encoding.UTF8.GetBytes(preamble + "2025/01/02,-10.00,0.00,Existing coffee\n");
+        var first = await PrepareAsync(session, accountId, firstFile, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31));
+        var firstCommit = await SendAsync(Post($"{ReviewsPath}/{first.GetProperty("summary").GetProperty("id").GetGuid()}/commit", Json(CommitBody(first)), session: session));
+        Assert.Equal(HttpStatusCode.Created, firstCommit.StatusCode);
+
+        var secondFile = Encoding.UTF8.GetBytes(preamble + "2025/01/02,-10.00,0.00,Existing coffee\n" + "2025/01/03,-20.00,0.00,New coffee\n");
+        var second = await PrepareAsync(session, accountId, secondFile, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31));
+        var summary = second.GetProperty("summary");
+        Assert.Equal(1, summary.GetProperty("imported_count").GetInt32());
+        Assert.Equal(1, summary.GetProperty("suppressed_count").GetInt32());
+        var duplicate = Assert.Single(Rows(second), row => row.GetProperty("duplicate_state").GetString() == "suppressed");
+        Assert.True(duplicate.GetProperty("skip").GetBoolean());
+
+        var unskipped = await SendAsync(Patch(
+            $"{ReviewsPath}/{summary.GetProperty("id").GetGuid()}",
+            Json(new
+            {
+                expected_review_version = Version(second),
+                decisions = new[]
+                {
+                    new
+                    {
+                        row_id = duplicate.GetProperty("row_id").GetGuid(),
+                        skip = false,
+                        @override = true,
+                    },
+                },
+            }),
+            session: session));
+        Assert.Equal(HttpStatusCode.OK, unskipped.StatusCode);
+        var patched = await BodyAsync(unskipped);
+        Assert.Equal(2, patched.GetProperty("imported_count").GetInt32());
+        Assert.Equal(0, patched.GetProperty("suppressed_count").GetInt32());
+        Assert.Equal(1, patched.GetProperty("exact_override_count").GetInt32());
+
+        var commit = await SendAsync(Post($"{ReviewsPath}/{summary.GetProperty("id").GetGuid()}/commit", Json(CommitBody(patched)), session: session));
+        Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
+        Assert.Equal(3L, await CountRowsAsync("transactions"));
+    }
+
+    [Fact]
+    public async Task InvalidSuppressedOverlapRowIsSkippedByDefaultAndStaysSuppressed()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var preamble = "one\ntwo\nthree\nfour\nfive\nsix\n" + "Date,Amount,Balance,Description\n";
+        var firstFile = Encoding.UTF8.GetBytes(preamble + "2025/01/02,-10.00,0.00,Existing coffee\n");
+        var first = await PrepareAsync(session, accountId, firstFile, new DateOnly(2025, 1, 1), new DateOnly(2025, 1, 31));
+        var firstCommit = await SendAsync(Post($"{ReviewsPath}/{first.GetProperty("summary").GetProperty("id").GetGuid()}/commit", Json(CommitBody(first)), session: session));
+        Assert.Equal(HttpStatusCode.Created, firstCommit.StatusCode);
+
+        var secondFile = Encoding.UTF8.GetBytes(preamble + "2025/01/02,-10.00,0.00,Existing coffee\n" + "2025/02/05,-20.00,0.00,New coffee\n");
+        var second = await PrepareAsync(session, accountId, secondFile, new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28));
+        var summary = second.GetProperty("summary");
+        Assert.Equal(1, summary.GetProperty("imported_count").GetInt32());
+        Assert.Equal(1, summary.GetProperty("suppressed_count").GetInt32());
+        Assert.Equal(0, summary.GetProperty("skipped_count").GetInt32());
+        Assert.Equal(0, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        var overlap = Assert.Single(Rows(second), row => row.GetProperty("description").GetString() == "Existing coffee");
+        Assert.True(overlap.GetProperty("skip").GetBoolean());
+        Assert.Contains("date_outside_period", overlap.GetProperty("validation_codes").EnumerateArray().Select(code => code.GetString()!));
+        Assert.Equal("suppressed", overlap.GetProperty("duplicate_state").GetString());
+
+        var commit = await SendAsync(Post($"{ReviewsPath}/{summary.GetProperty("id").GetGuid()}/commit", Json(CommitBody(second)), session: session));
+        Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
+        Assert.Equal(2L, await CountRowsAsync("transactions"));
+    }
+
+    [Fact]
+    public async Task SkippedWithinFileRepeatsDoNotBlockImport()
+    {
+        var (session, _) = await NewCustomerAsync();
+        var accountId = await CreateAccountAsync(session);
+        var preamble = "one\ntwo\nthree\nfour\nfive\nsix\n" + "Date,Amount,Balance,Description\n";
+        var file = Encoding.UTF8.GetBytes(preamble + "2025/01/02,-10.00,0.00,Repeated old coffee\n" + "2025/01/02,-10.00,0.00,Repeated old coffee\n" + "2025/02/05,-20.00,0.00,New coffee\n");
+        var review = await PrepareAsync(session, accountId, file, new DateOnly(2025, 2, 1), new DateOnly(2025, 2, 28));
+        var summary = review.GetProperty("summary");
+        var reviewId = summary.GetProperty("id").GetGuid();
+        Assert.Equal(3, summary.GetProperty("total_rows").GetInt32());
+        Assert.Equal(1, summary.GetProperty("imported_count").GetInt32());
+        Assert.Equal(2, summary.GetProperty("skipped_count").GetInt32());
+        Assert.Equal(0, summary.GetProperty("within_file_pending_count").GetInt32());
+        Assert.Equal(0, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        var skippedRepeats = Rows(review).Where(row => row.GetProperty("description").GetString() == "Repeated old coffee").ToArray();
+        Assert.Equal(2, skippedRepeats.Length);
+        Assert.All(skippedRepeats, row =>
+        {
+            Assert.True(row.GetProperty("skip").GetBoolean());
+            Assert.Equal("skip", row.GetProperty("within_file_state").GetString());
+        });
+
+        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
+        Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
+        Assert.Equal(1L, await CountRowsAsync("transactions"));
+        Assert.Equal(1L, await CountRowsAsync("statement_imports"));
     }
 
     [Fact]
@@ -1034,8 +1172,8 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         Assert.Equal(HttpStatusCode.OK, skipped.StatusCode);
         var patched = await BodyAsync(skipped);
         Assert.Equal(0, patched.GetProperty("imported_count").GetInt32());
-        Assert.Equal(1, patched.GetProperty("suppressed_count").GetInt32());
-        Assert.Equal(1, patched.GetProperty("skipped_count").GetInt32());
+        Assert.Equal(2, patched.GetProperty("suppressed_count").GetInt32());
+        Assert.Equal(0, patched.GetProperty("skipped_count").GetInt32());
 
         var reread = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session)));
         var rereadRows = Rows(reread);
@@ -1425,7 +1563,7 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
     }
 
     [Fact]
-    public async Task PdfInvalidCandidateCreatesAReviewAndRequiresSkip()
+    public async Task PdfInvalidCandidateIsSkippedByDefault()
     {
         var (session, _) = await NewCustomerAsync();
         var accountId = await CreateAccountAsync(session);
@@ -1439,15 +1577,12 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var summary = review.GetProperty("summary");
         var reviewId = summary.GetProperty("id").GetGuid();
         Assert.Equal(2, summary.GetProperty("total_rows").GetInt32());
-        Assert.Equal(1, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        Assert.Equal(0, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        Assert.Equal(1, summary.GetProperty("skipped_count").GetInt32());
         var invalid = Assert.Single(Rows(review), row => row.GetProperty("validation_codes").GetArrayLength() > 0);
+        Assert.True(invalid.GetProperty("skip").GetBoolean());
 
-        var blocked = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
-        Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
-        Assert.Equal("invalid_rows", await ErrorKindAsync(blocked));
-
-        var patched = await SkipRowAsync(session, reviewId, review, invalid);
-        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(patched)), session: session));
+        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
         Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
         Assert.Equal(1L, await CountRowsAsync("transactions"));
         Assert.Equal(1L, await CountRowsAsync("statement_imports"));
@@ -1544,7 +1679,7 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
     }
 
     [Fact]
-    public async Task PdfZeroDayCandidateCreatesAReviewAndRequiresSkip()
+    public async Task PdfZeroDayCandidateIsSkippedByDefault()
     {
         var (session, _) = await NewCustomerAsync();
         var accountId = await CreateAccountAsync(session);
@@ -1552,22 +1687,19 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var summary = review.GetProperty("summary");
         var reviewId = summary.GetProperty("id").GetGuid();
         Assert.Equal(2, summary.GetProperty("total_rows").GetInt32());
-        Assert.Equal(1, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        Assert.Equal(0, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        Assert.Equal(1, summary.GetProperty("skipped_count").GetInt32());
         var invalid = Assert.Single(Rows(review), row => row.GetProperty("validation_codes").GetArrayLength() > 0);
+        Assert.True(invalid.GetProperty("skip").GetBoolean());
 
-        var blocked = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
-        Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
-        Assert.Equal("invalid_rows", await ErrorKindAsync(blocked));
-
-        var patched = await SkipRowAsync(session, reviewId, review, invalid);
-        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(patched)), session: session));
+        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
         Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
         Assert.Equal(1L, await CountRowsAsync("transactions"));
         Assert.Equal(1L, await CountRowsAsync("statement_imports"));
     }
 
     [Fact]
-    public async Task PdfDisqualifiedTotalCreatesAReviewAndRequiresSkip()
+    public async Task PdfDisqualifiedTotalIsSkippedByDefault()
     {
         var (session, _) = await NewCustomerAsync();
         var accountId = await CreateAccountAsync(session);
@@ -1575,15 +1707,12 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var summary = review.GetProperty("summary");
         var reviewId = summary.GetProperty("id").GetGuid();
         Assert.Equal(4, summary.GetProperty("total_rows").GetInt32());
-        Assert.Equal(1, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        Assert.Equal(0, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        Assert.Equal(1, summary.GetProperty("skipped_count").GetInt32());
         var invalid = Assert.Single(Rows(review), row => row.GetProperty("validation_codes").GetArrayLength() > 0);
+        Assert.True(invalid.GetProperty("skip").GetBoolean());
 
-        var blocked = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
-        Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
-        Assert.Equal("invalid_rows", await ErrorKindAsync(blocked));
-
-        var patched = await SkipRowAsync(session, reviewId, review, invalid);
-        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(patched)), session: session));
+        var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
         Assert.Equal(HttpStatusCode.Created, commit.StatusCode);
         Assert.Equal(3L, await CountRowsAsync("transactions"));
         Assert.Equal(1L, await CountRowsAsync("statement_imports"));
@@ -2215,7 +2344,8 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var summary = review.GetProperty("summary");
         Assert.Equal(49, summary.GetProperty("total_rows").GetInt32());
         Assert.Equal(42, summary.GetProperty("imported_count").GetInt32());
-        Assert.Equal(7, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        Assert.Equal(0, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        Assert.Equal(7, summary.GetProperty("skipped_count").GetInt32());
         Assert.Equal(0, summary.GetProperty("suppressed_count").GetInt32());
     }
 
@@ -2323,7 +2453,7 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
     }
 
     [Fact]
-    public async Task PdfProductionInvalidRowsRequireSkipBeforeCommit()
+    public async Task PdfProductionInvalidRowsAreSkippedByDefaultAndCanBeUnskipped()
     {
         var (session, _) = await NewCustomerAsync();
         var accountId = await CreateAccountAsync(session);
@@ -2331,15 +2461,31 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         var summary = review.GetProperty("summary");
         var reviewId = summary.GetProperty("id").GetGuid();
         Assert.Equal(49, summary.GetProperty("total_rows").GetInt32());
-        Assert.Equal(25, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        Assert.Equal(0, summary.GetProperty("invalid_unskipped_count").GetInt32());
+        Assert.Equal(25, summary.GetProperty("skipped_count").GetInt32());
         var invalidRows = Rows(review).Where(row => row.GetProperty("validation_codes").GetArrayLength() > 0).ToArray();
         Assert.Equal(25, invalidRows.Length);
-        string[] rowsBefore = ImmutableRowSignatures(review);
-        int versionBefore = Version(review);
-        string hashBefore = Hash(review);
+        Assert.All(invalidRows, row => Assert.True(row.GetProperty("skip").GetBoolean()));
+
+        var firstInvalid = invalidRows[0];
+        var unskipped = await SendAsync(Patch(
+            $"{ReviewsPath}/{reviewId}",
+            Json(new
+            {
+                expected_review_version = Version(review),
+                decisions = new[] { new { row_id = firstInvalid.GetProperty("row_id").GetGuid(), skip = false } },
+            }),
+            session: session));
+        Assert.Equal(HttpStatusCode.OK, unskipped.StatusCode);
+        var unskippedBody = await BodyAsync(unskipped);
+        Assert.Equal(1, unskippedBody.GetProperty("invalid_unskipped_count").GetInt32());
+        var unskippedDetail = await BodyAsync(await SendAsync(Get($"{ReviewsPath}/{reviewId}", session: session)));
+        string[] rowsBefore = ImmutableRowSignatures(unskippedDetail);
+        int versionBefore = Version(unskippedDetail);
+        string hashBefore = Hash(unskippedDetail);
         long reviewRowsBefore = await CountRowsAsync("import_review_rows");
 
-        var blocked = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(review)), session: session));
+        var blocked = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(unskippedBody)), session: session));
         Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
         Assert.Equal("invalid_rows", await ErrorKindAsync(blocked));
 
@@ -2351,11 +2497,8 @@ public sealed class StatementImportContractTests(KitFactory factory) : ApiTestBa
         Assert.Equal(0L, await CountRowsAsync("transactions"));
         Assert.Equal(0L, await CountRowsAsync("statement_imports"));
 
-        var patched = review;
-        foreach (var row in invalidRows)
-        {
-            patched = await SkipRowAsync(session, reviewId, patched, row);
-        }
+        var patched = await SkipRowAsync(session, reviewId, unskippedBody, firstInvalid);
+        Assert.Equal(0, Summary(patched).GetProperty("invalid_unskipped_count").GetInt32());
         Assert.Equal(25, Summary(patched).GetProperty("skipped_count").GetInt32());
         Assert.Equal(24, Summary(patched).GetProperty("imported_count").GetInt32());
         var commit = await SendAsync(Post($"{ReviewsPath}/{reviewId}/commit", Json(CommitBody(patched)), session: session));

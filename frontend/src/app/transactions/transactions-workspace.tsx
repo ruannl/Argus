@@ -28,6 +28,7 @@ import type {
   CurrentAccount,
   FinancialAccount,
   MerchantTag,
+  TransactionCategoryRef,
   TransactionDetail,
   TransactionErrorDetails,
   TransactionFilters,
@@ -45,7 +46,7 @@ import { formatMoney } from "@/lib/money-format";
 import { visibleTags } from "./classification-order";
 import TransactionDetailView from "./transaction-detail";
 import TransactionInlineEditor from "./transaction-inline-editor";
-import type { TransactionTagSuggestions } from "./transaction-inline-editor";
+import type { TransactionRowSuggestions } from "./transaction-inline-editor";
 
 export type TransactionsInitialQuery = {
   filters: TransactionFilters;
@@ -192,12 +193,12 @@ export default function TransactionsWorkspace({
   const inlineEditorIdRef = useRef<string | null>(null);
   const [inlineSuggestions, setInlineSuggestions] = useState<{
     id: string | null;
-    value: TransactionTagSuggestions | null;
+    value: TransactionRowSuggestions | null;
     failed: boolean;
   }>({ id: null, value: null, failed: false });
   const inlineSuggestionsRef = useRef<{
     id: string | null;
-    value: TransactionTagSuggestions | null;
+    value: TransactionRowSuggestions | null;
     failed: boolean;
   }>({ id: null, value: null, failed: false });
   const [confirmingRowId, setConfirmingRowId] = useState<string | null>(null);
@@ -980,11 +981,15 @@ export default function TransactionsWorkspace({
   // message instead of claiming there are no suggestions.
   const loadRowSuggestions = useCallback(async (id: string) => {
     let failed = false;
-    let value: TransactionTagSuggestions | null = null;
+    let value: TransactionRowSuggestions | null = null;
     try {
       const result = await loadTransactionAction(id);
       if (result.ok) {
-        value = { tags: result.value.suggested_tags, hasMore: result.value.has_more_suggestions };
+        value = {
+          tags: result.value.suggested_tags,
+          category: result.value.suggested_category ?? null,
+          hasMore: result.value.has_more_suggestions,
+        };
       } else {
         failed = true;
       }
@@ -1014,6 +1019,12 @@ export default function TransactionsWorkspace({
     },
     [loadRowSuggestions],
   );
+
+  function openSuggestedCategoryEditor(id: string) {
+    if (inlineEditorIdRef.current !== id) {
+      toggleInlineEditor(id);
+    }
+  }
 
   const closeDetail = useCallback(() => {
     detailRequestRef.current += 1;
@@ -1086,10 +1097,15 @@ export default function TransactionsWorkspace({
         inlineSuggestionsRef.current = { id: null, value: null, failed: false };
         setInlineSuggestions({ id: null, value: null, failed: false });
         setMessage({ tone: "status", text: "Inline change saved." });
+      } else if (inlineEditorIdRef.current === saved.id) {
+        // Suggested-tag acceptance and confirmation keep the editor open;
+        // re-read the advisory suggestions so the classification proposal is
+        // current while the editor stays available.
+        void loadRowSuggestions(saved.id);
       }
       reloadRow(saved.id);
     },
-    [reloadRow],
+    [loadRowSuggestions, reloadRow],
   );
 
   // A stale or uncertain single edit retires its draft, tells the user why, and
@@ -1220,6 +1236,18 @@ export default function TransactionsWorkspace({
     }
     const assigned = new Set(row.merchant_tags.map((tag) => tag.id));
     return suggestion.suggested_tags.filter((tag) => !assigned.has(tag.id)).slice(0, 3);
+  }
+  function suggestedCategoryFor(row: TransactionRow): TransactionCategoryRef | null {
+    const suggestion = suggestionsByTransaction.get(row.id)?.suggested_category ?? null;
+    if (
+      !suggestion ||
+      suggestion.is_archived ||
+      suggestion.id === row.category.id ||
+      (row.category_confirmed && row.category.kind !== "Uncategorised")
+    ) {
+      return null;
+    }
+    return suggestion;
   }
 
   const preparedAction = prepared?.action ?? null;
@@ -1938,11 +1966,24 @@ export default function TransactionsWorkspace({
                 <table
                   role="table"
                   aria-label="Matching transactions"
-                  className={`${TABLE_CLASS} min-w-[64rem]`}
+                  className={`${TABLE_CLASS} min-w-[60rem]`}
                 >
+                  {/* Budget width toward the fields that need it: Description, Classification,
+                      Amount and Actions. Date, Account, Institution and Tags hold short values. */}
+                  <colgroup>
+                    <col className="w-[4%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[9%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-[12%]" />
+                  </colgroup>
                   <thead className={TABLE_HEAD_CLASS}>
                     <tr>
-                      <th className={`${TH_CLASS} w-10`} scope="col">
+                      <th className={TH_CLASS} scope="col">
                         <span className="sr-only">Select</span>
                       </th>
                       <th className={TH_CLASS} scope="col">
@@ -1953,6 +1994,9 @@ export default function TransactionsWorkspace({
                       </th>
                       <th className={TH_CLASS} scope="col">
                         Account
+                      </th>
+                      <th className={TH_CLASS} scope="col">
+                        Institution
                       </th>
                       <th className={TH_CLASS} scope="col">
                         Tags
@@ -1971,6 +2015,7 @@ export default function TransactionsWorkspace({
                   <tbody>
                     {rows.map((row) => {
                       const badge = hiddenBadge(row);
+                      const categorySuggestion = suggestedCategoryFor(row);
                       const isSelected = selection.has(row.id);
                       return (
                         <Fragment key={row.id}>
@@ -2005,6 +2050,9 @@ export default function TransactionsWorkspace({
                             <td data-label="Account" className={`${TD_CLASS} text-muted`}>
                               {row.financial_account.display_name}
                               {row.financial_account.is_archived ? " (archived)" : ""}
+                            </td>
+                            <td data-label="Institution" className={`${TD_CLASS} text-muted`}>
+                              {row.financial_account.institution ?? "—"}
                             </td>
                             <td data-label="Tags" className={TD_CLASS}>
                               <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -2061,6 +2109,18 @@ export default function TransactionsWorkspace({
                                     ? row.category.display_name
                                     : `${row.category.display_name} (${row.category.kind})`}
                                 </span>
+                                {categorySuggestion ? (
+                                  <button
+                                    aria-label={`Review suggested category ${categorySuggestion.display_name} for ${row.description || "this transaction"}`}
+                                    className="suggested-category-chip rounded-full border border-dashed border-suggestion-line bg-suggestion-soft px-2 py-1 font-semibold text-suggestion-ink disabled:opacity-60"
+                                    disabled={inventoryFailed || loading}
+                                    onClick={() => openSuggestedCategoryEditor(row.id)}
+                                    title="Open the inline editor to review and save this suggested category."
+                                    type="button"
+                                  >
+                                    Suggested: {categorySuggestion.display_name}
+                                  </button>
+                                ) : null}
                                 {!row.category_confirmed &&
                                 row.category.kind !== "Uncategorised" ? (
                                   <button
@@ -2121,7 +2181,7 @@ export default function TransactionsWorkspace({
                           </tr>
                           {inlineEditorId === row.id ? (
                             <tr className={EDITOR_ROW_CLASS} id={`inline-editor-${row.id}`}>
-                              <td className="px-4 py-4" colSpan={8}>
+                              <td className="px-4 py-4" colSpan={9}>
                                 <TransactionInlineEditor
                                   categories={categories}
                                   classificationDisabled={inventoryFailed}
@@ -2130,7 +2190,7 @@ export default function TransactionsWorkspace({
                                   }
                                   onStale={(text) => handleRowStale(row.id, text)}
                                   row={row}
-                                  suggestedTags={
+                                  suggestions={
                                     inlineSuggestions.id === row.id && !inlineSuggestions.failed
                                       ? inlineSuggestions.value
                                       : null
@@ -2139,8 +2199,8 @@ export default function TransactionsWorkspace({
                                 />
                                 {inlineSuggestions.id === row.id && inlineSuggestions.failed ? (
                                   <p className="mt-1 px-3 text-xs text-muted">
-                                    Suggestions could not be loaded. Assigned tags can still be
-                                    added in the editor above.
+                                    Suggestions could not be loaded. Assigned tags and categories
+                                    can still be changed in the editor above.
                                   </p>
                                 ) : null}
                               </td>
