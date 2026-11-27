@@ -119,12 +119,13 @@ function comparisonFixture(mode: Mode = "calendar", availableLatest = false): Re
         unavailable_reason: null,
       };
     }
-    const isPartial = index === 5 && !salary;
+    const isPartial = index === 5;
     const prior = period(index - 1, false);
     const covered = index === 5 ? availableLatest || salary : true;
     return {
       current_period: period(index, isPartial),
-      prior_period: isPartial ? { ...prior, end_date: "2024-02-15", is_partial: false } : prior,
+      prior_period:
+        isPartial && !salary ? { ...prior, end_date: "2024-02-15", is_partial: false } : prior,
       label: salary
         ? "Previous salary cycle"
         : isPartial
@@ -338,6 +339,12 @@ describe("category trend period comparison", () => {
       "Spending increased ↑ +10.0%",
     );
     expect(within(table).getByText("vs 24 Feb – 24 Mar 2024", { exact: true })).toBeVisible();
+    expect(within(table).getByText("To date: 25 Mar – 8 Apr 2024", { exact: true })).toBeVisible();
+    expect(
+      within(table).getByText("Open cycle through today vs full previous cycle.", {
+        exact: true,
+      }),
+    ).toBeVisible();
   });
 
   it("keeps each period's change, disclosed amounts and original links across range switches", async () => {

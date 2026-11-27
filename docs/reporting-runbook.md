@@ -88,12 +88,12 @@ for a period that remains visible.
   shorter, its slice ends on its last day. There is no estimate or adjustment
   for different period lengths.
 - Each column heading shows the exact previous dates, and a period-to-date
-  column also shows its current dates. Open **Compared amounts** under a first
-  visible or period-to-date amount to see the actual current and previous ZAR
-  amounts used for that change. The existing period amount, total and
-  transaction link still use their original displayed ranges. For example, a
-  prior month can show R1,000.00 even when only R100.00 falls in its matched
-  slice.
+  column also shows its current dates. Open **Compared amounts** under the
+  first visible amount or under an amount in the current calendar-month column
+  to see the actual current and previous ZAR amounts used for that change. The
+  existing period amount, total and transaction link still use their original
+  displayed ranges. For example, a prior month can show R1,000.00 even when
+  only R100.00 falls in its matched slice.
 - A period without a defined predecessor shows **No previous confirmed
   cycle** or **No prior period**, and a dash under each amount.
   There is no invented range.
