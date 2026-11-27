@@ -240,6 +240,24 @@ public sealed class ReportingPeriodTests
     }
 
     [Fact]
+    public void LeapFebruaryKeepsDay29WhenMatchingOrComparingWholeMonths()
+    {
+        DateOnly today = new(2024, 3, 30);
+        ResolvedPeriod elapsed = ReportingPeriods.Resolve(new ReportPeriodRequest("calendar", "month_to_date", null, null, null, null), today, []).Period!;
+        ComparisonResolution matched = ReportingPeriods.Compare(elapsed, today, []);
+        Assert.Equal(new DateOnly(2024, 2, 1), matched.Period!.Start);
+        Assert.Equal(new DateOnly(2024, 2, 29), matched.Period.End);
+        Assert.Equal(29, ReportingPeriods.DaysInclusive(matched.Period.Start, matched.Period.End));
+        Assert.True(matched.ShorterPrior);
+
+        ResolvedPeriod full = ReportingPeriods.Resolve(new ReportPeriodRequest("calendar", "month", "2024-03", null, null, null), today.AddDays(1), []).Period!;
+        ComparisonResolution complete = ReportingPeriods.Compare(full, today.AddDays(1), []);
+        Assert.Equal(matched.Period.Start, complete.Period!.Start);
+        Assert.Equal(matched.Period.End, complete.Period.End);
+        Assert.False(complete.ShorterPrior);
+    }
+
+    [Fact]
     public void CalendarPreviousMonthAndMultiMonthRangesMatchTheBrief()
     {
         var today = new DateOnly(2026, 3, 15);

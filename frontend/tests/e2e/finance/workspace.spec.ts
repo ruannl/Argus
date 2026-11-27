@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { writeFile } from "node:fs/promises";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { ids } from "./fixture-backend";
 
 async function scenario(page: Page, name: string) {
@@ -93,18 +94,22 @@ test("category spending trend switches ranges and keeps exact monthly drill-down
   const table = trend.getByRole("table", {
     name: /Included Money out by category and month/,
   });
-  await expect(table.getByRole("columnheader", { name: /Sep 2026/ })).toBeVisible();
-  await expect(table.getByRole("columnheader", { name: /Aug 2026/ })).toHaveCount(0);
+  await expect(table.getByRole("columnheader", { name: "Sep 2026", exact: true })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "Aug 2026", exact: true })).toHaveCount(0);
 
   await trend.getByRole("button", { name: "2 months" }).click();
   await expect(trend.getByRole("button", { name: "2 months" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  await expect(table.getByRole("columnheader", { name: /Sep 2026/ })).toHaveCount(0);
-  await expect(table.getByRole("columnheader", { name: /Oct 2026/ })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "Sep 2026", exact: true })).toHaveCount(0);
+  await expect(table.getByRole("columnheader", { name: "Oct 2026", exact: true })).toBeVisible();
 
   const groceries = table.getByRole("row", { name: /Household essentials and groceries/ });
+  await expect(trend.getByText(/Missing coverage: the current period/)).toBeVisible();
+  const november = groceries.getByRole("cell", { name: /R 175.00/ });
+  await expect(november).toContainText("—");
+  expect(await november.textContent()).not.toMatch(/[%↑↓]/);
   const october = groceries.getByRole("link", { name: "R 1 000.00" });
   await expect(october).toHaveAttribute("href", /start_date=2026-10-01/);
   await expect(october).toHaveAttribute("href", /end_date=2026-10-31/);
@@ -117,11 +122,160 @@ test("category spending trend switches ranges and keeps exact monthly drill-down
   await expect(october).toHaveAttribute("href", /calculation_scope=included/);
 
   await trend.getByRole("button", { name: "6 months" }).click();
-  await expect(table.getByRole("columnheader", { name: /Jun 2026/ })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "Jun 2026", exact: true })).toBeVisible();
   await fits(page);
 
   await page.setViewportSize({ width: 320, height: 900 });
   await fits(page);
+});
+
+async function comparisonContrast(value: Locator, token: string) {
+  return value.evaluate((node, cssToken) => {
+    const color = getComputedStyle(node).color;
+    const tokenColor = getComputedStyle(node).getPropertyValue(cssToken).trim().toLowerCase();
+    const parseRgb = (value: string) => {
+      const match = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(value);
+      if (!match) throw new Error(`Expected an opaque RGB color, received ${value}`);
+      return match.slice(1).map(Number);
+    };
+    let background = "rgba(0, 0, 0, 0)";
+    for (let ancestor: Element | null = node; ancestor; ancestor = ancestor.parentElement) {
+      background = getComputedStyle(ancestor).backgroundColor;
+      if (background !== "rgba(0, 0, 0, 0)") break;
+    }
+    const foreground = parseRgb(color);
+    const rgbHex =
+      "#" + foreground.map((channel) => channel.toString(16).padStart(2, "0")).join("");
+    function luminance(channels: number[]) {
+      const [r, g, b] = channels
+        .map((channel) => channel / 255)
+        .map((channel) =>
+          channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
+        );
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }
+    const fg = luminance(foreground);
+    const bg = luminance(parseRgb(background));
+    return { rgbHex, tokenColor, ratio: (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05) };
+  }, token);
+}
+
+test.describe("category change accessibility", () => {
+  test.use({ hasTouch: true });
+
+  for (const theme of ["light", "dark"]) {
+    for (const width of [320, 375, 1440]) {
+      test(`${theme} ${width}px: change, focus, scrolling and touch disclosure`, async ({
+        page,
+      }, info) => {
+        await page.setViewportSize({ width, height: 900 });
+        await login(page, theme);
+        await scenario(page, "category-change");
+        await page.goto("/home?mode=calendar&preset=month_to_date");
+        if (theme === "dark") {
+          await expect(page.locator("html")).toHaveClass(/\bdark\b/);
+        } else {
+          await expect(page.locator("html")).not.toHaveClass(/\bdark\b/);
+        }
+
+        const trend = page.getByRole("region", { name: "Category spending trend" });
+        await trend.getByRole("button", { name: "6 months" }).click();
+        const tableSummary = trend.getByText("Category spending as a table");
+        await tableSummary.focus();
+        await page.keyboard.press("Enter");
+        const scroller = trend.getByRole("region", { name: "Scrollable category spending table" });
+        const table = scroller.getByRole("table", {
+          name: /Included Money out by category and month/,
+        });
+        const header = table.getByRole("rowheader", { name: "Change vs previous period" });
+        await expect(header).toHaveCount(1);
+        await expect(header).toHaveAttribute("scope", "row");
+        await expect(trend.getByText("vs 1–21 Oct 2026", { exact: true })).toBeVisible();
+        await expect(trend.getByText("To date: 1–21 Nov 2026", { exact: true })).toBeVisible();
+        await expect(trend.getByText("vs 1–31 May 2026", { exact: true })).toBeVisible();
+
+        const groceries = table.getByRole("row", { name: /Household essentials and groceries/ });
+        const transport = table.getByRole("row", {
+          name: /longer-distance household travel expenses \(archived\)/,
+        });
+        await expect(transport.getByRole("rowheader")).toHaveAttribute("scope", "row");
+        await expect(
+          groceries.getByRole("cell", { name: /Spending increased.*\+9\.1%/ }),
+        ).toBeVisible();
+        const increase = groceries.getByRole("cell", { name: /Spending increased.*\+75.0%/ });
+        const decrease = transport
+          .getByRole("cell", { name: /Spending decreased.*−100.0%/ })
+          .filter({ hasText: "Nov 2026" });
+        const contrasts: Record<string, number> = {};
+        for (const [cell, percentage, arrow, token] of [
+          [increase, "+75.0%", "↑", "--chart-in"],
+          [decrease, "−100.0%", "↓", "--chart-out"],
+        ] as const) {
+          await expect(cell.getByText(arrow, { exact: true })).toBeVisible();
+          const value = cell.getByText(percentage, { exact: true });
+          await expect(value).toBeVisible();
+          const evidence = await comparisonContrast(value, token);
+          expect(evidence.rgbHex).toBe(evidence.tokenColor);
+          expect(evidence.ratio).toBeGreaterThanOrEqual(4.5);
+          contrasts[token] = evidence.ratio;
+        }
+        const contrastPath = info.outputPath("direction-contrast.json");
+        await writeFile(contrastPath, JSON.stringify(contrasts));
+        await info.attach("direction-contrast", {
+          path: contrastPath,
+          contentType: "application/json",
+        });
+
+        await page.keyboard.press("Tab");
+        await expect(scroller).toBeFocused();
+        if (width < 700) {
+          await page.keyboard.press("ArrowRight");
+          await expect
+            .poll(async () => scroller.evaluate((node) => node.scrollLeft))
+            .toBeGreaterThan(0);
+        }
+        const groceryLinks = groceries.getByRole("link");
+        await expect(groceryLinks).toHaveCount(6);
+        await expect(groceries.getByRole("link", { name: "R 1 000.00" })).toHaveAttribute(
+          "href",
+          /start_date=2026-10-01&end_date=2026-10-31/,
+        );
+        for (const link of await groceryLinks.all()) {
+          await link.focus();
+          await expect(link).toBeFocused();
+          expect(await link.evaluate((node) => node.getClientRects().length)).toBe(1);
+        }
+        const summary = increase.locator("summary");
+        const amounts = increase.locator("details");
+        await page.keyboard.press("Tab");
+        await expect(summary).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect(amounts).toHaveAttribute("open", "");
+        await expect(amounts.getByText("R 175.00")).toBeVisible();
+        await expect(amounts.getByText("R 100.00")).toBeVisible();
+
+        await summary.tap();
+        await expect(amounts).not.toHaveAttribute("open");
+        await summary.tap();
+        await expect(amounts).toHaveAttribute("open", "");
+        await increase.scrollIntoViewIfNeeded();
+        await expect
+          .poll(() =>
+            increase.evaluate((cell) => {
+              const scrollRegion = cell.closest('[role="region"]')!;
+              const content = cell.getBoundingClientRect();
+              const bounds = scrollRegion.getBoundingClientRect();
+              return content.left >= bounds.left - 1 && content.right <= bounds.right + 1;
+            }),
+          )
+          .toBe(true);
+        await fits(page);
+        const screenshot = info.outputPath("category-change.png");
+        await page.screenshot({ path: screenshot });
+        await info.attach("category-change", { path: screenshot, contentType: "image/png" });
+      });
+    }
+  }
 });
 
 for (const theme of ["light", "dark"]) {

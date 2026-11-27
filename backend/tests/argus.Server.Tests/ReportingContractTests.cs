@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using argus.Server.Reporting;
+using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace argus.Server.Tests;
 
@@ -137,6 +138,251 @@ public sealed class ReportingContractTests(KitFactory factory) : TransactionTest
             .GetProperty("category_trend").GetProperty("categories").EnumerateArray().ToArray();
         Assert.Equal(2, otherFilters.Length);
         Assert.Contains(otherFilters, category => category.GetProperty("id").GetGuid() == expenseId);
+    }
+
+    [Fact]
+    public async Task LatestCategoryChangeUsesMatchedSlicesRatherThanOverviewOrFullPriorCell()
+    {
+        using WebApplicationFactory<Program> datedHost = Factory.WithReportingDate(new DateOnly(2024, 3, 15));
+        using HttpClient reporting = datedHost.CreateClient();
+        (string session, Guid customerId) = await NewCustomerAsync();
+        Guid accountId = await CreateAccountAsync(session);
+        (Guid systemId, Guid expenseId) = await DefaultCategoriesAsync(session);
+        Guid incomeId = await CreateCategoryAsync(session, "Archived income history", "Income");
+        Guid transferId = await CreateCategoryAsync(session, "Matched transfer", "Transfer");
+        Guid excludedId = await CreateCategoryAsync(session, "Matched excluded", "Excluded");
+        Guid statement = await SeedStatementAsync(customerId, accountId);
+        Guid hiddenStatement = await SeedStatementAsync(customerId, accountId, hidden: true);
+        await ExecuteSqlAsync($"""
+            UPDATE statement_imports SET start_date = DATE '2024-02-01', end_date = DATE '2024-02-15' WHERE id = '{statement}';
+            UPDATE categories SET is_archived = TRUE WHERE id = '{incomeId}';
+            """);
+        Guid currentStatement = await SeedStatementAsync(customerId, accountId, label: "Matched current");
+        await ExecuteSqlAsync($"""
+            UPDATE statement_imports SET start_date = DATE '2024-03-01', end_date = DATE '2024-03-15' WHERE id = '{currentStatement}';
+            """);
+
+        await SeedTransactionAsync(customerId, accountId, statement, expenseId, new DateOnly(2024, 2, 1), "Prior first day", -60m, 1);
+        await SeedTransactionAsync(customerId, accountId, statement, expenseId, new DateOnly(2024, 2, 15), "Prior last matched day", -40m, 2);
+        await SeedTransactionAsync(customerId, accountId, statement, expenseId, new DateOnly(2024, 2, 16), "Prior outside slice", -900m, 3);
+        await SeedTransactionAsync(customerId, accountId, currentStatement, expenseId, new DateOnly(2024, 3, 15), "Current last day", -120m, 1);
+        await SeedTransactionAsync(customerId, accountId, currentStatement, expenseId, new DateOnly(2024, 3, 10), "Refund", 30m, 2);
+        await SeedTransactionAsync(customerId, accountId, currentStatement, incomeId, new DateOnly(2024, 3, 1), "Income-kind outflow", -80m, 3);
+        await SeedTransactionAsync(customerId, accountId, statement, incomeId, new DateOnly(2024, 2, 1), "Prior income-kind outflow", -100m, 4);
+        await SeedTransactionAsync(customerId, accountId, statement, systemId, new DateOnly(2024, 2, 15), "Prior uncategorised", -100m, 5);
+        await SeedTransactionAsync(customerId, accountId, currentStatement, expenseId, new DateOnly(2024, 3, 8), "Child hidden", -1000m, 4, hidden: true);
+        await SeedTransactionAsync(customerId, accountId, hiddenStatement, expenseId, new DateOnly(2024, 3, 9), "Parent hidden", -1000m, 1);
+        await SeedTransactionAsync(customerId, accountId, currentStatement, transferId, new DateOnly(2024, 3, 4), "Not spending", -500m, 5);
+        await SeedTransactionAsync(customerId, accountId, currentStatement, excludedId, new DateOnly(2024, 3, 5), "Excluded", -600m, 6);
+
+        object selection = CustomBody(new DateOnly(2024, 1, 1), new DateOnly(2024, 1, 31));
+        JsonElement report = await ReportAsync(session, selection, reporting);
+        Assert.Equal("2024-01-31", report.GetProperty("period").GetProperty("end_date").GetString());
+        JsonElement trend = report.GetProperty("category_trend");
+        JsonElement latest = trend.GetProperty("latest_comparison");
+        AssertLatestRanges(latest, "2024-03-01", "2024-03-15", "2024-02-01", "2024-02-15", partial: true, shorter: false);
+        Assert.Equal("Same period last month", latest.GetProperty("label").GetString());
+        Assert.Equal("available", latest.GetProperty("availability").GetString());
+        Assert.Equal("covered", latest.GetProperty("current_coverage").GetString());
+        Assert.Equal("covered", latest.GetProperty("prior_coverage").GetString());
+        Assert.True(latest.GetProperty("has_prior_included_data").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, latest.GetProperty("unavailable_reason").ValueKind);
+
+        JsonElement[] categories = trend.GetProperty("categories").EnumerateArray().ToArray();
+        Assert.Equal(new[] { expenseId, incomeId, systemId }, categories.Select(category => category.GetProperty("id").GetGuid()));
+        Assert.True(categories[1].GetProperty("is_archived").GetBoolean());
+        AssertLatestChange(categories[0], "120.00", "100.00", "increase", "20.0");
+        AssertLatestChange(categories[1], "80.00", "100.00", "decrease", "-20.0");
+        AssertLatestChange(categories[2], "0.00", "100.00", "decrease", "-100.0");
+        Assert.Equal("1120.00", categories[0].GetProperty("money_out").GetString());
+        Assert.Equal(4, categories[0].GetProperty("count").GetInt64());
+        JsonElement priorCell = categories[0].GetProperty("months")[4];
+        Assert.Equal("1000.00", priorCell.GetProperty("amount").GetString());
+        Assert.Equal(3, priorCell.GetProperty("count").GetInt64());
+        JsonElement descriptor = priorCell.GetProperty("descriptor");
+        Assert.Equal("2024-02-29", descriptor.GetProperty("end_date").GetString());
+        Assert.Equal("partial", trend.GetProperty("months")[4].GetProperty("coverage").GetString());
+        JsonElement drilldown = await QueryAsync(session, descriptor);
+        Assert.Equal("1000.00", drilldown.GetProperty("money_totals").GetProperty("money_out").GetString());
+        Assert.Equal(3, drilldown.GetProperty("filtered_total").GetInt64());
+    }
+
+    [Fact]
+    public async Task LatestCategoryStatesSeparateIncludedPriorRowsFromCategoryZeros()
+    {
+        using WebApplicationFactory<Program> datedHost = Factory.WithReportingDate(new DateOnly(2024, 3, 15));
+        using HttpClient reporting = datedHost.CreateClient();
+        (string session, Guid customerId) = await NewCustomerAsync();
+        Guid accountId = await CreateAccountAsync(session);
+        (Guid _, Guid expenseId) = await DefaultCategoriesAsync(session);
+        Guid priorOnlyId = await CreateCategoryAsync(session, "Prior after slice", "Expense");
+        Guid incomeId = await CreateCategoryAsync(session, "Prior evidence income", "Income");
+        Guid equalId = await CreateCategoryAsync(session, "Equal comparison", "Expense");
+        Guid tinyId = await CreateCategoryAsync(session, "Tiny change", "Expense");
+        Guid statement = await SeedStatementAsync(customerId, accountId);
+        await ExecuteSqlAsync($"""
+            UPDATE statement_imports SET start_date = DATE '2024-02-01', end_date = DATE '2024-03-15' WHERE id = '{statement}';
+            """);
+        await SeedTransactionAsync(customerId, accountId, statement, expenseId, new DateOnly(2024, 3, 15), "Current spending", -120m, 1);
+        await SeedTransactionAsync(customerId, accountId, statement, priorOnlyId, new DateOnly(2024, 2, 16), "Outside prior slice", -100m, 2);
+
+        object selection = CalendarBody("month_to_date");
+        async Task<JsonElement> TrendAsync() => (await ReportAsync(session, selection, reporting)).GetProperty("category_trend");
+        JsonElement noData = await TrendAsync();
+        JsonElement latest = noData.GetProperty("latest_comparison");
+        Assert.Equal("unavailable", latest.GetProperty("availability").GetString());
+        Assert.Equal("no_prior_data", latest.GetProperty("unavailable_reason").GetString());
+        Assert.False(latest.GetProperty("has_prior_included_data").GetBoolean());
+        AssertLatestChange(TrendCategory(noData, expenseId), "120.00", "0.00", "unavailable", null);
+        AssertLatestChange(TrendCategory(noData, priorOnlyId), "0.00", "0.00", "unavailable", null);
+
+        Guid priorIncome = await SeedTransactionAsync(customerId, accountId, statement, incomeId, new DateOnly(2024, 2, 15), "Positive prior evidence", 50m, 3);
+        JsonElement positive = await TrendAsync();
+        Assert.True(positive.GetProperty("latest_comparison").GetProperty("has_prior_included_data").GetBoolean());
+        AssertLatestChange(TrendCategory(positive, expenseId), "120.00", "0.00", "new_spending", null);
+        AssertLatestChange(TrendCategory(positive, priorOnlyId), "0.00", "0.00", "no_spending", null);
+
+        await ExecuteSqlAsync($"DELETE FROM transactions WHERE id = '{priorIncome}'");
+        await SeedTransactionAsync(customerId, accountId, statement, incomeId, new DateOnly(2024, 2, 1), "Zero prior evidence", 0m, 4);
+        JsonElement zero = await TrendAsync();
+        Assert.True(zero.GetProperty("latest_comparison").GetProperty("has_prior_included_data").GetBoolean());
+        AssertLatestChange(TrendCategory(zero, expenseId), "120.00", "0.00", "new_spending", null);
+        AssertLatestChange(TrendCategory(zero, priorOnlyId), "0.00", "0.00", "no_spending", null);
+
+        await SeedTransactionAsync(customerId, accountId, statement, equalId, new DateOnly(2024, 2, 10), "Prior equal amount", -100m, 5);
+        await SeedTransactionAsync(customerId, accountId, statement, equalId, new DateOnly(2024, 3, 10), "Current equal amount", -100m, 6);
+        await SeedTransactionAsync(customerId, accountId, statement, tinyId, new DateOnly(2024, 2, 10), "Prior tiny baseline", -100m, 7);
+        await SeedTransactionAsync(customerId, accountId, statement, tinyId, new DateOnly(2024, 3, 10), "Current tiny decrease", -99.99m, 8);
+        JsonElement withSpending = await TrendAsync();
+        AssertLatestChange(TrendCategory(withSpending, equalId), "100.00", "100.00", "unchanged", "0.0");
+        AssertLatestChange(TrendCategory(withSpending, tinyId), "99.99", "100.00", "decrease", "0.0");
+    }
+
+    [Theory]
+    [InlineData(2, 29, "2024-02-01", "2024-01-01", "2024-01-31", false, false)]
+    [InlineData(3, 1, "2024-03-01", "2024-02-01", "2024-02-01", true, false)]
+    [InlineData(3, 30, "2024-03-01", "2024-02-01", "2024-02-29", true, true)]
+    [InlineData(3, 31, "2024-03-01", "2024-02-01", "2024-02-29", false, false)]
+    public async Task CalendarTrendDistinguishesElapsedAndCompletedMonths(int month,
+                                                                        int day,
+                                                                        string currentStart,
+                                                                        string priorStart,
+                                                                        string priorEnd,
+                                                                        bool partial,
+                                                                        bool shorter)
+    {
+        DateOnly today = new(2024, month, day);
+        using WebApplicationFactory<Program> datedHost = Factory.WithReportingDate(today);
+        using HttpClient reporting = datedHost.CreateClient();
+        (string session, Guid customerId) = await NewCustomerAsync();
+        Guid accountId = await CreateAccountAsync(session);
+        (Guid _, Guid expenseId) = await DefaultCategoriesAsync(session);
+        Guid statement = await SeedStatementAsync(customerId, accountId);
+        await SeedTransactionAsync(customerId, accountId, statement, expenseId, today, "Latest month", -1m, 1);
+
+        JsonElement report = await ReportAsync(session, CalendarBody("previous_month"), reporting);
+        Assert.Equal(priorStart, report.GetProperty("period").GetProperty("start_date").GetString());
+        JsonElement trend = report.GetProperty("category_trend");
+        JsonElement latest = trend.GetProperty("latest_comparison");
+        AssertLatestRanges(latest, currentStart, today.ToString("yyyy-MM-dd"), priorStart, priorEnd, partial, shorter);
+        Assert.Equal(partial ? "Same period last month" : "Previous calendar month", latest.GetProperty("label").GetString());
+        Assert.Equal(partial, trend.GetProperty("months")[5].GetProperty("is_partial").GetBoolean());
+    }
+
+    [Fact]
+    public async Task CategoryComparisonUsesSelectedConfirmedSalaryCycleAndItsPredecessor()
+    {
+        using WebApplicationFactory<Program> datedHost = Factory.WithReportingDate(new DateOnly(2025, 3, 3));
+        using HttpClient reporting = datedHost.CreateClient();
+        (string session, Guid customerId) = await NewCustomerAsync();
+        Guid accountId = await CreateAccountAsync(session);
+        (Guid _, Guid expenseId) = await DefaultCategoriesAsync(session);
+        Guid statementId = await SeedStatementAsync(customerId, accountId);
+        await ExecuteSqlAsync($"""
+            UPDATE statement_imports SET start_date = DATE '2025-01-25', end_date = DATE '2025-03-03' WHERE id = '{statementId}';
+            """);
+        Guid jan = await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2025, 1, 25), "First salary", 1000m, 1);
+        Guid feb = await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2025, 2, 24), "Second salary", 1000m, 2);
+        Guid mar = await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2025, 3, 2), "Third salary", 1000m, 3);
+        await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2025, 2, 23), "First cycle last day", -100m, 4);
+        await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2025, 3, 1), "Short cycle last day", -80m, 5);
+        await SeedTransactionAsync(customerId, accountId, statementId, expenseId, new DateOnly(2025, 3, 3), "Open cycle through today", -120m, 6);
+
+        object overview = new { view = "overview" };
+        JsonElement setup = await ReportAsync(session, overview, reporting);
+        Assert.Equal(JsonValueKind.Null, setup.GetProperty("category_trend").ValueKind);
+
+        await ConfirmSalaryAsync(session, jan, 0);
+        JsonElement first = (await ReportAsync(session, overview, reporting)).GetProperty("category_trend");
+        JsonElement firstComparison = first.GetProperty("latest_comparison");
+        Assert.Equal("2025-01-25", firstComparison.GetProperty("current_period").GetProperty("start_date").GetString());
+        Assert.Equal(JsonValueKind.Null, firstComparison.GetProperty("prior_period").ValueKind);
+        Assert.Equal(JsonValueKind.Null, firstComparison.GetProperty("prior_coverage").ValueKind);
+        Assert.Equal("unavailable", firstComparison.GetProperty("availability").GetString());
+        Assert.Equal("insufficient_salary_boundaries", firstComparison.GetProperty("unavailable_reason").GetString());
+        AssertLatestChange(TrendCategory(first, expenseId), "300.00", null, "unavailable", null);
+
+        Guid middle = await ConfirmSalaryAsync(session, feb, 1);
+        await ConfirmSalaryAsync(session, mar, 2);
+        JsonElement openReport = await ReportAsync(session, overview, reporting);
+        JsonElement open = openReport.GetProperty("category_trend");
+        JsonElement columns = open.GetProperty("months");
+        JsonElement expense = TrendCategory(open, expenseId);
+        Assert.Equal(3, columns.GetArrayLength());
+        Assert.Equal("insufficient_salary_boundaries", columns[0].GetProperty("comparison").GetProperty("unavailable_reason").GetString());
+        AssertLatestRanges(columns[1].GetProperty("comparison"), "2025-02-24", "2025-03-01", "2025-01-25", "2025-02-23", partial: false, shorter: false);
+        AssertLatestRanges(columns[2].GetProperty("comparison"), "2025-03-02", "2025-03-03", "2025-02-24", "2025-03-01", partial: true, shorter: false);
+        AssertCategoryChange(expense.GetProperty("months")[0].GetProperty("change"), "100.00", null, "unavailable", null);
+        AssertCategoryChange(expense.GetProperty("months")[1].GetProperty("change"), "80.00", "100.00", "decrease", "-20.0");
+        AssertCategoryChange(expense.GetProperty("months")[2].GetProperty("change"), "120.00", "80.00", "increase", "50.0");
+        AssertLatestChange(expense, "120.00", "80.00", "increase", "50.0");
+        // The separate Overview comparison keeps its existing elapsed-day rule.
+        Assert.Equal("2025-02-25", openReport.GetProperty("comparison").GetProperty("period").GetProperty("end_date").GetString());
+
+        await ExecuteSqlAsync($"UPDATE statement_imports SET end_date = DATE '2025-03-02' WHERE id = '{statementId}'");
+        JsonElement gap = (await ReportAsync(session, overview, reporting)).GetProperty("category_trend");
+        Assert.Equal("available", gap.GetProperty("months")[1].GetProperty("comparison").GetProperty("availability").GetString());
+        Assert.Equal("incomplete_coverage", gap.GetProperty("months")[2].GetProperty("comparison").GetProperty("availability").GetString());
+        JsonElement gapCells = TrendCategory(gap, expenseId).GetProperty("months");
+        AssertCategoryChange(gapCells[1].GetProperty("change"), "80.00", "100.00", "decrease", "-20.0");
+        AssertCategoryChange(gapCells[2].GetProperty("change"), "120.00", "80.00", "incomplete_coverage", null);
+
+        JsonElement closed = (await ReportAsync(session, new
+        {
+            view = "overview",
+            period = new { mode = "salary_cycle", cycle_start_id = middle },
+        }, reporting)).GetProperty("category_trend");
+        Assert.Equal(2, closed.GetProperty("months").GetArrayLength());
+        AssertLatestRanges(closed.GetProperty("latest_comparison"), "2025-02-24", "2025-03-01", "2025-01-25", "2025-02-23", partial: false, shorter: false);
+        AssertLatestChange(TrendCategory(closed, expenseId), "80.00", "100.00", "decrease", "-20.0");
+    }
+
+    [Fact]
+    public async Task EarliestDisplayedMonthComparesWithAnUndisplayedPredecessorWithoutAddingRows()
+    {
+        using WebApplicationFactory<Program> datedHost = Factory.WithReportingDate(new DateOnly(2024, 7, 15));
+        using HttpClient reporting = datedHost.CreateClient();
+        (string session, Guid customerId) = await NewCustomerAsync();
+        Guid accountId = await CreateAccountAsync(session);
+        (Guid _, Guid expenseId) = await DefaultCategoriesAsync(session);
+        Guid priorOnlyId = await CreateCategoryAsync(session, "Outside visible history", "Expense");
+        Guid statement = await SeedStatementAsync(customerId, accountId);
+        await ExecuteSqlAsync($"UPDATE statement_imports SET start_date = DATE '2024-01-01', end_date = DATE '2024-07-15' WHERE id = '{statement}'");
+        await SeedTransactionAsync(customerId, accountId, statement, expenseId, new DateOnly(2024, 1, 31), "Undisplayed prior", -100m, 1);
+        await SeedTransactionAsync(customerId, accountId, statement, priorOnlyId, new DateOnly(2024, 1, 31), "Undisplayed category", -300m, 2);
+        await SeedTransactionAsync(customerId, accountId, statement, expenseId, new DateOnly(2024, 2, 29), "Earliest displayed month", -120m, 3);
+
+        JsonElement trend = (await ReportAsync(session, CalendarBody("month_to_date"), reporting)).GetProperty("category_trend");
+        JsonElement months = trend.GetProperty("months");
+        Assert.Equal(6, months.GetArrayLength());
+        AssertLatestRanges(months[0].GetProperty("comparison"), "2024-02-01", "2024-02-29", "2024-01-01", "2024-01-31", partial: false, shorter: false);
+        JsonElement category = Assert.Single(trend.GetProperty("categories").EnumerateArray());
+        Assert.Equal(expenseId, category.GetProperty("id").GetGuid());
+        Assert.Equal("120.00", category.GetProperty("money_out").GetString());
+        Assert.Equal(1, category.GetProperty("count").GetInt64());
+        JsonElement earliest = category.GetProperty("months")[0];
+        Assert.Equal("2024-02-29", earliest.GetProperty("descriptor").GetProperty("end_date").GetString());
+        AssertCategoryChange(earliest.GetProperty("change"), "120.00", "100.00", "increase", "20.0");
     }
 
     [Fact]
@@ -492,13 +738,47 @@ public sealed class ReportingContractTests(KitFactory factory) : TransactionTest
             period = new { mode = "calendar", preset },
         };
 
-    private async Task<JsonElement> ReportAsync(string session, object body)
+    private async Task<JsonElement> ReportAsync(string session, object body, HttpClient? reporting = null)
     {
-        HttpResponseMessage response = await SendAsync(Post(ReportPath, Json(body), session: session));
+        using HttpRequestMessage request = Post(ReportPath, Json(body), session: session);
+        using HttpResponseMessage response = await (reporting ?? Client).SendAsync(request);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         return await BodyAsync(response);
     }
+
+    private static void AssertLatestRanges(JsonElement latest,
+                                           string currentStart,
+                                           string currentEnd,
+                                           string priorStart,
+                                           string priorEnd,
+                                           bool partial,
+                                           bool shorter)
+    {
+        JsonElement current = latest.GetProperty("current_period");
+        JsonElement prior = latest.GetProperty("prior_period");
+        Assert.Equal(currentStart, current.GetProperty("start_date").GetString());
+        Assert.Equal(currentEnd, current.GetProperty("end_date").GetString());
+        Assert.Equal(partial, current.GetProperty("is_partial").GetBoolean());
+        Assert.Equal(priorStart, prior.GetProperty("start_date").GetString());
+        Assert.Equal(priorEnd, prior.GetProperty("end_date").GetString());
+        Assert.False(prior.GetProperty("is_partial").GetBoolean());
+        Assert.Equal(shorter, latest.GetProperty("shorter_prior").GetBoolean());
+    }
+
+    private static void AssertLatestChange(JsonElement category, string? current, string? prior, string state, string? percentage) =>
+        AssertCategoryChange(category.GetProperty("latest_change"), current, prior, state, percentage);
+
+    private static void AssertCategoryChange(JsonElement change, string? current, string? prior, string state, string? percentage)
+    {
+        Assert.Equal(current, change.GetProperty("current_amount").GetString());
+        Assert.Equal(prior, change.GetProperty("prior_amount").GetString());
+        Assert.Equal(state, change.GetProperty("state").GetString());
+        Assert.Equal(percentage, change.GetProperty("change_percentage").GetString());
+    }
+
+    private static JsonElement TrendCategory(JsonElement trend, Guid categoryId) =>
+        Assert.Single(trend.GetProperty("categories").EnumerateArray(), category => category.GetProperty("id").GetGuid() == categoryId);
 
     private async Task<JsonElement> QueryAsync(string session, JsonElement descriptor)
     {
@@ -520,9 +800,9 @@ public sealed class ReportingContractTests(KitFactory factory) : TransactionTest
         return await BodyAsync(response);
     }
 
-    private async Task ConfirmSalaryAsync(string session, Guid transactionId, long revision)
+    private async Task<Guid> ConfirmSalaryAsync(string session, Guid transactionId, long revision)
     {
-        HttpResponseMessage response = await SendAsync(Post(
+        using HttpResponseMessage response = await SendAsync(Post(
             "/v1/finance/salary-cycles",
             Json(new
             {
@@ -533,6 +813,8 @@ public sealed class ReportingContractTests(KitFactory factory) : TransactionTest
             }),
             session: session));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        return (await BodyAsync(response)).GetProperty("id").GetGuid();
     }
 
     private async Task<Guid> CreateCategoryAsync(string session, string name, string kind)

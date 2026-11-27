@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace argus.Server.Tests;
 
@@ -51,6 +52,88 @@ public sealed class ReportingCoverageTests(KitFactory factory) : TransactionTest
         Assert.Equal(
             unionCoverage.GetProperty("gaps").GetProperty("total").GetInt64(),
             filtered.GetProperty("coverage").GetProperty("current").GetProperty("gaps").GetProperty("total").GetInt64());
+    }
+
+    [Fact]
+    public async Task CategoryChangeCoverageUsesActualSlicesAndAccountUnionBeforePriorData()
+    {
+        using WebApplicationFactory<Program> datedHost = Factory.WithReportingDate(new DateOnly(2024, 3, 15));
+        using HttpClient reporting = datedHost.CreateClient();
+        (string session, Guid customerId) = await NewCustomerAsync();
+        Guid accountA = await CreateAccountAsync(session, "Latest activity");
+        Guid accountB = await CreateAccountAsync(session, "Prior coverage");
+        (Guid systemId, Guid expenseId) = await DefaultCategoriesAsync(session);
+        Guid tag = await SeedTagAsync(customerId, "Unrelated filter");
+        Guid current = await SeedStatementAsync(customerId, accountA);
+        Guid prior = await SeedStatementAsync(customerId, accountB);
+        Guid bridge = await SeedStatementAsync(customerId, accountB);
+        await ExecuteSqlAsync($"""
+            UPDATE statement_imports SET start_date = DATE '2024-03-01', end_date = DATE '2024-03-15' WHERE id = '{current}';
+            UPDATE statement_imports SET start_date = DATE '2024-02-01', end_date = DATE '2024-02-13' WHERE id = '{prior}';
+            UPDATE statement_imports SET start_date = DATE '2024-02-14', end_date = DATE '2024-02-15' WHERE id = '{bridge}';
+            """);
+        await SeedTransactionAsync(customerId, accountA, current, expenseId, new DateOnly(2024, 3, 10), "Current outflow", -120m, 1);
+        await SeedTransactionAsync(customerId, accountB, prior, expenseId, new DateOnly(2024, 2, 16), "Later prior outflow", -100m, 1);
+
+        async Task<JsonElement> TrendAsync(Guid? accountId = null)
+        {
+            using HttpRequestMessage request = Post(ReportPath, Json(new
+            {
+                view = "overview",
+                period = new { mode = "calendar", preset = "month_to_date" },
+                filters = new { financial_account_id = accountId, category_id = systemId, merchant_tag = tag.ToString(), direction = "in" },
+            }), session: session);
+            using HttpResponseMessage response = await reporting.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            return (await BodyAsync(response)).GetProperty("category_trend");
+        }
+
+        AssertComparisonCoverage(await TrendAsync(), "covered", "covered", false, "unavailable", "no_prior_data", "120.00", "0.00");
+        AssertComparisonCoverage(await TrendAsync(accountA), "covered", "uncovered", false, "incomplete_coverage", null, "120.00", "0.00");
+        await ExecuteSqlAsync($"UPDATE statement_imports SET is_hidden = TRUE, hidden_at = NOW() WHERE id = '{bridge}'");
+        JsonElement hidden = await TrendAsync();
+        AssertComparisonCoverage(hidden, "covered", "partial", false, "incomplete_coverage", null, "120.00", "0.00");
+        Assert.Equal("partial", hidden.GetProperty("months")[4].GetProperty("coverage").GetString());
+
+        await ExecuteSqlAsync($"UPDATE statement_imports SET is_hidden = FALSE, hidden_at = NULL WHERE id = '{bridge}'");
+        await SeedTransactionAsync(customerId, accountB, prior, systemId, new DateOnly(2024, 2, 1), "Prior income evidence", 1m, 2);
+        AssertComparisonCoverage(await TrendAsync(accountB), "uncovered", "covered", true, "incomplete_coverage", null, "0.00", "0.00");
+        JsonElement complete = await TrendAsync();
+        Assert.Equal("partial", complete.GetProperty("months")[4].GetProperty("coverage").GetString());
+        AssertComparisonCoverage(complete, "covered", "covered", true, "available", null, "120.00", "0.00");
+
+        await ExecuteSqlAsync($"UPDATE statement_imports SET end_date = DATE '2024-03-14' WHERE id = '{current}'");
+        JsonElement shorterCurrent = await TrendAsync();
+        Assert.Equal("partial", shorterCurrent.GetProperty("months")[5].GetProperty("coverage").GetString());
+        AssertComparisonCoverage(shorterCurrent, "partial", "covered", true, "incomplete_coverage", null, "120.00", "0.00");
+        await ExecuteSqlAsync($"""
+            UPDATE statement_imports SET end_date = DATE '2024-03-15' WHERE id = '{current}';
+            DELETE FROM statement_imports WHERE id = '{bridge}';
+            """);
+        AssertComparisonCoverage(await TrendAsync(), "covered", "partial", true, "incomplete_coverage", null, "120.00", "0.00");
+    }
+
+    private static void AssertComparisonCoverage(JsonElement trend,
+                                                 string currentCoverage,
+                                                 string priorCoverage,
+                                                 bool hasPrior,
+                                                 string availability,
+                                                 string? reason,
+                                                 string currentAmount,
+                                                 string priorAmount)
+    {
+        JsonElement latest = trend.GetProperty("latest_comparison");
+        Assert.Equal(currentCoverage, latest.GetProperty("current_coverage").GetString());
+        Assert.Equal(priorCoverage, latest.GetProperty("prior_coverage").GetString());
+        Assert.Equal(hasPrior, latest.GetProperty("has_prior_included_data").GetBoolean());
+        Assert.Equal(availability, latest.GetProperty("availability").GetString());
+        Assert.Equal(reason, latest.GetProperty("unavailable_reason").GetString());
+        JsonElement change = Assert.Single(trend.GetProperty("categories").EnumerateArray()).GetProperty("latest_change");
+        Assert.Equal(currentAmount, change.GetProperty("current_amount").GetString());
+        Assert.Equal(priorAmount, change.GetProperty("prior_amount").GetString());
+        Assert.Equal(availability == "available" ? "new_spending" : availability, change.GetProperty("state").GetString());
+        Assert.Equal(JsonValueKind.Null, change.GetProperty("change_percentage").ValueKind);
     }
 
     [Fact]

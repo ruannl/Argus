@@ -244,7 +244,7 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
 
         ReportCategoryTrendResponse? categoryTrend = inventory == 0
             ? null
-            : await BuildCategoryTrendAsync(context, customerId, plan, today, salaryMode, period, salaryCycleBuckets, cancellationToken);
+            : await BuildCategoryTrendAsync(context, customerId, plan, today, period, salaryCycleBuckets, starts, cancellationToken);
 
         ReportBucketResponse[]? salaryCycleTrend = null;
         if (includeBreakdowns && salaryMode && salaryCycleBuckets.Count > 0)
@@ -429,8 +429,6 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
 
     private sealed record DailyAmount(DateOnly Date, decimal MoneyIn, decimal MoneyOut, long Count);
 
-    private sealed record CategoryTrendMonth(DateOnly Start, DateOnly End, string Label, bool IsPartial);
-
     private sealed record CategoryTrendDaily(DateOnly Date,
                                              Guid Id,
                                              string DisplayName,
@@ -443,6 +441,7 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
     {
         public decimal[] MoneyOut { get; } = new decimal[6];
         public long[] Count { get; } = new long[6];
+        public decimal[] ComparedPrior { get; } = new decimal[6];
     }
 
     private sealed record CoverageRange(DateOnly Start, DateOnly End);
@@ -899,50 +898,56 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
                                                                             Guid customerId,
                                                                             ReportQueryPlan plan,
                                                                             DateOnly today,
-                                                                            bool salaryMode,
                                                                             ResolvedPeriod period,
                                                                             IReadOnlyList<TrendBucket> salaryCycleBuckets,
+                                                                            IReadOnlyList<SalaryCycleStartRef> starts,
                                                                             CancellationToken cancellationToken)
     {
-        List<CategoryTrendMonth> months = new(6);
-        DateOnly windowStart;
-        DateOnly windowEnd;
-        if (salaryMode)
+        List<ResolvedPeriod> months = new(6);
+        if (period.Mode == "salary_cycle")
         {
             if (salaryCycleBuckets.Count == 0)
             {
-                return new ReportCategoryTrendResponse([], []);
+                return new ReportCategoryTrendResponse([], [], new ReportCategoryTrendComparisonResponse(
+                    null, null, "Previous salary cycle", false, null, null, false, "unavailable", "insufficient_salary_boundaries"));
             }
 
-            for (int index = 0; index < salaryCycleBuckets.Count; index++)
+            foreach (TrendBucket bucket in salaryCycleBuckets)
             {
-                TrendBucket bucket = salaryCycleBuckets[index];
-                bool isPartial = period.IsOpenSalaryCycle && index == salaryCycleBuckets.Count - 1;
-                months.Add(new CategoryTrendMonth(bucket.Start, bucket.End, bucket.Label, isPartial));
+                if (bucket.Start == period.Start)
+                {
+                    months.Add(period with { Label = bucket.Label });
+                    continue;
+                }
+
+                Guid? cycleId = starts.FirstOrDefault(start => start.StartDate == bucket.Start)?.Id;
+                months.Add(new ResolvedPeriod("salary_cycle", null, bucket.Label, bucket.Start, bucket.End, false, false, false, cycleId, null));
             }
-            windowStart = salaryCycleBuckets[0].Start;
-            windowEnd = salaryCycleBuckets[salaryCycleBuckets.Count - 1].End;
         }
         else
         {
-            DateOnly currentMonthStart = new(today.Year, today.Month, 1);
-            DateOnly firstMonthStart = currentMonthStart.AddMonths(-5);
-            for (int index = 0; index < 6; index++)
+            DateOnly currentMonthStart = ReportingPeriods.MonthStart(today);
+            for (int offset = -5; offset <= 0; offset++)
             {
-                DateOnly monthStart = firstMonthStart.AddMonths(index);
-                DateOnly monthEnd = monthStart.AddMonths(1).AddDays(-1);
-                bool isCurrentMonth = index == 5;
+                if (!ReportingPeriods.TryAddMonths(currentMonthStart, offset, out DateOnly monthStart))
+                {
+                    continue;
+                }
+
+                DateOnly monthEnd = ReportingPeriods.MonthEnd(monthStart);
+                bool isCurrentMonth = offset == 0;
                 DateOnly end = isCurrentMonth && today < monthEnd ? today : monthEnd;
-                months.Add(new CategoryTrendMonth(
-                    monthStart,
-                    end,
-                    monthStart.ToString("MMM yyyy", CultureInfo.InvariantCulture),
-                    isCurrentMonth && end < monthEnd));
+                bool partial = isCurrentMonth && end < monthEnd;
+                string label = monthStart.ToString("MMM yyyy", CultureInfo.InvariantCulture);
+                months.Add(new ResolvedPeriod("calendar", partial ? "month_to_date" : "month", label, monthStart, end, partial, false, false, null, null));
             }
-            windowStart = firstMonthStart;
-            windowEnd = today;
         }
 
+        // The earliest displayed column can still need the preceding period.
+        // Include it in the read, without extending the visible history.
+        List<ComparisonResolution> comparisons = months.Select(month => ReportingPeriods.CompareCategoryTrend(month, today, starts)).ToList();
+        DateOnly windowStart = comparisons[0].Period?.Start ?? months[0].Start;
+        DateOnly windowEnd = months[^1].End;
         ReportQueryPlan trendPlan = plan with
         {
             CategoryId = null,
@@ -961,7 +966,7 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
             false,
             null,
             null,
-            "out",
+            null,
             TransactionVisibility.Visible,
             "included",
             []);
@@ -985,24 +990,39 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
                 grouped.Key.Kind,
                 grouped.Key.IsArchived,
                 grouped.Sum(transaction => transaction.Amount < 0m ? -transaction.Amount : 0m),
-                grouped.LongCount()))
+                grouped.LongCount(transaction => transaction.Amount < 0m)))
             .ToListAsync(cancellationToken);
 
+        bool[] hasPriorData = new bool[months.Count];
         Dictionary<Guid, CategoryTrendItem> items = [];
         foreach (CategoryTrendDaily day in daily)
         {
             int monthIndex = months.FindIndex(month => day.Date >= month.Start && day.Date <= month.End);
-            if (monthIndex < 0)
+            int priorIndex = comparisons.FindIndex(entry => entry.Period is ResolvedPeriod prior && day.Date >= prior.Start && day.Date <= prior.End);
+            if (priorIndex >= 0)
+            {
+                // Presence of any visible included row establishes prior data.
+                hasPriorData[priorIndex] = true;
+            }
+            if (day.Count == 0 || (monthIndex < 0 && priorIndex < 0))
             {
                 continue;
             }
+
             if (!items.TryGetValue(day.Id, out CategoryTrendItem? item))
             {
                 item = new CategoryTrendItem(day.Id, day.DisplayName, day.Kind, day.IsArchived);
                 items.Add(day.Id, item);
             }
-            item.MoneyOut[monthIndex] += day.MoneyOut;
-            item.Count[monthIndex] += day.Count;
+            if (monthIndex >= 0)
+            {
+                item.MoneyOut[monthIndex] += day.MoneyOut;
+                item.Count[monthIndex] += day.Count;
+            }
+            if (priorIndex >= 0)
+            {
+                item.ComparedPrior[priorIndex] += day.MoneyOut;
+            }
         }
 
         ResolvedPeriod coveragePeriod = new(
@@ -1023,38 +1043,86 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
             plan.FinancialAccountId,
             cancellationToken);
 
-        ReportCategoryTrendMonthResponse[] monthResponses = months.Select(month =>
-        {
-            long totalDays = ReportingPeriods.DaysInclusive(month.Start, month.End);
-            long coveredDays = CoverageDays(month.Start, month.End, coverage);
-            string state = coveredDays <= 0 ? "uncovered" : coveredDays >= totalDays ? "covered" : "partial";
-            return new ReportCategoryTrendMonthResponse(
-                FormatDate(month.Start),
-                FormatDate(month.End),
-                month.Label,
-                month.IsPartial,
-                state);
-        }).ToArray();
+        ReportCategoryTrendMonthResponse[] monthResponses = months
+            .Select((month, index) =>
+            {
+                ReportCategoryTrendComparisonResponse comparison = CategoryTrendComparison(month, comparisons[index], hasPriorData[index], coverage);
+
+                return new ReportCategoryTrendMonthResponse(FormatDate(month.Start), FormatDate(month.End), month.Label, month.IsPartial, comparison.CurrentCoverage!, comparison);
+            })
+            .ToArray();
 
         ReportCategoryTrendCategoryResponse[] categoryResponses = items.Values
+            .Where(item => item.Count.Any(count => count > 0))
             .OrderByDescending(item => item.MoneyOut.Sum())
             .ThenBy(item => item.DisplayName, StringComparer.Ordinal)
             .ThenBy(item => item.Id)
-            .Select(item => new ReportCategoryTrendCategoryResponse(
-                item.Id,
-                item.DisplayName,
-                item.Kind,
-                item.IsArchived,
-                TransactionRequestParser.FormatAmount(item.MoneyOut.Sum()),
-                item.Count.Sum(),
-                months.Select((month, index) => new ReportCategoryTrendCellResponse(
+            .Select(item =>
+            {
+                ReportCategoryTrendCellResponse[] cells = months.Select((month, index) => new ReportCategoryTrendCellResponse(
                     TransactionRequestParser.FormatAmount(item.MoneyOut[index]),
                     item.Count[index],
-                    Descriptor(month.Start, month.End, trendPlan, item.Id, "out", "visible", "included", [])))
-                    .ToArray()))
+                    Descriptor(month.Start, month.End, trendPlan, item.Id, "out", "visible", "included", []),
+                    CategoryTrendChange(item.MoneyOut[index], item.ComparedPrior[index], monthResponses[index].Comparison))).ToArray();
+
+                return new ReportCategoryTrendCategoryResponse(
+                    item.Id, item.DisplayName, item.Kind, item.IsArchived,
+                    TransactionRequestParser.FormatAmount(item.MoneyOut.Sum()), item.Count.Sum(), cells, cells[^1].Change);
+            })
             .ToArray();
 
-        return new ReportCategoryTrendResponse(monthResponses, categoryResponses);
+        return new ReportCategoryTrendResponse(monthResponses, categoryResponses, monthResponses[^1].Comparison);
+    }
+
+    private static ReportCategoryTrendComparisonResponse CategoryTrendComparison(ResolvedPeriod current,
+                                                                                ComparisonResolution comparison,
+                                                                                bool hasPriorIncludedData,
+                                                                                List<CoverageRange> coverage)
+    {
+        ResolvedPeriod? prior = comparison.Period;
+        string currentCoverage = WindowCoverage(current.Start, current.End, coverage);
+        string? priorCoverage = prior is null ? null : WindowCoverage(prior.Start, prior.End, coverage);
+
+        string availability = prior is null ? "unavailable"
+            : currentCoverage != "covered" || priorCoverage != "covered" ? "incomplete_coverage"
+            : hasPriorIncludedData ? "available" : "unavailable";
+
+        return new ReportCategoryTrendComparisonResponse(
+            ToPeriodResponse(current),
+            prior is null ? null : ToPeriodResponse(prior),
+            comparison.Label,
+            comparison.ShorterPrior,
+            currentCoverage,
+            priorCoverage,
+            hasPriorIncludedData,
+            availability,
+            availability == "unavailable" ? comparison.UnavailableReason ?? "no_prior_data" : null);
+    }
+
+    private static ReportCategoryTrendChangeResponse CategoryTrendChange(decimal current, decimal prior, ReportCategoryTrendComparisonResponse comparison)
+    {
+        string currentAmount = TransactionRequestParser.FormatAmount(current);
+        string? priorAmount = comparison.PriorPeriod is null ? null : TransactionRequestParser.FormatAmount(prior);
+        if (comparison.Availability != "available")
+        {
+            return new ReportCategoryTrendChangeResponse(currentAmount, priorAmount, comparison.Availability, null);
+        }
+
+        if (prior == 0m)
+        {
+            return new ReportCategoryTrendChangeResponse(currentAmount, priorAmount, current > 0m ? "new_spending" : "no_spending", null);
+        }
+
+        string direction = current > prior ? "increase" : current < prior ? "decrease" : "unchanged";
+
+        return new ReportCategoryTrendChangeResponse(currentAmount, priorAmount, direction, ReportingPeriods.ChangePercentage(current, prior));
+    }
+
+    private static string WindowCoverage(DateOnly start, DateOnly end, List<CoverageRange> coverage)
+    {
+        long coveredDays = CoverageDays(start, end, coverage);
+
+        return coveredDays <= 0 ? "uncovered" : coveredDays >= ReportingPeriods.DaysInclusive(start, end) ? "covered" : "partial";
     }
 
     private async Task<List<CoverageRange>> LoadCoverageAsync(ArgusDbContext context,

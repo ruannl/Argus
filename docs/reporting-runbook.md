@@ -63,8 +63,59 @@ When salary-cycle mode is active, the 2/3/6 selector on the Category spending
 trend and the main Trend card means the last 2/3/6 confirmed cycles ending at the
 selected cycle. Each cycle runs from its start to the day before the next start,
 or through today for the open cycle. The money cards, coverage and
-current-versus-prior comparison remain tied to the one selected cycle. Calendar
-and Custom periods keep calendar-month and week buckets for those two cards.
+current-versus-prior comparison remain tied to the one selected cycle.
+
+### Change in category spending
+
+Open **Category spending as a table** to see **Change vs previous period**.
+Every displayed period has its own change against the period immediately
+before it. An older displayed period still compares with its full
+predecessor even when that predecessor is outside the columns on screen, and
+one period's missing coverage does not hide another period's change.
+In Calendar and Custom modes, the chart ends at the current calendar month
+using reporting today in Africa/Johannesburg, even if the Overview is set to
+a different date range. Only the account filter applies to the chart.
+Choosing 2, 3, or 6 periods changes the visible history, not the comparison
+for a period that remains visible.
+
+- Salary cycles use the confirmed start and end dates of each cycle. A closed
+  cycle compares the whole previous cycle. The open cycle compares its
+  confirmed start through today with the whole previous cycle, and its
+  heading says so. Calendar months still use whole months for completed
+  months.
+- A current calendar month compares the same number of elapsed days in the
+  previous month, counting the first and last dates. If the previous month is
+  shorter, its slice ends on its last day. There is no estimate or adjustment
+  for different period lengths.
+- Each column heading shows the exact previous dates, and a period-to-date
+  column also shows its current dates. Open **Compared amounts** under a first
+  visible or period-to-date amount to see the actual current and previous ZAR
+  amounts used for that change. The existing period amount, total and
+  transaction link still use their original displayed ranges. For example, a
+  prior month can show R1,000.00 even when only R100.00 falls in its matched
+  slice.
+- A period without a defined predecessor shows **No previous confirmed
+  cycle** or **No prior period**, and a dash under each amount.
+  There is no invented range.
+- **Incomplete coverage** overrides the percentage for only that period if
+  either compared slice has a statement-coverage gap. Its heading names
+  whether the current or previous period is missing coverage. A gap outside
+  that period's matched slice does not invalidate it, and other periods keep
+  their changes. Amounts are recorded values, not proof that missing days had
+  no spending.
+- **No included prior transactions** means both slices are
+  covered but the previous slice has no visible included rows. A positive or
+  zero-valued included transaction is enough to establish prior data; it does
+  not count towards a category's Money out.
+- When the comparison is available, zero previous spending and positive
+  current spending shows **New spending**; two recorded zeros show **No
+  spending**. Otherwise the backend rounds the change to one decimal, with
+  halfway values rounded away from zero. Green ↑ means spending increased
+  and red ↓ means it decreased; neither colour is financial advice. Equal
+  positive amounts show `0.0%` with no arrow. A drop from positive spending
+  to zero shows `−100.0%`. A small change that rounds to `0.0%` keeps its
+  true direction. There is no arrow or percentage for any of the text-only
+  states above.
 
 ## Money, categories and tags
 
@@ -74,11 +125,12 @@ and Custom periods keep calendar-month and week buckets for those two cards.
 - Included means effective-visible and not `Transfer` or `Excluded`.
   Income-category outflows and Expense-category refunds keep their sign. Zero
   rows count but do not change totals.
-- Hidden transactions are excluded from every financial total, category and
-  tag rank, coverage value and comparison. The hidden count and gross
-  directional values are labelled diagnostics with a restore link. Parent
-  hidden rows are restored in Imports; individually hidden rows can be restored
-  from the transaction list.
+- Hidden transactions are excluded from financial totals, category and tag
+  ranks, and included-transaction comparisons. Statement coverage follows
+  the separate rule below. The hidden count and gross directional values
+  are labelled diagnostics with a restore link. Parent hidden rows are
+  restored in Imports; individually hidden rows can be restored from the
+  transaction list.
 - Category ranks are additive and reconcile to the direction headline,
   including Uncategorised. Every category with activity is listed individually,
   ordered from largest to smallest directional amount. The API retains the
@@ -158,8 +210,9 @@ calendar dates and are never timezone-shifted.
 ## Live-view limits
 
 One report response is one repeatable-read financial snapshot: current/prior
-totals, category and tag ranks, trend buckets, coverage and detail rows come
-from the same admitted context, with a final authority check before commit.
+totals, category and tag ranks, trend buckets, latest category changes,
+coverage and detail rows come from the same admitted context, with a final
+authority check before commit.
 Separate navigation requests are new live views. A concurrent import,
 classification, category/tag deletion, statement hide/delete or salary change
 can therefore change a later drill-down total; the UI offers refresh rather than
@@ -183,27 +236,36 @@ materialized report cache.
   transaction. Restoring or hiding the source does not remove the date.
 - A report timeout/overflow/provider failure rolls back and returns a retryable
   busy or sanitized failure. It never returns a truncated or partial total.
+- The category-spending change column adds no stored report data or migration.
+  Older frontends ignore the new fields. A new frontend receiving an older
+  response displays **No comparison available** instead of computing from
+  the displayed totals. A fresh request to a matching backend recomputes the
+  comparison; no repair or backfill is needed.
 
 ## Verification
 
 The reporting tests are selected with:
 
 ```bash
-# Repository root; focused database-backed suites
-node scripts/run-backend-tests.mjs --filter 'FullyQualifiedName~SalaryCycle|FullyQualifiedName~Reporting|FullyQualifiedName~TransactionQueryTests'
+# Repository root; run only against the dedicated local argus_test database
+node scripts/run-backend-tests.mjs --filter '(FullyQualifiedName~Reporting|FullyQualifiedName~SalaryCycleContractTests|FullyQualifiedName~TransactionQueryTests|FullyQualifiedName~PersistenceBoundaryTests)&Category!=Performance'
+node scripts/run-backend-tests.mjs --filter 'FullyQualifiedName~ReportingPerformanceTests&Category=Performance'
 
 # Backend; database-free period tests
-cd backend
-dotnet test tests/argus.Server.Tests -warnaserror --filter 'FullyQualifiedName~ReportingPeriodTests'
+(cd backend && dotnet test tests/argus.Server.Tests -warnaserror --filter 'FullyQualifiedName~ReportingPeriodTests')
 
 # Frontend; focused Overview and transaction transport/state tests
-cd frontend
-npm run test -- tests/app/home tests/lib/reporting-state.test.ts tests/lib/money-format.test.ts tests/lib/server/reporting-actions.test.ts tests/app/transactions
+(cd frontend && npm run test -- tests/app/home tests/lib/reporting-state.test.ts tests/lib/money-format.test.ts tests/lib/server/reporting-actions.test.ts tests/app/transactions)
+(cd frontend && npm run test:e2e:finance -- tests/e2e/finance/workspace.spec.ts)
 ```
 
 `ReportingPerformanceTests` (Category=Performance) seeds 20,000 synthetic rows,
 mixed tag fan-out and confirmed salary dates, then times 30 ready reports across
 salary-cycle, calendar and custom periods. The measured target is p95 under two
 seconds; record the printed hardware, PostgreSQL and runtime versions with the
-result. It does not replace an authenticated browser/visual/accessibility
-exercise, which remains a separate evidence step.
+result. Guarded backend tests against synthetic PostgreSQL data verify the
+date, Money out, coverage and snapshot rules. The finance browser journey
+starts a synthetic fixture backend and verifies the presentation, including
+exact date and amount disclosures, links, keyboard and touch, and contrast
+in both themes. It does not verify backend reconciliation, real customer
+data, or assistive-technology use.

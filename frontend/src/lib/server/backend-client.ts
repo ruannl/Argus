@@ -2061,12 +2061,40 @@ export type ReportCategoryTrendMonth = {
   label: string;
   is_partial: boolean;
   coverage: "covered" | "partial" | "uncovered";
+  comparison: ReportCategoryTrendComparison;
 };
 
 export type ReportCategoryTrendCell = {
   amount: string;
   count: number;
   descriptor: ReportFilterDescriptor;
+  change: ReportCategoryTrendChange;
+};
+
+export type ReportCategoryTrendComparison = {
+  current_period: ReportPeriod | null;
+  prior_period: ReportPeriod | null;
+  label: string;
+  shorter_prior: boolean;
+  current_coverage: ReportCategoryTrendMonth["coverage"] | null;
+  prior_coverage: ReportCategoryTrendMonth["coverage"] | null;
+  has_prior_included_data: boolean;
+  availability: "available" | "incomplete_coverage" | "unavailable";
+  unavailable_reason: string | null;
+};
+
+export type ReportCategoryTrendChange = {
+  current_amount: string | null;
+  prior_amount: string | null;
+  state:
+    | "increase"
+    | "decrease"
+    | "unchanged"
+    | "new_spending"
+    | "no_spending"
+    | "incomplete_coverage"
+    | "unavailable";
+  change_percentage: string | null;
 };
 
 export type ReportCategoryTrendCategory = {
@@ -2077,11 +2105,13 @@ export type ReportCategoryTrendCategory = {
   money_out: string;
   count: number;
   months: ReportCategoryTrendCell[];
+  latest_change: ReportCategoryTrendChange;
 };
 
 export type ReportCategoryTrend = {
   months: ReportCategoryTrendMonth[];
   categories: ReportCategoryTrendCategory[];
+  latest_comparison: ReportCategoryTrendComparison;
 };
 
 export type ReportFocus = {

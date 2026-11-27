@@ -217,6 +217,7 @@ const report = {
     overlap_disclosure: true,
   },
   trend: null,
+  category_trend: null,
   coverage: null,
   focus_group: null,
   transactions: null,

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using argus.Server.Reporting;
+using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace argus.Server.Tests;
 
@@ -11,7 +12,8 @@ public sealed class ReportingConcurrencyTests
     {
         var injector = new BarrierReportFaultInjector();
         using var factory = new KitFactory(null, null, injector);
-        using HttpClient client = factory.CreateClient();
+        using WebApplicationFactory<Program> datedHost = factory.WithReportingDate(new DateOnly(2025, 1, 15));
+        using HttpClient client = datedHost.CreateClient();
         var db = factory.CreateDb();
 
         string email = $"report-race-{Guid.NewGuid():N}@example.test";
@@ -25,14 +27,18 @@ public sealed class ReportingConcurrencyTests
         Guid expenseId = await CreateCategoryAsync(client, session, "Snapshot expense", "Expense");
         Guid incomeId = await CreateCategoryAsync(client, session, "Snapshot income", "Income");
         Guid statementId = Guid.NewGuid();
+        Guid priorStatementId = Guid.NewGuid();
         await using (Npgsql.NpgsqlConnection connection = await db.OpenAsync())
         {
             await PersistenceTestSupport.ExecuteAsync(connection, $"""
                 INSERT INTO statement_imports (
                     id, customer_id, financial_account_id, source_type, statement_label,
                     statement_fingerprint, start_date, end_date, created_at, updated_at)
-                VALUES ('{statementId}', '{customerId}', '{accountId}', 'generic_csv', 'Snapshot statement',
-                        'snapshot-{Guid.NewGuid():N}', DATE '2025-01-01', DATE '2025-01-31', NOW(), NOW());
+                VALUES
+                    ('{statementId}', '{customerId}', '{accountId}', 'generic_csv', 'Snapshot statement',
+                     'snapshot-{Guid.NewGuid():N}', DATE '2025-01-01', DATE '2025-01-31', NOW(), NOW()),
+                    ('{priorStatementId}', '{customerId}', '{accountId}', 'generic_csv', 'Prior statement',
+                     'snapshot-{Guid.NewGuid():N}', DATE '2024-12-01', DATE '2024-12-15', NOW(), NOW());
                 INSERT INTO transactions (
                     id, customer_id, financial_account_id, statement_import_id, transaction_date,
                     description, normalized_description, amount, category_id, category_confirmed,
@@ -43,7 +49,10 @@ public sealed class ReportingConcurrencyTests
                      'generic_csv', 1, 'snapshot-1', NOW(), NOW()),
                     ('{Guid.NewGuid()}', '{customerId}', '{accountId}', '{statementId}', DATE '2025-01-06',
                      'Snapshot income row', 'snapshot income row', 250.00, '{incomeId}', TRUE,
-                     'generic_csv', 2, 'snapshot-2', NOW(), NOW());
+                     'generic_csv', 2, 'snapshot-2', NOW(), NOW()),
+                    ('{Guid.NewGuid()}', '{customerId}', '{accountId}', '{priorStatementId}', DATE '2024-12-15',
+                     'Prior expense row', 'prior expense row', -80.00, '{expenseId}', TRUE,
+                     'generic_csv', 1, 'snapshot-prior-1', NOW(), NOW());
                 """);
         }
         var body = new
@@ -64,7 +73,7 @@ public sealed class ReportingConcurrencyTests
                 UPDATE statement_imports SET is_hidden = TRUE, hidden_at = NOW(), version = version + 1
                 WHERE id = '{statementId}';
                 UPDATE transactions SET category_id = '{incomeId}', version = version + 1
-                WHERE customer_id = '{customerId}' AND amount < 0;
+                WHERE customer_id = '{customerId}' AND statement_import_id = '{statementId}' AND amount < 0;
                 INSERT INTO transactions (
                     id, customer_id, financial_account_id, statement_import_id, transaction_date,
                     description, normalized_description, amount, category_id, category_confirmed,
@@ -89,12 +98,40 @@ public sealed class ReportingConcurrencyTests
             .Sum(rank => decimal.Parse(rank.GetProperty("amount").GetString()!, System.Globalization.CultureInfo.InvariantCulture));
         Assert.Equal(100m, categoryOut);
         Assert.Equal(0, current.GetProperty("hidden").GetProperty("count").GetInt64());
+        AssertTrend(report, expenseId, "covered", "available", "100.00", "increase", "25.0");
 
         JsonElement fresh = await ReportAsync(client, session, body);
         Assert.Equal("0.00", fresh.GetProperty("current").GetProperty("money").GetProperty("money_in").GetString());
         Assert.Equal("0.00", fresh.GetProperty("current").GetProperty("money").GetProperty("money_out").GetString());
         Assert.Equal(0, fresh.GetProperty("current").GetProperty("money").GetProperty("included_count").GetInt64());
         Assert.Equal(3, fresh.GetProperty("current").GetProperty("hidden").GetProperty("count").GetInt64());
+        AssertTrend(fresh, expenseId, "uncovered", "incomplete_coverage", "0.00", "incomplete_coverage", null);
+    }
+
+    private static void AssertTrend(JsonElement report,
+                                    Guid expenseId,
+                                    string coverage,
+                                    string availability,
+                                    string currentAmount,
+                                    string state,
+                                    string? percentage)
+    {
+        JsonElement trend = report.GetProperty("category_trend");
+        JsonElement latest = trend.GetProperty("latest_comparison");
+        Assert.Equal("2025-01-15", latest.GetProperty("current_period").GetProperty("end_date").GetString());
+        Assert.Equal("2024-12-15", latest.GetProperty("prior_period").GetProperty("end_date").GetString());
+        Assert.Equal(coverage, latest.GetProperty("current_coverage").GetString());
+        Assert.Equal("covered", latest.GetProperty("prior_coverage").GetString());
+        Assert.True(latest.GetProperty("has_prior_included_data").GetBoolean());
+        Assert.Equal(availability, latest.GetProperty("availability").GetString());
+
+        JsonElement category = Assert.Single(trend.GetProperty("categories").EnumerateArray());
+        Assert.Equal(expenseId, category.GetProperty("id").GetGuid());
+        JsonElement change = category.GetProperty("latest_change");
+        Assert.Equal(currentAmount, change.GetProperty("current_amount").GetString());
+        Assert.Equal("80.00", change.GetProperty("prior_amount").GetString());
+        Assert.Equal(state, change.GetProperty("state").GetString());
+        Assert.Equal(percentage, change.GetProperty("change_percentage").GetString());
     }
 
     private sealed class BarrierReportFaultInjector : IReportFaultInjector
