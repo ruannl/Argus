@@ -34,6 +34,59 @@ public sealed class ReportingPeriodTests
     }
 
     [Fact]
+    public void SalaryCycleTrendBucketsEndAtTheSelectedCycle()
+    {
+        var today = new DateOnly(2026, 4, 10);
+        SalaryCycleStartRef[] starts = [_startA, _startB, _startC];
+        PeriodResolution latest = ReportingPeriods.Resolve(null, today, starts);
+        Assert.NotNull(latest.Period);
+
+        IReadOnlyList<TrendBucket> buckets = ReportingPeriods.BuildSalaryCycleBuckets(latest.Period!, today, starts);
+        Assert.Equal(3, buckets.Count);
+        Assert.Equal(new DateOnly(2026, 1, 25), buckets[0].Start);
+        Assert.Equal(new DateOnly(2026, 2, 23), buckets[0].End);
+        Assert.Equal("25 Jan – 23 Feb 2026", buckets[0].Label);
+        Assert.Equal(new DateOnly(2026, 2, 24), buckets[1].Start);
+        Assert.Equal(new DateOnly(2026, 3, 24), buckets[1].End);
+        Assert.Equal(new DateOnly(2026, 3, 25), buckets[2].Start);
+        Assert.Equal(today, buckets[2].End);
+        Assert.Equal("salary_cycle", buckets[2].Granularity);
+
+        PeriodResolution earlier = ReportingPeriods.Resolve(
+            new ReportPeriodRequest("salary_cycle", null, null, null, null, _startB.Id),
+            today,
+            starts);
+        Assert.NotNull(earlier.Period);
+        IReadOnlyList<TrendBucket> earlierBuckets = ReportingPeriods.BuildSalaryCycleBuckets(earlier.Period!, today, starts);
+        Assert.Equal(2, earlierBuckets.Count);
+        Assert.Equal(new DateOnly(2026, 1, 25), earlierBuckets[0].Start);
+        Assert.Equal(new DateOnly(2026, 2, 23), earlierBuckets[0].End);
+        Assert.Equal(new DateOnly(2026, 2, 24), earlierBuckets[1].Start);
+        Assert.Equal(new DateOnly(2026, 3, 24), earlierBuckets[1].End);
+    }
+
+    [Fact]
+    public void SalaryCycleTrendKeepsTheSixMostRecentCycles()
+    {
+        var today = new DateOnly(2026, 9, 30);
+        SalaryCycleStartRef[] starts = Enumerable.Range(0, 8)
+            .Select(index => new SalaryCycleStartRef(Guid.NewGuid(), new DateOnly(2025, 12, 25).AddMonths(index)))
+            .ToArray();
+        SalaryCycleStartRef selected = starts[^1];
+        PeriodResolution period = ReportingPeriods.Resolve(
+            new ReportPeriodRequest("salary_cycle", null, null, null, null, selected.Id),
+            today,
+            starts);
+        Assert.NotNull(period.Period);
+
+        IReadOnlyList<TrendBucket> buckets = ReportingPeriods.BuildSalaryCycleBuckets(period.Period!, today, starts);
+        Assert.Equal(6, buckets.Count);
+        Assert.Equal(starts[^6].StartDate, buckets[0].Start);
+        Assert.Equal(selected.StartDate, buckets[^1].Start);
+        Assert.Equal(today, buckets[^1].End);
+    }
+
+    [Fact]
     public void IrregularReceiptGapsUseOnlyConfirmedDates()
     {
         var today = new DateOnly(2026, 5, 1);

@@ -26,6 +26,14 @@ const account = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
+const fnbAccount = { ...account, institution: "FNB" };
+
+const standardBankAccount = {
+  ...account,
+  id: "standardbank-account-id",
+  institution: "Standardbank",
+};
+
 function inspectResult(headerLine: string) {
   return {
     detected_source_kind: "generic_csv",
@@ -313,6 +321,96 @@ describe("import workspace", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.queryByText("date?")).not.toBeInTheDocument();
+  });
+
+  it("warns before importing a Standard Bank statement into an FNB account", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const mode = new URL(url, "http://localhost").searchParams.get("mode");
+        if (mode === "prepare") {
+          return jsonResponse({ summary: { id: "review-id" }, page: { rows: [] } });
+        }
+        return jsonResponse({
+          ...inspectResult("1"),
+          detected_source_kind: "standard_bank_pdf",
+          mapping: {},
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    const { container } = render(
+      <ImportWorkspace
+        accounts={[fnbAccount, standardBankAccount]}
+        reviews={[]}
+        history={[]}
+        initialTab="new"
+        loadError={null}
+        nextCursor={null}
+      />,
+    );
+
+    expect(screen.getByRole("option", { name: "Cheque — FNB" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Cheque — Standardbank" })).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Statement format"), "standard_bank_pdf");
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: {
+        files: [new File(["%PDF-1.7"], "statement.pdf", { type: "application/pdf" })],
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Inspect statement" }));
+
+    const warning = await screen.findByRole("alert");
+    expect(warning).toHaveTextContent("Standard Bank PDF");
+    expect(warning).toHaveTextContent("set to FNB");
+    expect(screen.getByRole("button", { name: "Prepare review" })).toBeDisabled();
+
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "Import this statement into this account anyway.",
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "Prepare review" })).toBeEnabled();
+  });
+
+  it("does not warn when the statement bank matches the account institution", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          ...inspectResult("1"),
+          detected_source_kind: "standard_bank_pdf",
+          mapping: {},
+        }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    const { container } = render(
+      <ImportWorkspace
+        accounts={[standardBankAccount]}
+        reviews={[]}
+        history={[]}
+        initialTab="new"
+        loadError={null}
+        nextCursor={null}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("Statement format"), "standard_bank_pdf");
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: {
+        files: [new File(["%PDF-1.7"], "statement.pdf", { type: "application/pdf" })],
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Inspect statement" }));
+
+    expect(await screen.findByText("Detected Standard Bank PDF")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Prepare review" })).toBeEnabled();
   });
 
   it("shows the last committed coverage for the inspected account and format", async () => {

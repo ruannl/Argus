@@ -57,6 +57,15 @@ with a visible partial/future note.
   uncertain response is resolved by reading the sequence, not by automatically
   repeating the removal. Revisions travel as decimal strings end to end.
 
+### Salary-cycle trends
+
+When salary-cycle mode is active, the 2/3/6 selector on the Category spending
+trend and the main Trend card means the last 2/3/6 confirmed cycles ending at the
+selected cycle. Each cycle runs from its start to the day before the next start,
+or through today for the open cycle. The money cards, coverage and
+current-versus-prior comparison remain tied to the one selected cycle. Calendar
+and Custom periods keep calendar-month and week buckets for those two cards.
+
 ## Money, categories and tags
 
 - **Money in** is the gross positive visible included amount. **Money out** is

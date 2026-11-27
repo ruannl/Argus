@@ -22,6 +22,7 @@ import type {
   ImportOpenReview,
   ImportStatementSummary,
 } from "@/lib/server/backend-client";
+import { accountBank, statementBank } from "./import-institution";
 import { buildUploadOptions, type SourceKind } from "./import-options";
 
 type ImportWorkspaceProps = {
@@ -120,6 +121,7 @@ export default function ImportWorkspace({
   const [century, setCentury] = useState("2000");
   const [busy, setBusy] = useState<"idle" | "inspecting" | "preparing">("idle");
   const [message, setMessage] = useState<Message | null>(null);
+  const [mismatchAcknowledged, setMismatchAcknowledged] = useState(false);
   const [pending, startTransition] = useTransition();
 
   function resetInspection() {
@@ -127,6 +129,7 @@ export default function ImportWorkspace({
     setMapping({});
     setStartDate("");
     setEndDate("");
+    setMismatchAcknowledged(false);
   }
 
   function chooseFile(file: File | null) {
@@ -180,6 +183,7 @@ export default function ImportWorkspace({
       setMessage({ tone: "error", text: "Choose an account and a statement file first." });
       return;
     }
+    setMismatchAcknowledged(false);
     setBusy("inspecting");
     setMessage(null);
     try {
@@ -265,6 +269,15 @@ export default function ImportWorkspace({
   const unresolvedDates = Boolean(inspect?.preview.some((row) => !row.transaction_date));
   const amountMode = mapping.amount_mode ?? "signed";
   const working = busy !== "idle" || pending;
+  const selectedAccount = activeAccounts.find((account) => account.id === accountId) ?? null;
+  const detectedBank = inspect ? statementBank(inspect.detected_source_kind) : null;
+  const selectedAccountBank = accountBank(selectedAccount?.institution);
+  const accountInstitutionMismatch =
+    inspect !== null &&
+    detectedBank !== null &&
+    selectedAccountBank !== null &&
+    selectedAccountBank !== detectedBank;
+  const canPrepare = ready && (!accountInstitutionMismatch || mismatchAcknowledged);
 
   return (
     <div className="mt-8">
@@ -366,6 +379,7 @@ export default function ImportWorkspace({
                           {activeAccounts.map((account) => (
                             <option key={account.id} value={account.id}>
                               {account.display_name}
+                              {account.institution ? ` — ${account.institution}` : ""}
                             </option>
                           ))}
                         </select>
@@ -483,6 +497,32 @@ export default function ImportWorkspace({
                             you adjust the dates or skip them.
                           </p>
                         </div>
+
+                        {accountInstitutionMismatch && selectedAccount ? (
+                          <div
+                            className="rounded-2xl border border-warning-line bg-warning-soft p-4"
+                            role="alert"
+                          >
+                            <h3 className="text-sm font-bold text-warning-ink">
+                              Check the destination account
+                            </h3>
+                            <p className="mt-1 text-sm leading-6 text-warning-ink">
+                              The detected format is {sourceKindLabel(inspect.detected_source_kind)}
+                              , but the selected account “{selectedAccount.display_name}” is set to{" "}
+                              {selectedAccount.institution}. Choose the matching account, or confirm
+                              below to import it here anyway.
+                            </p>
+                            <label className="mt-3 flex items-start gap-2 text-sm font-semibold text-warning-ink">
+                              <input
+                                checked={mismatchAcknowledged}
+                                disabled={working}
+                                onChange={(event) => setMismatchAcknowledged(event.target.checked)}
+                                type="checkbox"
+                              />
+                              Import this statement into this account anyway.
+                            </label>
+                          </div>
+                        ) : null}
 
                         {previousImports === undefined ? null : (
                           <div className="rounded-2xl border border-line bg-page p-4">
@@ -644,7 +684,7 @@ export default function ImportWorkspace({
                         <div className="flex flex-wrap items-center gap-3">
                           <button
                             className="primary-link inline-flex items-center justify-center rounded-full px-5 py-3 text-sm font-bold disabled:opacity-60"
-                            disabled={!ready || working || mappingDirty}
+                            disabled={!canPrepare || working || mappingDirty}
                             onClick={handlePrepare}
                             type="button"
                           >

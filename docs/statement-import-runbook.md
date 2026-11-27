@@ -122,6 +122,12 @@ operator-accepted self-injection limitation, not an owner-access feature. Dates
 and ZAR must be confirmed before preparing a review. Source date, description,
 signed amount, account, and source are immutable after preparation.
 
+The upload screen labels each financial account with its institution and warns
+when the detected statement bank disagrees with that institution. A review cannot
+be prepared until the customer either selects a matching account or explicitly
+confirms the mismatch. The warning is advisory metadata guidance; it does not
+change the immutable account/source association or relax any import guard.
+
 ## Service bounds
 
 | Bound                                 | Value                                             |
