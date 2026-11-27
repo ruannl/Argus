@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 
 import type {
   ReportCategoryTrend,
@@ -12,16 +11,13 @@ import type { ReportingState } from "@/lib/reporting-state";
 import { compareMoneyDescending, formatMoney, sumMoney } from "@/lib/money-format";
 
 import { transactionHref } from "./reporting-links";
-
-type TrendRange = 2 | 3 | 6;
+import { TREND_RANGES, useTrendRange, type TrendRange } from "./trend-range";
 
 type SelectedCategory = ReportCategoryTrendCategory & {
   selectedMonths: ReportCategoryTrendCategory["months"];
   selectedTotal: string;
   color: string;
 };
-
-const RANGES: TrendRange[] = [2, 3, 6];
 
 const COVERAGE_LABELS: Record<ReportCategoryTrendMonth["coverage"], string> = {
   covered: "Covered",
@@ -88,8 +84,8 @@ function selectedCategories(trend: ReportCategoryTrend, monthCount: number): Sel
     .filter((category) => category.selectedMonths.some((month) => month.count > 0));
 }
 
-function rangeLabel(range: TrendRange): string {
-  return `${range} months`;
+function rangeLabel(range: TrendRange, salaryCycles: boolean): string {
+  return `${range} ${salaryCycles ? "salary cycles" : "months"}`;
 }
 
 function categoryLabel(category: SelectedCategory): string {
@@ -103,7 +99,8 @@ export default function CategoryTrendChart({
   trend: ReportCategoryTrend;
   state: ReportingState;
 }) {
-  const [range, setRange] = useState<TrendRange>(3);
+  const { range, setRange } = useTrendRange();
+  const salaryCycles = state.mode === "salary_cycle";
   const monthCount = Math.min(range, trend.months.length);
   const months = trend.months.slice(-monthCount);
   const categories = selectedCategories(trend, monthCount);
@@ -129,13 +126,15 @@ export default function CategoryTrendChart({
             Category spending trend
           </h2>
           <p className="mt-1 text-xs leading-5 text-muted">
-            Included Money out by category for the last {rangeLabel(range)}. Each month groups one
-            bar per category. This chart uses the selected account only; other Overview filters do
-            not narrow it.
+            Included Money out by category for the last {rangeLabel(range, salaryCycles)}.{" "}
+            {salaryCycles
+              ? "Each salary cycle groups one bar per category."
+              : "Each month groups one bar per category."}{" "}
+            This chart uses the selected account only; other Overview filters do not narrow it.
           </p>
         </div>
         <div aria-label="Category trend range" className="flex flex-wrap gap-1" role="group">
-          {RANGES.map((option) => (
+          {TREND_RANGES.map((option) => (
             <button
               aria-pressed={range === option}
               className="rounded-full border border-line px-3 py-1.5 text-xs font-semibold text-ink"
@@ -143,7 +142,7 @@ export default function CategoryTrendChart({
               onClick={() => setRange(option)}
               type="button"
             >
-              {option} months
+              {option} {salaryCycles ? "salary cycles" : "months"}
             </button>
           ))}
         </div>
@@ -215,7 +214,7 @@ export default function CategoryTrendChart({
 
           <p className="mt-3 text-xs leading-5 text-muted">
             Bars share one scale from zero. Missing statement dates are not zero spending; the
-            coverage label on each month says what the statements cover. Exact values and
+            coverage label on each period says what the statements cover. Exact values and
             transaction links are in the table.
           </p>
 
@@ -226,8 +225,8 @@ export default function CategoryTrendChart({
             <div className="mt-2 overflow-x-auto">
               <table className="w-full min-w-[38rem] caption-bottom text-left text-xs">
                 <caption className="sr-only">
-                  Included Money out by category and month, with exact ZAR values and statement
-                  coverage.
+                  Included Money out by category and {salaryCycles ? "salary cycle" : "month"}, with
+                  exact ZAR values and statement coverage.
                 </caption>
                 <thead>
                   <tr className="text-muted">
@@ -295,8 +294,8 @@ export default function CategoryTrendChart({
         </>
       ) : (
         <p className="mt-3 rounded-xl border border-dashed border-line bg-page p-3 text-sm text-muted">
-          No recorded included Money out in the last {rangeLabel(range)}. An absent bar is not a
-          claim of zero spending where statement coverage is missing.
+          No recorded included Money out in the last {rangeLabel(range, salaryCycles)}. An absent
+          bar is not a claim of zero spending where statement coverage is missing.
         </p>
       )}
     </section>

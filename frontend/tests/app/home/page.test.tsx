@@ -564,7 +564,7 @@ describe("home page", () => {
     expect(within(trend).getAllByText("Money out").length).toBeGreaterThan(0);
   });
 
-  it("defaults the category trend to the latest three months and keeps each category separate", async () => {
+  it("defaults the category trend to the latest three salary cycles and keeps each category separate", async () => {
     signedIn();
     vi.mocked(loadReportPage).mockResolvedValue({
       ok: true,
@@ -576,17 +576,17 @@ describe("home page", () => {
     render(await HomePage());
 
     const trend = screen.getByRole("region", { name: "Category spending trend" });
-    expect(within(trend).getByRole("button", { name: "3 months" })).toHaveAttribute(
+    expect(within(trend).getByRole("button", { name: "3 salary cycles" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    expect(within(trend).getByRole("button", { name: "2 months" })).toHaveAttribute(
+    expect(within(trend).getByRole("button", { name: "2 salary cycles" })).toHaveAttribute(
       "aria-pressed",
       "false",
     );
 
     const table = within(trend).getByRole("table", {
-      name: /Included Money out by category and month/,
+      name: /Included Money out by category and salary cycle/,
     });
     expect(within(table).getByRole("columnheader", { name: /Sep 2026/ })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: /Oct 2026/ })).toBeInTheDocument();
@@ -597,7 +597,7 @@ describe("home page", () => {
     expect(within(table).getByRole("cell", { name: "R 2 075.00" })).toBeInTheDocument();
   });
 
-  it("switches the category trend between two, three and six months with exact drill-down values", async () => {
+  it("switches the category trend between two, three and six salary cycles with exact drill-down values", async () => {
     signedIn();
     vi.mocked(loadReportPage).mockResolvedValue({
       ok: true,
@@ -611,11 +611,11 @@ describe("home page", () => {
 
     const trend = screen.getByRole("region", { name: "Category spending trend" });
     const table = within(trend).getByRole("table", {
-      name: /Included Money out by category and month/,
+      name: /Included Money out by category and salary cycle/,
     });
 
-    await user.click(within(trend).getByRole("button", { name: "2 months" }));
-    expect(within(trend).getByRole("button", { name: "2 months" })).toHaveAttribute(
+    await user.click(within(trend).getByRole("button", { name: "2 salary cycles" }));
+    expect(within(trend).getByRole("button", { name: "2 salary cycles" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -633,13 +633,81 @@ describe("home page", () => {
     expect(href).toContain("direction=out");
     expect(href).toContain("calculation_scope=included");
 
-    await user.click(within(trend).getByRole("button", { name: "6 months" }));
-    expect(within(trend).getByRole("button", { name: "6 months" })).toHaveAttribute(
+    await user.click(within(trend).getByRole("button", { name: "6 salary cycles" }));
+    expect(within(trend).getByRole("button", { name: "6 salary cycles" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
     expect(within(table).getByRole("columnheader", { name: /Jun 2026/ })).toBeInTheDocument();
     expect(within(table).getByRole("cell", { name: "R 4 175.00" })).toBeInTheDocument();
+  });
+
+  it("uses the same salary-cycle range for the category and main trend cards", async () => {
+    signedIn();
+    const cycleTrend = [
+      {
+        start_date: "2026-08-25",
+        end_date: "2026-09-24",
+        label: "25 Aug – 24 Sep 2026",
+        granularity: "salary_cycle" as const,
+        money_in: "0.00",
+        money_out: "100.00",
+        money_in_share: null,
+        money_out_share: "100.0",
+        count: 1,
+        coverage: "covered" as const,
+        money_in_descriptor: descriptor({ direction: "in" }),
+        money_out_descriptor: descriptor({ direction: "out" }),
+      },
+      {
+        start_date: "2026-09-25",
+        end_date: "2026-10-24",
+        label: "25 Sep – 24 Oct 2026",
+        granularity: "salary_cycle" as const,
+        money_in: "0.00",
+        money_out: "200.00",
+        money_in_share: null,
+        money_out_share: "100.0",
+        count: 2,
+        coverage: "covered" as const,
+        money_in_descriptor: descriptor({ direction: "in" }),
+        money_out_descriptor: descriptor({ direction: "out" }),
+      },
+      {
+        start_date: "2026-10-25",
+        end_date: "2026-11-15",
+        label: "25 Oct – 15 Nov 2026",
+        granularity: "salary_cycle" as const,
+        money_in: "0.00",
+        money_out: "300.00",
+        money_in_share: null,
+        money_out_share: "100.0",
+        count: 3,
+        coverage: "covered" as const,
+        money_in_descriptor: descriptor({ direction: "in" }),
+        money_out_descriptor: descriptor({ direction: "out" }),
+      },
+    ];
+    vi.mocked(loadReportPage).mockResolvedValue({
+      ok: true,
+      account,
+      inventory: { accounts: [], categories: [], tags: [] },
+      report: readyReport({ salary_cycle_trend: cycleTrend }),
+    });
+
+    const user = userEvent.setup();
+    render(await HomePage());
+
+    const trend = screen.getByRole("region", { name: "Trend" });
+    expect(within(trend).getByText("25 Aug – 24 Sep 2026 · 31 days")).toBeInTheDocument();
+    expect(within(trend).getByText(/same last 3 cycles/)).toBeInTheDocument();
+
+    const category = screen.getByRole("region", { name: "Category spending trend" });
+    await user.click(within(category).getByRole("button", { name: "2 salary cycles" }));
+
+    expect(within(trend).getByText("25 Sep – 24 Oct 2026 · 30 days")).toBeInTheDocument();
+    expect(within(trend).queryByText("25 Aug – 24 Sep 2026 · 31 days")).not.toBeInTheDocument();
+    expect(within(trend).getByText(/same last 2 cycles/)).toBeInTheDocument();
   });
 
   it("keeps the category trend honest when the selected range has no recorded spending", async () => {
@@ -659,7 +727,7 @@ describe("home page", () => {
     const trend = screen.getByRole("region", { name: "Category spending trend" });
     expect(within(trend).getByText("Nov 2026: Partial coverage")).toBeInTheDocument();
     expect(
-      within(trend).getByText(/No recorded included Money out in the last 3 months/),
+      within(trend).getByText(/No recorded included Money out in the last 3 salary cycles/),
     ).toBeInTheDocument();
     expect(
       within(trend).getByText(

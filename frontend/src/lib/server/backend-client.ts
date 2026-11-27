@@ -2044,7 +2044,7 @@ export type ReportBucket = {
   start_date: string;
   end_date: string;
   label: string;
-  granularity: "week" | "month";
+  granularity: "week" | "month" | "salary_cycle";
   money_in: string;
   money_out: string;
   money_in_share: string | null;
@@ -2160,6 +2160,7 @@ export type ReportResponse = {
   tags: ReportTagBreakdown | null;
   trend: ReportBucket[] | null;
   category_trend: ReportCategoryTrend | null;
+  salary_cycle_trend?: ReportBucket[] | null;
   coverage: ReportCoveragePair | null;
   focus_group: ReportGroupTotals | null;
   transactions: ReportTransactionPage | null;

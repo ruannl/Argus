@@ -229,6 +229,66 @@ public sealed class ReportingContractTests(KitFactory factory) : TransactionTest
     }
 
     [Fact]
+    public async Task SalaryCycleChartsUseConfirmedCycleBuckets()
+    {
+        var (session, customerId) = await NewCustomerAsync();
+        Guid accountId = await CreateAccountAsync(session);
+        var (_, expenseId) = await DefaultCategoriesAsync(session);
+        Guid statementId = await SeedStatementAsync(customerId, accountId);
+        DateOnly today = ReportingClock.Today(TimeProvider.System);
+        DateOnly firstStart = today.AddMonths(-3);
+        DateOnly secondStart = today.AddMonths(-2);
+        DateOnly thirdStart = today.AddMonths(-1);
+        await ExecuteSqlAsync($"""
+            UPDATE statement_imports
+            SET start_date = DATE '{firstStart.AddDays(-10):yyyy-MM-dd}', end_date = DATE '{today:yyyy-MM-dd}'
+            WHERE id = '{statementId}';
+            """);
+
+        Guid firstSalary = await SeedTransactionAsync(customerId, accountId, statementId, expenseId, firstStart, "First salary", 10_000m, 1);
+        Guid secondSalary = await SeedTransactionAsync(customerId, accountId, statementId, expenseId, secondStart, "Second salary", 10_000m, 2);
+        Guid thirdSalary = await SeedTransactionAsync(customerId, accountId, statementId, expenseId, thirdStart, "Third salary", 10_000m, 3);
+        await ConfirmSalaryAsync(session, firstSalary, 0);
+        await ConfirmSalaryAsync(session, secondSalary, 1);
+        await ConfirmSalaryAsync(session, thirdSalary, 2);
+
+        await SeedTransactionAsync(customerId, accountId, statementId, expenseId, firstStart.AddDays(1), "First cycle expense", -10m, 4);
+        await SeedTransactionAsync(customerId, accountId, statementId, expenseId, secondStart.AddDays(1), "Second cycle expense", -20m, 5);
+        await SeedTransactionAsync(customerId, accountId, statementId, expenseId, thirdStart.AddDays(1), "Third cycle expense", -30m, 6);
+
+        JsonElement report = await ReportAsync(session, new { view = "overview" });
+        JsonElement cycleTrend = report.GetProperty("salary_cycle_trend");
+        Assert.Equal(3, cycleTrend.GetArrayLength());
+        Assert.Equal(firstStart.ToString("yyyy-MM-dd"), cycleTrend[0].GetProperty("start_date").GetString());
+        Assert.Equal(secondStart.AddDays(-1).ToString("yyyy-MM-dd"), cycleTrend[0].GetProperty("end_date").GetString());
+        Assert.Equal("10.00", cycleTrend[0].GetProperty("money_out").GetString());
+        Assert.Equal(secondStart.ToString("yyyy-MM-dd"), cycleTrend[1].GetProperty("start_date").GetString());
+        Assert.Equal(thirdStart.AddDays(-1).ToString("yyyy-MM-dd"), cycleTrend[1].GetProperty("end_date").GetString());
+        Assert.Equal("20.00", cycleTrend[1].GetProperty("money_out").GetString());
+        Assert.Equal(thirdStart.ToString("yyyy-MM-dd"), cycleTrend[2].GetProperty("start_date").GetString());
+        Assert.Equal(today.ToString("yyyy-MM-dd"), cycleTrend[2].GetProperty("end_date").GetString());
+        Assert.Equal("30.00", cycleTrend[2].GetProperty("money_out").GetString());
+
+        JsonElement categoryTrend = report.GetProperty("category_trend");
+        JsonElement months = categoryTrend.GetProperty("months");
+        Assert.Equal(3, months.GetArrayLength());
+        Assert.Equal(firstStart.ToString("yyyy-MM-dd"), months[0].GetProperty("start_date").GetString());
+        Assert.Equal(thirdStart.ToString("yyyy-MM-dd"), months[2].GetProperty("start_date").GetString());
+        Assert.Equal(today.ToString("yyyy-MM-dd"), months[2].GetProperty("end_date").GetString());
+        Assert.True(months[2].GetProperty("is_partial").GetBoolean());
+        JsonElement expense = Assert.Single(
+            categoryTrend.GetProperty("categories").EnumerateArray(),
+            category => category.GetProperty("id").GetGuid() == expenseId);
+        JsonElement[] cells = expense.GetProperty("months").EnumerateArray().ToArray();
+        Assert.Equal(3, cells.Length);
+        Assert.Equal("10.00", cells[0].GetProperty("amount").GetString());
+        Assert.Equal("20.00", cells[1].GetProperty("amount").GetString());
+        Assert.Equal("30.00", cells[2].GetProperty("amount").GetString());
+        Assert.Equal(firstStart.ToString("yyyy-MM-dd"), cells[0].GetProperty("descriptor").GetProperty("start_date").GetString());
+        Assert.Equal(today.ToString("yyyy-MM-dd"), cells[2].GetProperty("descriptor").GetProperty("end_date").GetString());
+    }
+
+    [Fact]
     public async Task HiddenDiagnosticPreservesAllKindsAndRestoresExactRows()
     {
         var (session, customerId) = await NewCustomerAsync();

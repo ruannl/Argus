@@ -160,12 +160,16 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
                 null,
                 null,
                 null,
+                null,
                 setup,
                 _policyLabels);
         }
 
         ResolvedPeriod period = resolution.Period;
         ComparisonResolution comparisonResolution = ReportingPeriods.Compare(period, today, starts);
+        IReadOnlyList<TrendBucket> salaryCycleBuckets = salaryMode
+            ? ReportingPeriods.BuildSalaryCycleBuckets(period, today, starts)
+            : [];
 
         TransactionFilter includedFilter = FilterFor(period, plan, TransactionVisibility.Visible, "included", null);
         TransactionFilter allKindsVisible = FilterFor(period, plan, TransactionVisibility.Visible, null, null);
@@ -240,7 +244,40 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
 
         ReportCategoryTrendResponse? categoryTrend = inventory == 0
             ? null
-            : await BuildCategoryTrendAsync(context, customerId, plan, today, cancellationToken);
+            : await BuildCategoryTrendAsync(context, customerId, plan, today, salaryMode, period, salaryCycleBuckets, cancellationToken);
+
+        ReportBucketResponse[]? salaryCycleTrend = null;
+        if (includeBreakdowns && salaryMode && salaryCycleBuckets.Count > 0)
+        {
+            DateOnly cycleWindowStart = salaryCycleBuckets[0].Start;
+            DateOnly cycleWindowEnd = salaryCycleBuckets[salaryCycleBuckets.Count - 1].End;
+            var cycleWindow = new ResolvedPeriod(
+                period.Mode,
+                period.Preset,
+                "Salary cycle trend",
+                cycleWindowStart,
+                cycleWindowEnd,
+                false,
+                false,
+                false,
+                null,
+                null);
+            List<CoverageRange> cycleCoverage = await LoadCoverageAsync(
+                context,
+                customerId,
+                cycleWindow,
+                plan.FinancialAccountId,
+                cancellationToken);
+            salaryCycleTrend = await BuildTrendAsync(
+                context,
+                customerId,
+                FilterFor(cycleWindow, plan, TransactionVisibility.Visible, "included", null),
+                cycleWindow,
+                plan,
+                cycleCoverage,
+                cancellationToken,
+                salaryCycleBuckets);
+        }
 
         ReportComparisonResponse? comparisonResponse = null;
         ReportCategoryChangesResponse? categoryChanges = null;
@@ -348,6 +385,7 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
             tags,
             trend,
             categoryTrend,
+            salaryCycleTrend,
             new ReportCoveragePairResponse(currentCoverageResponse, priorCoverageResponse),
             focusGroup,
             transactions,
@@ -798,7 +836,8 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
                                                                ResolvedPeriod period,
                                                                ReportQueryPlan plan,
                                                                List<CoverageRange> coverage,
-                                                               CancellationToken cancellationToken)
+                                                               CancellationToken cancellationToken,
+                                                               IReadOnlyList<TrendBucket>? bucketsOverride = null)
     {
         List<DailyAmount> daily = await TransactionQuery.Apply(context, customerId, filter, includeVisibility: true)
             .GroupBy(transaction => transaction.TransactionDate)
@@ -809,7 +848,7 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
                 group.LongCount()))
             .ToListAsync(cancellationToken);
 
-        IReadOnlyList<TrendBucket> buckets = ReportingPeriods.BuildBuckets(period.Start, period.End);
+        IReadOnlyList<TrendBucket> buckets = bucketsOverride ?? ReportingPeriods.BuildBuckets(period.Start, period.End);
         var responses = new List<ReportBucketResponse>(buckets.Count);
         var folded = new List<(TrendBucket Bucket, decimal MoneyIn, decimal MoneyOut, long Count)>();
         decimal maximum = 0m;
@@ -860,22 +899,48 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
                                                                             Guid customerId,
                                                                             ReportQueryPlan plan,
                                                                             DateOnly today,
+                                                                            bool salaryMode,
+                                                                            ResolvedPeriod period,
+                                                                            IReadOnlyList<TrendBucket> salaryCycleBuckets,
                                                                             CancellationToken cancellationToken)
     {
-        DateOnly currentMonthStart = new(today.Year, today.Month, 1);
-        DateOnly firstMonthStart = currentMonthStart.AddMonths(-5);
         List<CategoryTrendMonth> months = new(6);
-        for (int index = 0; index < 6; index++)
+        DateOnly windowStart;
+        DateOnly windowEnd;
+        if (salaryMode)
         {
-            DateOnly monthStart = firstMonthStart.AddMonths(index);
-            DateOnly monthEnd = monthStart.AddMonths(1).AddDays(-1);
-            bool isCurrentMonth = index == 5;
-            DateOnly end = isCurrentMonth && today < monthEnd ? today : monthEnd;
-            months.Add(new CategoryTrendMonth(
-                monthStart,
-                end,
-                monthStart.ToString("MMM yyyy", CultureInfo.InvariantCulture),
-                isCurrentMonth && end < monthEnd));
+            if (salaryCycleBuckets.Count == 0)
+            {
+                return new ReportCategoryTrendResponse([], []);
+            }
+
+            for (int index = 0; index < salaryCycleBuckets.Count; index++)
+            {
+                TrendBucket bucket = salaryCycleBuckets[index];
+                bool isPartial = period.IsOpenSalaryCycle && index == salaryCycleBuckets.Count - 1;
+                months.Add(new CategoryTrendMonth(bucket.Start, bucket.End, bucket.Label, isPartial));
+            }
+            windowStart = salaryCycleBuckets[0].Start;
+            windowEnd = salaryCycleBuckets[salaryCycleBuckets.Count - 1].End;
+        }
+        else
+        {
+            DateOnly currentMonthStart = new(today.Year, today.Month, 1);
+            DateOnly firstMonthStart = currentMonthStart.AddMonths(-5);
+            for (int index = 0; index < 6; index++)
+            {
+                DateOnly monthStart = firstMonthStart.AddMonths(index);
+                DateOnly monthEnd = monthStart.AddMonths(1).AddDays(-1);
+                bool isCurrentMonth = index == 5;
+                DateOnly end = isCurrentMonth && today < monthEnd ? today : monthEnd;
+                months.Add(new CategoryTrendMonth(
+                    monthStart,
+                    end,
+                    monthStart.ToString("MMM yyyy", CultureInfo.InvariantCulture),
+                    isCurrentMonth && end < monthEnd));
+            }
+            windowStart = firstMonthStart;
+            windowEnd = today;
         }
 
         ReportQueryPlan trendPlan = plan with
@@ -887,8 +952,8 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
         };
         TransactionFilter filter = new(
             null,
-            firstMonthStart,
-            today,
+            windowStart,
+            windowEnd,
             plan.FinancialAccountId,
             null,
             null,
@@ -926,8 +991,8 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
         Dictionary<Guid, CategoryTrendItem> items = [];
         foreach (CategoryTrendDaily day in daily)
         {
-            int monthIndex = (day.Date.Year - firstMonthStart.Year) * 12 + day.Date.Month - firstMonthStart.Month;
-            if (monthIndex < 0 || monthIndex >= months.Count)
+            int monthIndex = months.FindIndex(month => day.Date >= month.Start && day.Date <= month.End);
+            if (monthIndex < 0)
             {
                 continue;
             }
@@ -944,8 +1009,8 @@ public sealed class ReportStore(IDbContextFactory<ArgusDbContext> contextFactory
             "calendar",
             null,
             "Category trend",
-            firstMonthStart,
-            today,
+            windowStart,
+            windowEnd,
             true,
             false,
             false,

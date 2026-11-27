@@ -294,6 +294,60 @@ public static class ReportingPeriods
             null);
     }
 
+    /// <summary>
+    /// Builds one bucket per confirmed salary cycle, ending at the cycle
+    /// selected by <paramref name="period"/>. The latest cycle ends today;
+    /// earlier cycles end the day before the next confirmed start. At most
+    /// <paramref name="maximum"/> cycles are returned, oldest first.
+    /// </summary>
+    public static IReadOnlyList<TrendBucket> BuildSalaryCycleBuckets(ResolvedPeriod period,
+                                                                     DateOnly today,
+                                                                     IReadOnlyList<SalaryCycleStartRef> starts,
+                                                                     int maximum = 6)
+    {
+        List<SalaryCycleStartRef> ordered = NormalizeStarts(starts);
+        if (ordered.Count == 0 || maximum < 1)
+        {
+            return [];
+        }
+
+        int selectedIndex = period.CycleStartId is Guid cycleStartId
+            ? ordered.FindIndex(start => start.Id == cycleStartId)
+            : ordered.FindIndex(start => start.StartDate == period.Start);
+        if (selectedIndex < 0)
+        {
+            return [];
+        }
+
+        int firstIndex = Math.Max(0, selectedIndex - maximum + 1);
+        var buckets = new List<TrendBucket>(selectedIndex - firstIndex + 1);
+        for (int index = firstIndex; index <= selectedIndex; index++)
+        {
+            DateOnly start = ordered[index].StartDate;
+            DateOnly end;
+            if (index + 1 < ordered.Count)
+            {
+                if (!TryAddDays(ordered[index + 1].StartDate, -1, out end) || end < start)
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                end = today;
+            }
+
+            if (end < start)
+            {
+                continue;
+            }
+
+            buckets.Add(new TrendBucket(start, end, FormatCycleLabel(start, end), "salary_cycle"));
+        }
+
+        return buckets;
+    }
+
     public static IReadOnlyList<TrendBucket> BuildBuckets(DateOnly start, DateOnly end)
     {
         long days = DaysInclusive(start, end);
@@ -432,4 +486,9 @@ public static class ReportingPeriods
 
     private static string FormatRange(DateOnly start, DateOnly end) =>
         $"{start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} – {end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}";
+
+    private static string FormatCycleLabel(DateOnly start, DateOnly end) =>
+        start.Year == end.Year
+            ? $"{start.ToString("dd MMM", CultureInfo.InvariantCulture)} – {end.ToString("dd MMM yyyy", CultureInfo.InvariantCulture)}"
+            : $"{start.ToString("dd MMM yyyy", CultureInfo.InvariantCulture)} – {end.ToString("dd MMM yyyy", CultureInfo.InvariantCulture)}";
 }
