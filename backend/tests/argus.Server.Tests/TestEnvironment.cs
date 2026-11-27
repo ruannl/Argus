@@ -312,6 +312,22 @@ public sealed class KitFactory : WebApplicationFactory<Program>
     }
 
     public TestDatabase CreateDb() => new(TestEnvironment.RequireTestDatabaseUrl());
+
+    internal WebApplicationFactory<Program> WithReportingDate(DateOnly date) =>
+        WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+        {
+            // Keep the reporting clock fixed without changing salary management,
+            // authentication, imports or other services that read the real clock.
+            services.RemoveAll<ReportStore>();
+            services.AddSingleton(provider =>
+                ActivatorUtilities.CreateInstance<ReportStore>(provider, new FixedReportingClock(date)));
+        }));
+
+    private sealed class FixedReportingClock(DateOnly date) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() =>
+            new(date.ToDateTime(new TimeOnly(12, 0)), TimeSpan.Zero);
+    }
 }
 
 /// <summary>

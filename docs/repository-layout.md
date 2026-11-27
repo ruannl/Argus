@@ -187,6 +187,40 @@ metadata (migration `0012_salary_cycles`), not edits of source transactions;
 they survive source hiding/deletion and are protected by forced RLS and
 least-privilege grants. See `docs/reporting-runbook.md`.
 
+In `/v1/finance/reports/query`, `category_trend` is null when the trend does
+not apply (for example, salary-cycle setup or no transaction inventory).
+When present, every `category_trend.months[]` entry has a `comparison`
+describing that period and its immediate predecessor, independently of the
+Overview comparison. It includes the inclusive `current_period` and
+`prior_period` descriptors (null only when undefined), `label`,
+`shorter_prior`, the coverage of each compared slice (`current_coverage`,
+`prior_coverage`: `covered`, `partial`, `uncovered`, or null for an undefined
+range), and `has_prior_included_data` (including positive or zero-valued
+included rows). A predecessor outside the visible columns is still resolved
+and read. Completed calendar months use their whole ranges; the current
+calendar month uses elapsed days and caps the prior slice at the previous
+month's end. Salary cycles use the confirmed start and end dates: a closed
+cycle compares the whole previous cycle, and the open cycle compares its start
+through today with the whole previous cycle. `availability` is `unavailable`
+for undefined ranges, `incomplete_coverage` for a gap in either defined range,
+then `unavailable` if no visible included transaction exists in the prior
+slice; otherwise it is `available`. `unavailable_reason` is null except when
+availability is `unavailable`.
+
+Each category's `category_trend.categories[].months[]` entry contains the
+period amount and a `change` with the actual `current_amount` and
+`prior_amount` as two-decimal strings (null only for undefined ranges).
+Its `state` is `increase`, `decrease`, `unchanged`, `new_spending`,
+`no_spending`, `incomplete_coverage`, or `unavailable`. Only the first three
+states have a one-decimal `change_percentage` string; otherwise it is null.
+The amounts are gross included Money out in each compared slice, scoped only
+by the account selection. A gap or unavailable percentage does not erase
+recorded amounts.
+`category_trend.latest_comparison` and each category's `latest_change` alias
+the last displayed month for older consumers. The existing chart period
+amounts, totals, and transaction descriptors still cover their original
+displayed ranges.
+
 ## CI
 
 `.github/workflows/ci.yml` runs on push and pull request to `main`:

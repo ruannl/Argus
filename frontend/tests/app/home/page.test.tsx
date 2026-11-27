@@ -32,7 +32,12 @@ import { redirect } from "next/navigation";
 import HomePage from "@/app/home/page";
 import { auth } from "@/auth";
 import { AccountReadError, getCurrentAccount, listSalaryCycles } from "@/lib/server/backend-client";
-import type { ReportFilterDescriptor, ReportResponse } from "@/lib/server/backend-client";
+import type {
+  ReportCategoryTrendChange,
+  ReportCategoryTrendMonth,
+  ReportFilterDescriptor,
+  ReportResponse,
+} from "@/lib/server/backend-client";
 import { loadReportPage } from "@/lib/server/reporting";
 import { endSessionAction } from "@/lib/server/account-actions";
 
@@ -108,20 +113,94 @@ function trendCell(
 }
 
 function categoryTrendFixture(): NonNullable<ReportResponse["category_trend"]> {
-  const months = TREND_MONTHS.map(([startDate, endDate, label, isPartial, coverage]) => ({
-    start_date: startDate,
-    end_date: endDate,
-    label,
-    is_partial: isPartial,
-    coverage,
-  }));
   const groceries = "44444444-4444-4444-4444-444444444444";
   const transport = "88888888-8888-4888-8888-888888888888";
   const groceryAmounts = ["600.00", "700.00", "800.00", "900.00", "1000.00", "175.00"];
   const transportAmounts = ["100.00", "0.00", "200.00", "0.00", "50.00", "0.00"];
+  const mayPeriod = {
+    mode: "calendar" as const,
+    preset: "month",
+    label: "May 2026",
+    start_date: "2026-05-01",
+    end_date: "2026-05-31",
+    is_partial: false,
+    is_future: false,
+    is_open_salary_cycle: false,
+    cycle_start_id: null,
+    note: null,
+  };
+  const months: ReportCategoryTrendMonth[] = TREND_MONTHS.map(
+    ([startDate, endDate, label, isPartial, coverage], index) => {
+      const previous = index === 0 ? mayPeriod : undefined;
+      const priorStart = previous?.start_date ?? TREND_MONTHS[index - 1][0];
+      const priorEnd = isPartial
+        ? "2026-10-15"
+        : (previous?.end_date ?? TREND_MONTHS[index - 1][1]);
+
+      return {
+        start_date: startDate,
+        end_date: endDate,
+        label,
+        is_partial: isPartial,
+        coverage,
+        comparison: {
+          current_period: {
+            ...mayPeriod,
+            preset: isPartial ? "month_to_date" : "month",
+            label: isPartial ? "Month to date" : label,
+            start_date: startDate,
+            end_date: endDate,
+            is_partial: isPartial,
+          },
+          prior_period: {
+            ...mayPeriod,
+            preset: isPartial ? "month_to_date" : "month",
+            label: isPartial ? "Same period last month" : "Previous calendar month",
+            start_date: priorStart,
+            end_date: priorEnd,
+          },
+          label: isPartial ? "Same period last month" : "Previous calendar month",
+          shorter_prior: false,
+          current_coverage: coverage,
+          prior_coverage: "covered",
+          has_prior_included_data: true,
+          availability: isPartial ? "incomplete_coverage" : "available",
+          unavailable_reason: null,
+        },
+      };
+    },
+  );
+  const change = (
+    currentAmount: string,
+    priorAmount: string,
+    state: ReportCategoryTrendChange["state"],
+    percentage: string | null,
+  ) => ({
+    current_amount: currentAmount,
+    prior_amount: priorAmount,
+    state,
+    change_percentage: percentage,
+  });
+  const groceryChanges: ReportCategoryTrendChange[] = [
+    change("600.00", "550.00", "increase", "9.1"),
+    change("700.00", "600.00", "increase", "16.7"),
+    change("800.00", "700.00", "increase", "14.3"),
+    change("900.00", "800.00", "increase", "12.5"),
+    change("1000.00", "900.00", "increase", "11.1"),
+    change("175.00", "100.00", "incomplete_coverage", null),
+  ];
+  const transportChanges: ReportCategoryTrendChange[] = [
+    change("100.00", "80.00", "increase", "25.0"),
+    change("0.00", "100.00", "decrease", "-100.0"),
+    change("200.00", "0.00", "new_spending", null),
+    change("0.00", "200.00", "decrease", "-100.0"),
+    change("50.00", "0.00", "new_spending", null),
+    change("0.00", "50.00", "incomplete_coverage", null),
+  ];
 
   return {
     months,
+    latest_comparison: months[5].comparison,
     categories: [
       {
         id: groceries,
@@ -130,9 +209,11 @@ function categoryTrendFixture(): NonNullable<ReportResponse["category_trend"]> {
         is_archived: false,
         money_out: "4175.00",
         count: 6,
-        months: TREND_MONTHS.map(([startDate, endDate], index) =>
-          trendCell(groceries, startDate, endDate, groceryAmounts[index], 1),
-        ),
+        latest_change: groceryChanges[5],
+        months: TREND_MONTHS.map(([startDate, endDate], index) => ({
+          ...trendCell(groceries, startDate, endDate, groceryAmounts[index], 1),
+          change: groceryChanges[index],
+        })),
       },
       {
         id: transport,
@@ -141,15 +222,17 @@ function categoryTrendFixture(): NonNullable<ReportResponse["category_trend"]> {
         is_archived: false,
         money_out: "350.00",
         count: 3,
-        months: TREND_MONTHS.map(([startDate, endDate], index) =>
-          trendCell(
+        latest_change: transportChanges[5],
+        months: TREND_MONTHS.map(([startDate, endDate], index) => ({
+          ...trendCell(
             transport,
             startDate,
             endDate,
             transportAmounts[index],
             transportAmounts[index] === "0.00" ? 0 : 1,
           ),
-        ),
+          change: transportChanges[index],
+        })),
       },
     ],
   };
@@ -588,10 +671,12 @@ describe("home page", () => {
     const table = within(trend).getByRole("table", {
       name: /Included Money out by category and salary cycle/,
     });
-    expect(within(table).getByRole("columnheader", { name: /Sep 2026/ })).toBeInTheDocument();
-    expect(within(table).getByRole("columnheader", { name: /Oct 2026/ })).toBeInTheDocument();
-    expect(within(table).getByRole("columnheader", { name: /Nov 2026/ })).toBeInTheDocument();
-    expect(within(table).queryByRole("columnheader", { name: /Aug 2026/ })).not.toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "Sep 2026" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "Oct 2026" })).toBeInTheDocument();
+    expect(
+      within(table).getByRole("columnheader", { name: "Nov 2026 · partial" }),
+    ).toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "Aug 2026" })).not.toBeInTheDocument();
     expect(within(table).getByRole("rowheader", { name: "Groceries" })).toBeInTheDocument();
     expect(within(table).getByRole("rowheader", { name: "Transport" })).toBeInTheDocument();
     expect(within(table).getByRole("cell", { name: "R 2 075.00" })).toBeInTheDocument();
@@ -619,8 +704,8 @@ describe("home page", () => {
       "aria-pressed",
       "true",
     );
-    expect(within(table).queryByRole("columnheader", { name: /Sep 2026/ })).not.toBeInTheDocument();
-    expect(within(table).getByRole("columnheader", { name: /Oct 2026/ })).toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "Sep 2026" })).not.toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "Oct 2026" })).toBeInTheDocument();
     expect(within(table).getByRole("rowheader", { name: "Transport" })).toBeInTheDocument();
 
     const groceriesRow = within(table).getByRole("row", { name: /Groceries/ });
@@ -638,7 +723,7 @@ describe("home page", () => {
       "aria-pressed",
       "true",
     );
-    expect(within(table).getByRole("columnheader", { name: /Jun 2026/ })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "Jun 2026" })).toBeInTheDocument();
     expect(within(table).getByRole("cell", { name: "R 4 175.00" })).toBeInTheDocument();
   });
 
@@ -718,7 +803,7 @@ describe("home page", () => {
       account,
       inventory: { accounts: [], categories: [], tags: [] },
       report: readyReport({
-        category_trend: { months: fixture.months, categories: [] },
+        category_trend: { ...fixture, categories: [] },
       }),
     });
 

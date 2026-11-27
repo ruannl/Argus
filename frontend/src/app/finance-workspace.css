@@ -189,6 +189,11 @@ body:has(.finance-workspace) [data-theme-toggle]:focus-visible {
   white-space: normal;
   font-variant-numeric: tabular-nums;
 }
+.finance-workspace .category-trend-exact-amount {
+  /* This table can scroll horizontally; don't split an exact amount. */
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
 
 .finance-workspace :is(button, a.rounded-full, a.finance-action) {
   min-height: 2.25rem;

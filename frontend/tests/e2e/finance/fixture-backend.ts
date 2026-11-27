@@ -229,15 +229,20 @@ const trendMonthStarts = [
 type CategoryTrend = NonNullable<ReportResponse["category_trend"]>;
 type CategoryTrendCell = CategoryTrend["categories"][number]["months"][number];
 
+type TrendChange = CategoryTrendCell["change"];
+type TrendMonth = CategoryTrend["months"][number];
+
 function fixtureTrendCell(
   categoryId: string,
   month: (typeof trendMonthStarts)[number],
   amount: string,
   count: number,
+  change: TrendChange,
 ): CategoryTrendCell {
   return {
     amount,
     count,
+    change,
     descriptor: {
       ...descriptor,
       start_date: month[0],
@@ -249,14 +254,94 @@ function fixtureTrendCell(
   };
 }
 
+const change = (
+  currentAmount: string,
+  priorAmount: string,
+  state: TrendChange["state"],
+  percentage: string | null,
+): TrendChange => ({
+  current_amount: currentAmount,
+  prior_amount: priorAmount,
+  state,
+  change_percentage: percentage,
+});
+
+const mayPeriod = {
+  mode: "calendar" as const,
+  preset: "month",
+  label: "May 2026",
+  start_date: "2026-05-01",
+  end_date: "2026-05-31",
+  is_partial: false,
+  is_future: false,
+  is_open_salary_cycle: false,
+  cycle_start_id: null,
+  note: null,
+};
+
+const trendMonths: TrendMonth[] = trendMonthStarts.map(
+  ([start_date, end_date, label, is_partial, coverage], index) => {
+    const previous = index === 0 ? mayPeriod : undefined;
+    const priorStart = previous?.start_date ?? trendMonthStarts[index - 1][0];
+    const priorEnd = is_partial
+      ? "2026-10-21"
+      : (previous?.end_date ?? trendMonthStarts[index - 1][1]);
+
+    return {
+      start_date,
+      end_date,
+      label,
+      is_partial,
+      coverage,
+      comparison: {
+        current_period: {
+          ...mayPeriod,
+          preset: is_partial ? "month_to_date" : "month",
+          label: is_partial ? "Month to date" : label,
+          start_date,
+          end_date,
+          is_partial,
+        },
+        prior_period: {
+          ...mayPeriod,
+          preset: is_partial ? "month_to_date" : "month",
+          label: is_partial ? "Same period last month" : "Previous calendar month",
+          start_date: priorStart,
+          end_date: priorEnd,
+        },
+        label: is_partial ? "Same period last month" : "Previous calendar month",
+        shorter_prior: false,
+        current_coverage: coverage,
+        prior_coverage: "covered",
+        has_prior_included_data: true,
+        availability: is_partial ? "incomplete_coverage" : "available",
+        unavailable_reason: null,
+      },
+    };
+  },
+);
+
+const groceryChanges: TrendChange[] = [
+  change("600.00", "550.00", "increase", "9.1"),
+  change("700.00", "600.00", "increase", "16.7"),
+  change("800.00", "700.00", "increase", "14.3"),
+  change("900.00", "800.00", "increase", "12.5"),
+  change("1000.00", "900.00", "increase", "11.1"),
+  change("175.00", "100.00", "incomplete_coverage", null),
+];
+
+const transportChanges: TrendChange[] = [
+  change("100.00", "80.00", "increase", "25.0"),
+  change("0.00", "100.00", "decrease", "-100.0"),
+  change("200.00", "0.00", "new_spending", null),
+  change("0.00", "200.00", "decrease", "-100.0"),
+  change("50.00", "0.00", "new_spending", null),
+  change("0.00", "50.00", "incomplete_coverage", null),
+];
+
 const categoryTrend: CategoryTrend = {
-  months: trendMonthStarts.map(([start_date, end_date, label, is_partial, coverage]) => ({
-    start_date,
-    end_date,
-    label,
-    is_partial,
-    coverage,
-  })),
+  months: trendMonths,
+  latest_comparison: trendMonths[5].comparison,
   categories: [
     {
       id: ids.category,
@@ -265,8 +350,9 @@ const categoryTrend: CategoryTrend = {
       is_archived: false,
       money_out: "4175.00",
       count: 6,
+      latest_change: groceryChanges[5],
       months: ["600.00", "700.00", "800.00", "900.00", "1000.00", "175.00"].map((amount, index) =>
-        fixtureTrendCell(ids.category, trendMonthStarts[index], amount, 1),
+        fixtureTrendCell(ids.category, trendMonthStarts[index], amount, 1, groceryChanges[index]),
       ),
     },
     {
@@ -276,13 +362,55 @@ const categoryTrend: CategoryTrend = {
       is_archived: false,
       money_out: "350.00",
       count: 3,
+      latest_change: transportChanges[5],
       months: ["100.00", "0.00", "200.00", "0.00", "50.00", "0.00"].map((amount, index) =>
         fixtureTrendCell(
           "99999999-9999-4999-8999-999999999999",
           trendMonthStarts[index],
           amount,
           amount === "0.00" ? 0 : 1,
+          transportChanges[index],
         ),
+      ),
+    },
+  ],
+};
+
+const availableCategoryTrend: CategoryTrend = {
+  ...categoryTrend,
+  months: categoryTrend.months.map((month, index) =>
+    index === categoryTrend.months.length - 1
+      ? {
+          ...month,
+          coverage: "covered",
+          comparison: {
+            ...month.comparison,
+            current_coverage: "covered",
+            availability: "available",
+          },
+        }
+      : month,
+  ),
+  latest_comparison: {
+    ...categoryTrend.latest_comparison,
+    current_coverage: "covered",
+    availability: "available",
+  },
+  categories: [
+    {
+      ...categoryTrend.categories[0],
+      latest_change: change("175.00", "100.00", "increase", "75.0"),
+      months: categoryTrend.categories[0].months.map((cell, index) =>
+        index === 5 ? { ...cell, change: change("175.00", "100.00", "increase", "75.0") } : cell,
+      ),
+    },
+    {
+      ...categoryTrend.categories[1],
+      display_name: "Synthetic transport and longer-distance household travel expenses",
+      is_archived: true,
+      latest_change: change("0.00", "50.00", "decrease", "-100.0"),
+      months: categoryTrend.categories[1].months.map((cell, index) =>
+        index === 5 ? { ...cell, change: change("0.00", "50.00", "decrease", "-100.0") } : cell,
       ),
     },
   ],
@@ -517,7 +645,25 @@ if (process.argv[1]?.endsWith("fixture-backend.ts")) {
       });
     if (path === "/v1/finance/salary-cycles")
       return send({ revision: "0", starts: [], next_before_date: null });
-    if (path === "/v1/finance/reports/query") return send(report);
+    if (path === "/v1/finance/reports/query") {
+      if (scenario !== "category-change" || !report.coverage) return send(report);
+
+      return send({
+        ...report,
+        category_trend: availableCategoryTrend,
+        trend: report.trend?.map((bucket) => ({ ...bucket, coverage: "covered" })) ?? null,
+        coverage: {
+          ...report.coverage,
+          current: {
+            ...report.coverage.current,
+            covered_days: 21,
+            covered_percentage: "100.0",
+            partial: false,
+            gaps: { ...report.coverage.current.gaps, items: [], total: 0, gap_days: 0 },
+          },
+        },
+      });
+    }
     if (path === "/v1/finance/transactions/query") {
       if (scenario === "pending") await new Promise((resolve) => setTimeout(resolve, 1500));
       if (scenario === "error") return send({ error: "unavailable" }, 503);

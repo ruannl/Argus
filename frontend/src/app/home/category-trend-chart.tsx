@@ -5,10 +5,17 @@ import Link from "next/link";
 import type {
   ReportCategoryTrend,
   ReportCategoryTrendCategory,
+  ReportCategoryTrendChange,
+  ReportCategoryTrendComparison,
   ReportCategoryTrendMonth,
 } from "@/lib/server/backend-client";
 import type { ReportingState } from "@/lib/reporting-state";
-import { compareMoneyDescending, formatMoney, sumMoney } from "@/lib/money-format";
+import {
+  compareMoneyDescending,
+  formatMoney,
+  formatPercentage,
+  sumMoney,
+} from "@/lib/money-format";
 
 import { transactionHref } from "./reporting-links";
 import { TREND_RANGES, useTrendRange, type TrendRange } from "./trend-range";
@@ -90,6 +97,180 @@ function rangeLabel(range: TrendRange, salaryCycles: boolean): string {
 
 function categoryLabel(category: SelectedCategory): string {
   return category.is_archived ? `${category.display_name} (archived)` : category.display_name;
+}
+
+const SHORT_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+function periodRange(start: string, end: string): string {
+  const parts = (value: string) => {
+    const [year, month, day] = value.split("-").map(Number);
+    return { year, month, day };
+  };
+  const from = parts(start);
+  const to = parts(end);
+  const startMonth = SHORT_MONTHS[from.month - 1];
+  const endMonth = SHORT_MONTHS[to.month - 1];
+  if (from.year === to.year && from.month === to.month) {
+    return `${from.day}–${to.day} ${endMonth} ${to.year}`;
+  }
+  if (from.year === to.year) {
+    return `${from.day} ${startMonth} – ${to.day} ${endMonth} ${to.year}`;
+  }
+  return `${from.day} ${startMonth} ${from.year} – ${to.day} ${endMonth} ${to.year}`;
+}
+
+function ComparisonHeading({ comparison }: { comparison?: ReportCategoryTrendComparison }) {
+  if (!comparison) {
+    return <span>No comparison available</span>;
+  }
+  const { current_period: current, prior_period: prior } = comparison;
+  if (!prior) {
+    return (
+      <span>
+        {comparison.unavailable_reason === "insufficient_salary_boundaries"
+          ? "No previous confirmed cycle"
+          : "No previous period to compare"}
+      </span>
+    );
+  }
+
+  const missingFrom =
+    comparison.current_coverage !== "covered" && comparison.prior_coverage !== "covered"
+      ? "both periods"
+      : comparison.current_coverage !== "covered"
+        ? "the current period"
+        : "the previous period";
+  return (
+    <>
+      <span className="block">{`vs ${periodRange(prior.start_date, prior.end_date)}`}</span>
+      {current?.is_partial ? (
+        <>
+          <span className="block">{`To date: ${periodRange(current.start_date, current.end_date)}`}</span>
+          {current.is_open_salary_cycle ? (
+            <span className="block">Open cycle through today vs full previous cycle.</span>
+          ) : (
+            <span className="block">
+              {comparison.shorter_prior
+                ? "Previous month capped at its last day."
+                : "Same elapsed days"}
+            </span>
+          )}
+        </>
+      ) : null}
+      {comparison.availability === "incomplete_coverage" ? (
+        <span className="block font-medium text-ink">{`Missing coverage: ${missingFrom}`}</span>
+      ) : comparison.unavailable_reason === "no_prior_data" ? (
+        <span className="block font-medium text-ink">
+          No included transactions in the previous period.
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+function ChangeValue({
+  change,
+  comparison,
+}: {
+  change?: ReportCategoryTrendChange;
+  comparison?: ReportCategoryTrendComparison;
+}) {
+  // Old backend responses can omit either new object. Do not derive a substitute
+  // from the full-period amounts, which may use different dates.
+  const state =
+    !change || !comparison
+      ? "unavailable"
+      : comparison.availability === "available"
+        ? change.state
+        : comparison.availability;
+  const percentage = formatPercentage(change?.change_percentage ?? null);
+  if (percentage !== null && (state === "increase" || state === "decrease")) {
+    const increased = state === "increase";
+    return (
+      <span
+        className={`whitespace-nowrap font-semibold ${increased ? "text-chart-in" : "text-chart-out"}`}
+      >
+        <span className="sr-only">{increased ? "Spending increased" : "Spending decreased"} </span>
+        <span aria-hidden="true">{increased ? "↑" : "↓"}</span>{" "}
+        <span>{`${increased ? "+" : "−"}${percentage.replace(/^-/, "")}`}</span>
+      </span>
+    );
+  }
+  if (percentage !== null && state === "unchanged") {
+    return (
+      <span className="font-semibold text-ink">
+        <span className="sr-only">Spending unchanged </span>
+        <span>{percentage}</span>
+      </span>
+    );
+  }
+
+  if (state === "new_spending" || state === "no_spending") {
+    return (
+      <span className="font-medium text-ink">
+        {state === "new_spending" ? "New spending" : "No spending"}
+      </span>
+    );
+  }
+
+  return (
+    <span className="text-muted">
+      <span aria-hidden="true">—</span>
+      <span className="sr-only">No comparison available; see period heading</span>
+    </span>
+  );
+}
+
+function PeriodChange({
+  comparison,
+  change,
+  label,
+  firstDisplayed,
+}: {
+  comparison?: ReportCategoryTrendComparison;
+  change?: ReportCategoryTrendChange;
+  label: string;
+  firstDisplayed: boolean;
+}) {
+  const current = change?.current_amount;
+  const prior = change?.prior_amount;
+  const isMatchedMonth =
+    comparison?.current_period?.mode === "calendar" && comparison.current_period.is_partial;
+
+  return (
+    <div className="mt-1">
+      <ChangeValue change={change} comparison={comparison} />
+      {(firstDisplayed || isMatchedMonth) &&
+      comparison?.prior_period &&
+      current != null &&
+      prior != null ? (
+        <details className="mt-1 text-muted">
+          <summary className="cursor-pointer underline underline-offset-2">
+            Compared amounts<span className="sr-only"> for {label}</span>
+          </summary>
+          <dl className="mt-1">
+            <dt>Current slice</dt>
+            <dd className="font-semibold whitespace-nowrap text-ink">{formatMoney(current)}</dd>
+            <dt>Previous slice</dt>
+            <dd className="font-semibold whitespace-nowrap text-ink">{formatMoney(prior)}</dd>
+          </dl>
+        </details>
+      ) : null}
+    </div>
+  );
 }
 
 export default function CategoryTrendChart({
@@ -222,22 +403,34 @@ export default function CategoryTrendChart({
             <summary className="cursor-pointer text-sm font-semibold text-ink">
               Category spending as a table
             </summary>
-            <div className="mt-2 overflow-x-auto">
+            <p className="mt-2 text-xs leading-5 text-muted">
+              Below each amount, change compares that period with the one before it. Green up means
+              spending increased; red down means it decreased. A dash means no comparison; see the
+              explanation at the top of that column.
+            </p>
+            <div
+              aria-label="Scrollable category spending table"
+              className="mt-2 overflow-x-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent-text"
+              role="region"
+              tabIndex={0}
+            >
               <table className="w-full min-w-[38rem] caption-bottom text-left text-xs">
                 <caption className="sr-only">
                   Included Money out by category and {salaryCycles ? "salary cycle" : "month"}, with
-                  exact ZAR values and statement coverage.
+                  exact ZAR values, statement coverage and change from the previous period.
                 </caption>
                 <thead>
                   <tr className="text-muted">
-                    <th scope="col">Category</th>
+                    <th className="min-w-36 pr-3" scope="col">
+                      Category
+                    </th>
                     {months.map((month) => (
-                      <th className="text-right" key={month.start_date} scope="col">
+                      <th className="min-w-36 px-2 text-right" key={month.start_date} scope="col">
                         {month.label}
                         {month.is_partial ? " · partial" : ""}
                       </th>
                     ))}
-                    <th className="text-right" scope="col">
+                    <th className="min-w-24 pl-2 text-right" scope="col">
                       Total
                     </th>
                   </tr>
@@ -247,7 +440,7 @@ export default function CategoryTrendChart({
                     </th>
                     {months.map((month) => (
                       <th
-                        className="text-right font-normal"
+                        className="px-1 text-right font-normal"
                         key={`coverage-${month.start_date}`}
                         scope="col"
                       >
@@ -258,31 +451,56 @@ export default function CategoryTrendChart({
                       —
                     </th>
                   </tr>
+                  <tr className="text-muted">
+                    <th className="py-1 pr-3 font-normal align-top" scope="row">
+                      Change vs previous period
+                    </th>
+                    {months.map((month) => (
+                      <th
+                        className="px-2 py-1 text-right font-normal align-top"
+                        key={`comparison-${month.start_date}`}
+                        scope="col"
+                      >
+                        <ComparisonHeading comparison={month.comparison} />
+                      </th>
+                    ))}
+                    <th className="text-right font-normal" scope="col">
+                      —
+                    </th>
+                  </tr>
                 </thead>
                 <tbody>
                   {categories.map((category) => (
                     <tr className="border-t border-line" key={`table-${category.id}`}>
-                      <th className="py-1 font-semibold text-ink" scope="row">
+                      <th className="py-1 pr-3 font-semibold text-ink" scope="row">
                         {categoryLabel(category)}
                       </th>
-                      {category.selectedMonths.map((month) => (
+                      {category.selectedMonths.map((month, index) => (
                         <td
-                          className="py-1 text-right tabular-nums"
+                          className="px-2 py-1 text-right tabular-nums align-top"
                           key={`${category.id}-${month.descriptor.start_date}`}
                         >
-                          {month.count > 0 ? (
-                            <Link
-                              className="underline underline-offset-4"
-                              href={transactionHref(month.descriptor, state)}
-                            >
-                              {formatMoney(month.amount)}
-                            </Link>
-                          ) : (
-                            formatMoney(month.amount)
-                          )}
+                          <div className="category-trend-exact-amount">
+                            {month.count > 0 ? (
+                              <Link
+                                className="underline underline-offset-4"
+                                href={transactionHref(month.descriptor, state)}
+                              >
+                                {formatMoney(month.amount)}
+                              </Link>
+                            ) : (
+                              formatMoney(month.amount)
+                            )}
+                          </div>
+                          <PeriodChange
+                            change={month.change}
+                            comparison={months[index]?.comparison}
+                            firstDisplayed={index === 0}
+                            label={`${categoryLabel(category)}, ${months[index]?.label}`}
+                          />
                         </td>
                       ))}
-                      <td className="py-1 text-right font-semibold tabular-nums text-ink">
+                      <td className="category-trend-exact-amount py-1 pl-2 text-right font-semibold tabular-nums text-ink">
                         {formatMoney(category.selectedTotal)}
                       </td>
                     </tr>

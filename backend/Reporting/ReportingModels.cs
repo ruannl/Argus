@@ -239,11 +239,28 @@ public sealed record ReportCategoryTrendMonthResponse(string StartDate,
                                                        string EndDate,
                                                        string Label,
                                                        bool IsPartial,
-                                                       string Coverage);
+                                                       string Coverage,
+                                                       ReportCategoryTrendComparisonResponse Comparison);
 
 public sealed record ReportCategoryTrendCellResponse(string Amount,
                                                       long Count,
-                                                      ReportFilterDescriptor Descriptor);
+                                                      ReportFilterDescriptor Descriptor,
+                                                      ReportCategoryTrendChangeResponse Change);
+
+public sealed record ReportCategoryTrendComparisonResponse(ReportPeriodResponse? CurrentPeriod,
+                                                            ReportPeriodResponse? PriorPeriod,
+                                                            string Label,
+                                                            bool ShorterPrior,
+                                                            string? CurrentCoverage,
+                                                            string? PriorCoverage,
+                                                            bool HasPriorIncludedData,
+                                                            string Availability,
+                                                            string? UnavailableReason);
+
+public sealed record ReportCategoryTrendChangeResponse(string? CurrentAmount,
+                                                        string? PriorAmount,
+                                                        string State,
+                                                        string? ChangePercentage);
 
 public sealed record ReportCategoryTrendCategoryResponse(Guid Id,
                                                           string DisplayName,
@@ -251,10 +268,12 @@ public sealed record ReportCategoryTrendCategoryResponse(Guid Id,
                                                           bool IsArchived,
                                                           string MoneyOut,
                                                           long Count,
-                                                          ReportCategoryTrendCellResponse[] Months);
+                                                          ReportCategoryTrendCellResponse[] Months,
+                                                          ReportCategoryTrendChangeResponse LatestChange);
 
 public sealed record ReportCategoryTrendResponse(ReportCategoryTrendMonthResponse[] Months,
-                                                  ReportCategoryTrendCategoryResponse[] Categories);
+                                                  ReportCategoryTrendCategoryResponse[] Categories,
+                                                  ReportCategoryTrendComparisonResponse LatestComparison);
 
 public sealed record ReportTotalsResponse(ReportMoneyResponse Money,
                                           ReportFilterDescriptor MoneyInDescriptor,

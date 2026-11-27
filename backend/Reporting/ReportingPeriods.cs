@@ -187,9 +187,18 @@ public static class ReportingPeriods
         }
     }
 
+    // The category table compares the full confirmed predecessor even when
+    // the current salary cycle is still open. Other report comparisons retain
+    // their elapsed-day behaviour.
+    internal static ComparisonResolution CompareCategoryTrend(ResolvedPeriod period,
+                                                               DateOnly today,
+                                                               IReadOnlyList<SalaryCycleStartRef> starts) =>
+        period.Mode == "salary_cycle" ? CompareSalary(period, today, starts, matchElapsed: false) : Compare(period, today, starts);
+
     private static ComparisonResolution CompareSalary(ResolvedPeriod period,
                                                       DateOnly today,
-                                                      IReadOnlyList<SalaryCycleStartRef> starts)
+                                                      IReadOnlyList<SalaryCycleStartRef> starts,
+                                                      bool matchElapsed = true)
     {
         List<SalaryCycleStartRef> ordered = NormalizeStarts(starts);
         int index = ordered.FindIndex(start => start.Id == period.CycleStartId || start.StartDate == period.Start);
@@ -199,7 +208,7 @@ public static class ReportingPeriods
         }
 
         SalaryCycleStartRef previous = ordered[index - 1];
-        if (period.IsOpenSalaryCycle)
+        if (period.IsOpenSalaryCycle && matchElapsed)
         {
             long elapsedDays = DaysInclusive(period.Start, today);
             if (elapsedDays < 1 || !TryAddDays(previous.StartDate, (int)elapsedDays - 1, out DateOnly rawEnd))

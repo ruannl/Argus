@@ -28,6 +28,7 @@ import {
   listSalaryCycles,
   previewSalaryCycle,
   removeSalaryCycle,
+  type ReportResponse,
 } from "@/lib/server/backend-client";
 import { loadReportForState } from "@/lib/server/reporting";
 import {
@@ -46,7 +47,7 @@ function signedIn() {
   } as never);
 }
 
-const report = {
+const report: ReportResponse = {
   status: "ready",
   as_of: "2026-11-15T10:00:00Z",
   today: "2026-11-15",
@@ -56,12 +57,27 @@ const report = {
   period_mode: "salary_cycle",
   period: null,
   comparison: null,
-  focus: {},
+  focus: {
+    kind: "overview",
+    category_id: null,
+    category_name: null,
+    category_kind: null,
+    category_archived: null,
+    merchant_tag_id: null,
+    merchant_tag_name: null,
+    merchant_tag_archived: null,
+    untagged: false,
+    financial_account_id: null,
+    financial_account_name: null,
+    financial_account_archived: null,
+    direction: null,
+  },
   current: null,
   prior: null,
   categories: null,
   tags: null,
   trend: null,
+  category_trend: null,
   coverage: null,
   focus_group: null,
   transactions: null,
@@ -95,7 +111,7 @@ describe("reporting server actions", () => {
 
   it("reconstructs only allowlisted state and forwards page overrides", async () => {
     signedIn();
-    vi.mocked(loadReportForState).mockResolvedValue({ ok: true, value: report as never });
+    vi.mocked(loadReportForState).mockResolvedValue({ ok: true, value: report });
 
     const result = await loadReportAction({
       view: "charts",
@@ -106,6 +122,7 @@ describe("reporting server actions", () => {
     });
 
     expect(result.ok).toBe(true);
+    expect(result).toMatchObject({ value: { category_trend: null } });
     expect(loadReportForState).toHaveBeenCalledWith(
       "backend-token",
       {
