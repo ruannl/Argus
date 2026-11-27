@@ -58,10 +58,15 @@ jobs:
           dotnet format tests/argus.Server.Tests/argus.Server.Tests.csproj --verify-no-changes
           dotnet format style tests/argus.Server.Tests/argus.Server.Tests.csproj --diagnostics IDE0005 --severity info --verify-no-changes
 
+      # TEMPORARILY PR-SKIPPED (2026-11-27): the full isolation and performance
+      # suites still run on pushes to main, but are skipped for pull requests to
+      # keep PR feedback under three minutes. Delete the `if` lines to re-enable.
       - name: Isolation tests (real PostgreSQL, excluding performance)
+        if: github.event_name == 'push'
         run: dotnet test tests/argus.Server.Tests -warnaserror
 
       - name: Persistence performance tests (real PostgreSQL)
+        if: github.event_name == 'push'
         run: dotnet test tests/argus.Server.Tests -warnaserror --filter "Category=Performance"
 
       - name: Install PostgreSQL client
